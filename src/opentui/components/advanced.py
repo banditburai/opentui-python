@@ -113,6 +113,65 @@ class Diff(Renderable):
         self._mode = mode
         self._context_lines = context_lines
 
+    def _compute_diff(self) -> list[tuple[str, str, int]]:
+        """Compute diff using LCS algorithm.
+
+        Returns list of (status, line, line_num) tuples:
+        - status: '-', '+', or ' '
+        - line: the text content
+        - line_num: line number in original/new
+        """
+        old_lines = self._old_text.split("\n")
+        new_lines = self._new_text.split("\n")
+
+        # LCS computation
+        m, n = len(old_lines), len(new_lines)
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if old_lines[i - 1] == new_lines[j - 1]:
+                    dp[i][j] = dp[i - 1][j - 1] + 1
+                else:
+                    dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+
+        # Backtrack to find diff
+        result = []
+        i, j = m, n
+        additions = []
+        deletions = []
+
+        while i > 0 or j > 0:
+            if i > 0 and j > 0 and old_lines[i - 1] == new_lines[j - 1]:
+                result.append((" ", old_lines[i - 1], i - 1))
+                i -= 1
+                j -= 1
+            elif j > 0 and (i == 0 or dp[i][j - 1] >= dp[i - 1][j]):
+                additions.append(("+", new_lines[j - 1], j - 1))
+                j -= 1
+            else:
+                deletions.append(("-", old_lines[i - 1], i - 1))
+                i -= 1
+
+        additions.reverse()
+        deletions.reverse()
+        result.reverse()
+
+        diff_lines = []
+        old_idx = 0
+        new_idx = 0
+
+        for status, line, _ in result:
+            if status == " ":
+                diff_lines.append((status, line, old_idx))
+                old_idx += 1
+                new_idx += 1
+
+        for status, line, idx in deletions + additions:
+            diff_lines.append((status, line, idx if status == "-" else new_idx))
+
+        return diff_lines
+
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         """Render the diff."""
         if not self._visible:
@@ -121,23 +180,19 @@ class Diff(Renderable):
         x = self._x + self._padding_left
         y = self._y + self._padding_top
 
-        # Simple diff rendering (would use actual diff algorithm in full impl)
-        old_lines = self._old_text.split("\n")
-        new_lines = self._new_text.split("\n")
+        diff_lines = self._compute_diff()
 
-        # Render with simple prefix indicators
-        for i, line in enumerate(old_lines):
-            if i < len(new_lines) and line != new_lines[i]:
-                # Modified line - show both
+        for i, (status, line, _) in enumerate(diff_lines):
+            if y + i >= buffer.height:
+                break
+
+            if status == "-":
                 buffer.draw_text(
-                    f"- {line}", x, y + i * 2, s.RGBA(1, 0.3, 0.3, 1), self._background_color
+                    f"- {line}", x, y + i, s.RGBA(1, 0.3, 0.3, 1), self._background_color
                 )
+            elif status == "+":
                 buffer.draw_text(
-                    f"+ {new_lines[i]}",
-                    x,
-                    y + i * 2 + 1,
-                    s.RGBA(0.3, 1, 0.3, 1),
-                    self._background_color,
+                    f"+ {line}", x, y + i, s.RGBA(0.3, 1, 0.3, 1), self._background_color
                 )
             else:
                 buffer.draw_text(f"  {line}", x, y + i, self._fg, self._background_color)
