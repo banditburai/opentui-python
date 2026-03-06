@@ -674,10 +674,10 @@ class OpenTUILibrary:
         char_ptr = lib.bufferGetCharPtr(buffer_ptr)
         fg_ptr = lib.bufferGetFgPtr(buffer_ptr)
         bg_ptr = lib.bufferGetBgPtr(buffer_ptr)
-        attr_ptr = lib.bufferGetAttributesPtr(buffer)
+        attr_ptr = lib.bufferGetAttributesPtr(buffer_ptr)
 
-        width = self.get_buffer_width(buffer)
-        height = self.get_buffer_height(buffer)
+        width = self.get_buffer_width(buffer_ptr)
+        height = self.get_buffer_height(buffer_ptr)
 
         for i, byte in enumerate(text[: width - x]):
             if x + i >= width:
@@ -707,9 +707,10 @@ class OpenTUILibrary:
 
             if attributes != 0:
                 attr_offset = offset * 4
+                attr_value = ctypes.c_uint32(attributes)
                 ctypes.memmove(
                     attr_ptr + attr_offset,
-                    ctypes.c_uint32(attributes).value,
+                    ctypes.addressof(attr_value),
                     4,
                 )
 
@@ -770,9 +771,10 @@ class OpenTUILibrary:
 
         if attributes != 0:
             attr_offset = offset * 4
+            attr_value = ctypes.c_uint32(attributes)
             ctypes.memmove(
                 attr_ptr + attr_offset,
-                ctypes.c_uint32(attributes).value,
+                ctypes.addressof(attr_value),
                 4,
             )
 
