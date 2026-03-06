@@ -31,6 +31,10 @@ class Text(Renderable):
         italic: bool = False,
         underline: bool = False,
         strikethrough: bool = False,
+        # Selection
+        selection_start: int | None = None,
+        selection_end: int | None = None,
+        selection_bg: s.RGBA | str | None = None,
         # Text wrap mode
         wrap_mode: str = "word",
         # Content (can be positional or keyword)
@@ -55,6 +59,11 @@ class Text(Renderable):
         self._italic = italic
         self._underline = underline
         self._strikethrough = strikethrough
+        self._selection_start = selection_start
+        self._selection_end = selection_end
+        self._selection_bg = (
+            self._parse_color(selection_bg) if selection_bg else s.RGBA(0.3, 0.3, 0.7, 1.0)
+        )
         self._wrap_mode = wrap_mode if wrap_mode in ("none", "char", "word") else "word"
 
         # Process children as text modifiers
@@ -93,7 +102,6 @@ class Text(Renderable):
 
     def _build_yoga_tree(self) -> Any:
         """Build yoga tree with measure function for text."""
-        from .. import layout as yoga_layout
         from ..text_utils import measure_text
 
         node = self._ensure_yoga_node()
@@ -149,6 +157,33 @@ class Text(Renderable):
 
         x = self._x + self._padding_left
         y = self._y + self._padding_top
+
+        # Draw selection highlight if there's a valid selection
+        if (
+            self._selection_start is not None
+            and self._selection_end is not None
+            and self._selection_start < self._selection_end
+        ):
+            from ..text_utils import measure_text
+
+            content = self._content
+            start_pos = max(0, self._selection_start)
+            end_pos = min(len(content), self._selection_end)
+
+            # Measure text before selection
+            before_sel = content[:start_pos]
+            sel_text = content[start_pos:end_pos]
+
+            _, text_height = measure_text(content, 0, "none")
+            text_height = max(1, text_height)
+
+            # Calculate x positions
+            before_width, _ = measure_text(before_sel, 0, "none")
+            sel_width, _ = measure_text(sel_text, 0, "none")
+
+            # Draw selection background
+            if sel_width > 0:
+                buffer.fill_rect(x + before_width, y, sel_width, text_height, self._selection_bg)
 
         buffer.draw_text(
             self._content, x, y, self._fg, self._background_color, self._get_attributes()

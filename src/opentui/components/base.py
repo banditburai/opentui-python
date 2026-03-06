@@ -265,6 +265,12 @@ class Renderable(BaseRenderable):
         border_color: s.RGBA | str | None = None,
         title: str | None = None,
         title_alignment: str = "left",
+        # Border sides
+        border_top: bool = True,
+        border_right: bool = True,
+        border_bottom: bool = True,
+        border_left: bool = True,
+        border_chars: dict | None = None,
         # Focus
         focused: bool = False,
         # Visibility
@@ -312,6 +318,13 @@ class Renderable(BaseRenderable):
         self._border_color = self._parse_color(border_color)
         self._title = title
         self._title_alignment = title_alignment
+
+        # Border sides
+        self._border_top = border_top
+        self._border_right = border_right
+        self._border_bottom = border_bottom
+        self._border_left = border_left
+        self._border_chars = border_chars
 
         # Focus
         self._focusable = False

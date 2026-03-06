@@ -108,6 +108,12 @@ class Box(Renderable):
         title_alignment: str = "left",
         # Focus
         focused: bool = False,
+        # Border sides
+        border_top: bool = True,
+        border_right: bool = True,
+        border_bottom: bool = True,
+        border_left: bool = True,
+        border_chars: dict | None = None,
         # Visibility
         visible: bool = True,
         opacity: float = 1.0,
@@ -143,6 +149,11 @@ class Box(Renderable):
             title=title,
             title_alignment=title_alignment,
             focused=focused,
+            border_top=border_top,
+            border_right=border_right,
+            border_bottom=border_bottom,
+            border_left=border_left,
+            border_chars=border_chars,
             visible=visible,
             opacity=opacity,
         )
@@ -199,40 +210,70 @@ class Box(Renderable):
 
     def _draw_border(self, buffer: Buffer, width: int, height: int) -> None:
         """Draw the box border."""
-        chars = BORDER_CHARS.get(self._border_style, BORDER_CHARS["single"])
+        if self._border_chars:
+            chars = self._border_chars
+        else:
+            chars = BORDER_CHARS.get(self._border_style, BORDER_CHARS["single"])
 
         border_color = self._border_color or self._fg
         bg = self._background_color
 
         # Top border
-        if width > 2:
-            buffer.draw_text(chars["top_left"], self._x, self._y, border_color, bg)
-            buffer.draw_text(
-                chars["horizontal"] * (width - 2), self._x + 1, self._y, border_color, bg
-            )
-            buffer.draw_text(chars["top_right"], self._x + width - 1, self._y, border_color, bg)
+        if self._border_top and width > 2:
+            # Left corner
+            if self._border_left:
+                buffer.draw_text(chars["top_left"], self._x, self._y, border_color, bg)
+            # Horizontal line
+            start_x = self._x + (1 if self._border_left else 0)
+            end_x = self._x + width - (1 if self._border_right else 0)
+            if end_x > start_x:
+                buffer.draw_text(
+                    chars["horizontal"] * (end_x - start_x), start_x, self._y, border_color, bg
+                )
+            # Right corner
+            if self._border_right:
+                buffer.draw_text(chars["top_right"], self._x + width - 1, self._y, border_color, bg)
 
         # Bottom border
-        if height > 2:
-            buffer.draw_text(chars["bottom_left"], self._x, self._y + height - 1, border_color, bg)
-            buffer.draw_text(
-                chars["horizontal"] * (width - 2),
-                self._x + 1,
-                self._y + height - 1,
-                border_color,
-                bg,
-            )
-            buffer.draw_text(
-                chars["bottom_right"], self._x + width - 1, self._y + height - 1, border_color, bg
-            )
+        if self._border_bottom and height > 2:
+            # Left corner
+            if self._border_left:
+                buffer.draw_text(
+                    chars["bottom_left"], self._x, self._y + height - 1, border_color, bg
+                )
+            # Horizontal line
+            start_x = self._x + (1 if self._border_left else 0)
+            end_x = self._x + width - (1 if self._border_right else 0)
+            if end_x > start_x:
+                buffer.draw_text(
+                    chars["horizontal"] * (end_x - start_x),
+                    start_x,
+                    self._y + height - 1,
+                    border_color,
+                    bg,
+                )
+            # Right corner
+            if self._border_right:
+                buffer.draw_text(
+                    chars["bottom_right"],
+                    self._x + width - 1,
+                    self._y + height - 1,
+                    border_color,
+                    bg,
+                )
 
         # Left and right borders
-        for y in range(self._y + 1, self._y + height - 1):
-            buffer.draw_text(chars["vertical"], self._x, y, border_color, bg)
-            buffer.draw_text(chars["vertical"], self._x + width - 1, y, border_color, bg)
+        if self._border_left or self._border_right:
+            top_y = self._y + (1 if self._border_top else 0)
+            bottom_y = self._y + height - (1 if self._border_bottom else 0)
+            for y in range(top_y, bottom_y):
+                if self._border_left:
+                    buffer.draw_text(chars["vertical"], self._x, y, border_color, bg)
+                if self._border_right:
+                    buffer.draw_text(chars["vertical"], self._x + width - 1, y, border_color, bg)
 
-        # Title
-        if self._title:
+        # Title (only if top border is drawn)
+        if self._title and self._border_top:
             title_x = self._x + 1
             if self._title_alignment == "center":
                 title_x = self._x + (width - len(self._title)) // 2
