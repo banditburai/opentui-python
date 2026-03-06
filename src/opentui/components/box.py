@@ -271,6 +271,8 @@ class ScrollBox(Box):
         self._scrollbar_position = scrollbar_position
         self._scroll_offset_x = 0
         self._scroll_offset_y = 0
+        self._content_height = 0
+        self._content_width = 0
 
     @property
     def scroll_x(self) -> bool:
@@ -280,12 +282,91 @@ class ScrollBox(Box):
     def scroll_y(self) -> bool:
         return self._scroll_y
 
+    @property
+    def scroll_offset_x(self) -> int:
+        return self._scroll_offset_x
+
+    @property
+    def scroll_offset_y(self) -> int:
+        return self._scroll_offset_y
+
     def scroll_to(self, x: int = 0, y: int = 0) -> None:
         """Scroll to position."""
         if self._scroll_x:
             self._scroll_offset_x = max(0, x)
         if self._scroll_y:
             self._scroll_offset_y = max(0, y)
+
+    def scroll_by(self, delta_x: int = 0, delta_y: int = 0) -> None:
+        """Scroll by delta amount."""
+        if self._scroll_x:
+            self._scroll_offset_x = max(0, self._scroll_offset_x + delta_x)
+        if self._scroll_y:
+            self._scroll_offset_y = max(0, self._scroll_offset_y + delta_y)
+
+    def render(self, buffer: Buffer, delta_time: float = 0) -> None:
+        """Render with scrolling applied."""
+        if not self._visible:
+            return
+
+        width = self._width or buffer.width
+        height = self._height or buffer.height
+
+        content_x = self._x + self._padding_left
+        content_y = self._y + self._padding_top
+        content_width = width - self._padding_left - self._padding_right
+        content_height = height - self._padding_top - self._padding_bottom
+
+        if self._border:
+            content_x += 1
+            content_y += 1
+            content_width -= 2
+            content_height -= 2
+
+        if content_width <= 0 or content_height <= 0:
+            return
+
+        self._content_width = content_width
+        self._content_height = content_height
+
+        for child in self._children:
+            if isinstance(child, Renderable):
+                child._x = content_x - self._scroll_offset_x
+                child._y = content_y - self._scroll_offset_y
+                child.render(buffer, delta_time)
+
+        if self._show_scrollbar and self._scroll_y:
+            self._render_scrollbar(buffer, content_x, content_y, content_width, content_height)
+
+    def _render_scrollbar(
+        self,
+        buffer: Buffer,
+        content_x: int,
+        content_y: int,
+        content_width: int,
+        content_height: int,
+    ) -> None:
+        """Render vertical scrollbar."""
+        if self._scrollbar_position == "right":
+            sb_x = content_x + content_width
+        else:
+            sb_x = content_x - 1
+
+        total_content_height = self._content_height
+        if total_content_height <= content_height:
+            return
+
+        visible_ratio = content_height / total_content_height
+        thumb_height = max(1, int(content_height * visible_ratio))
+
+        scroll_ratio = self._scroll_offset_y / total_content_height
+        thumb_y = content_y + int(scroll_ratio * (content_height - thumb_height))
+
+        for y in range(content_y, content_y + content_height):
+            if y < thumb_y or y >= thumb_y + thumb_height:
+                buffer.draw_text("▐", sb_x, y, s.RGBA(0.4, 0.4, 0.4, 1), None)
+            else:
+                buffer.draw_text("█", sb_x, y, s.RGBA(0.6, 0.6, 0.6, 1), None)
 
 
 __all__ = [
