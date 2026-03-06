@@ -58,20 +58,31 @@ class Buffer:
     def __init__(self, ptr: Any, native: Any):
         self._ptr = ptr
         self._native = native
+        self._width: int | None = None
+        self._height: int | None = None
 
     @property
     def width(self) -> int:
-        return self._native.get_buffer_width(self._ptr)
+        if self._width is None:
+            self._width = self._native.get_buffer_width(self._ptr)
+        return self._width  # type: ignore[return-value]
 
     @property
     def height(self) -> int:
-        return self._native.get_buffer_height(self._ptr)
+        if self._height is None:
+            self._height = self._native.get_buffer_height(self._ptr)
+        return self._height  # type: ignore[return-value]
 
     def clear(self, bg: s.RGBA | None = None) -> None:
-        self._native.buffer_clear(self._ptr)
+        if bg is not None:
+            self._native.buffer_clear(self._ptr, (bg.r, bg.g, bg.b, bg.a))
+        else:
+            self._native.buffer_clear(self._ptr, (0.0, 0.0, 0.0, 1.0))
 
     def resize(self, width: int, height: int) -> None:
         self._native.buffer_resize(self._ptr, width, height)
+        self._width = width
+        self._height = height
 
     def draw_text(
         self,
@@ -86,7 +97,13 @@ class Buffer:
             text_bytes = text.encode("utf-8")
         else:
             text_bytes = text
-        self._native.buffer_draw_text(self._ptr, text_bytes, len(text_bytes), x, y)
+
+        fg_tuple = (fg.r, fg.g, fg.b, fg.a) if fg else None
+        bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
+
+        self._native.buffer_draw_text(
+            self._ptr, text_bytes, len(text_bytes), x, y, fg_tuple, bg_tuple, attributes
+        )
 
     def fill_rect(
         self,
@@ -96,15 +113,13 @@ class Buffer:
         height: int,
         bg: s.RGBA | None = None,
     ) -> None:
-        self._native.buffer_fill_rect(self._ptr, x, y, width, height)
+        bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else (0.0, 0.0, 0.0, 1.0)
+        self._native.buffer_fill_rect(self._ptr, x, y, width, height, bg_tuple)
 
     def get_span_lines(self) -> list[dict]:
         """Get span lines for diff testing."""
-        try:
-            w = self._native.get_buffer_width(self._ptr)
-            h = self._native.get_buffer_height(self._ptr)
-        except Exception:
-            return []
+        w = self.width
+        h = self.height
 
         if w <= 0 or h <= 0:
             return []
