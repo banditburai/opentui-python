@@ -73,6 +73,7 @@ from .events import (
 
 # Hooks
 from .hooks import (
+    Animation,
     Timeline,
     use_keyboard,
     use_on_resize,
@@ -350,6 +351,7 @@ __all__ = [
     "use_selection_handler",
     "use_timeline",
     "Timeline",
+    "Animation",
     # Extension
     "extend",
     "get_component_catalogue",

@@ -154,6 +154,51 @@ def use_timeline(options: dict | None = None) -> Timeline:
     return Timeline(options or {})
 
 
+class Animation:
+    """Single animation definition."""
+
+    def __init__(
+        self,
+        target: Any,
+        property_name: str,
+        start_value: float,
+        end_value: float,
+        duration: float,
+        easing: str = "linear",
+        start_time: float = 0,
+    ):
+        self.target = target
+        self.property_name = property_name
+        self.start_value = start_value
+        self.end_value = end_value
+        self.duration = duration
+        self.easing = easing
+        self.start_time = start_time
+        self._current_value = start_value
+
+    def get_value(self, elapsed: float) -> float:
+        """Get the interpolated value at given elapsed time."""
+        local_time = elapsed - self.start_time
+        if local_time < 0:
+            return self.start_value
+        if local_time >= self.duration:
+            return self.end_value
+
+        progress = local_time / self.duration
+
+        if self.easing == "ease-in":
+            progress = progress * progress
+        elif self.easing == "ease-out":
+            progress = 1 - (1 - progress) * (1 - progress)
+        elif self.easing == "ease-in-out":
+            if progress < 0.5:
+                progress = 2 * progress * progress
+            else:
+                progress = 1 - (-2 * progress + 2) * (-2 * progress + 2) / 2
+
+        return self.start_value + (self.end_value - self.start_value) * progress
+
+
 class Timeline:
     """Animation timeline for smooth animations.
 
@@ -167,16 +212,50 @@ class Timeline:
         self._autoplay = options.get("autoplay", True)
         self._on_complete = options.get("on_complete")
         self._running = False
+        self._animations: list[Animation] = []
+        self._start_time: float | None = None
 
-    def add(self, target: Any, properties: dict, start_time: float = 0) -> None:
+    def add(
+        self,
+        target: Any,
+        properties: dict,
+        start_time: float = 0,
+        duration: float | None = None,
+        easing: str = "linear",
+    ) -> None:
         """Add an animation to the timeline.
 
         Args:
             target: Object to animate
-            properties: Property names and target values
+            properties: Property names and target values ({"prop": end_value})
             start_time: Start time offset in ms
+            duration: Animation duration in ms
+            easing: Easing function ("linear", "ease-in", "ease-out", "ease-in-out")
         """
-        pass
+        anim_duration = duration or (self._duration / len(properties)) if properties else 200
+
+        for prop_name, end_value in properties.items():
+            start_value = getattr(target, prop_name, 0)
+            anim = Animation(
+                target=target,
+                property_name=prop_name,
+                start_value=start_value,
+                end_value=end_value,
+                duration=anim_duration,
+                easing=easing,
+                start_time=start_time,
+            )
+            self._animations.append(anim)
+
+    def update(self, elapsed: float) -> None:
+        """Update all animations.
+
+        Args:
+            elapsed: Elapsed time in ms since timeline started
+        """
+        for anim in self._animations:
+            value = anim.get_value(elapsed)
+            setattr(anim.target, anim.property_name, value)
 
     def play(self) -> None:
         """Start playing the timeline."""
@@ -194,6 +273,10 @@ class Timeline:
         """Stop the timeline."""
         self._running = False
 
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
 
 __all__ = [
     "use_renderer",
@@ -204,4 +287,5 @@ __all__ = [
     "use_selection_handler",
     "use_timeline",
     "Timeline",
+    "Animation",
 ]
