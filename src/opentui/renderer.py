@@ -74,7 +74,7 @@ class Buffer:
         return self._height  # type: ignore[return-value]
 
     def clear(self, bg: s.RGBA | None = None) -> None:
-        # Native buffer_clear takes (buffer, alpha) - use alpha from bg or default
+        # Native buffer_clear takes (buffer, alpha)
         alpha = bg.a if bg else 0.0
         self._native.buffer_clear(self._ptr, alpha)
 
@@ -92,13 +92,18 @@ class Buffer:
         bg: s.RGBA | None = None,
         attributes: int = 0,
     ) -> None:
-        # Native buffer_draw_text takes (buffer, text, x, y) - colors not supported
-        # For now, just pass the text and position
+        # Native buffer_draw_text takes (buffer, text, len, x, y, fg, bg, attrs)
         if isinstance(text, str):
             text_bytes = text.encode("utf-8")
         else:
             text_bytes = text
-        self._native.buffer_draw_text(self._ptr, text_bytes, len(text_bytes), x, y)
+
+        fg_tuple = (fg.r, fg.g, fg.b, fg.a) if fg else None
+        bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
+
+        self._native.buffer_draw_text(
+            self._ptr, text_bytes, len(text_bytes), x, y, fg_tuple, bg_tuple, attributes
+        )
 
     def fill_rect(
         self,
@@ -108,8 +113,9 @@ class Buffer:
         height: int,
         bg: s.RGBA | None = None,
     ) -> None:
-        # Native buffer_fill_rect takes (buffer, x, y, width, height) - bg not supported
-        self._native.buffer_fill_rect(self._ptr, x, y, width, height)
+        # Native buffer_fill_rect takes (buffer, x, y, width, height, bg)
+        bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
+        self._native.buffer_fill_rect(self._ptr, x, y, width, height, bg_tuple)
 
     def get_span_lines(self) -> list[dict]:
         """Get span lines for diff testing."""

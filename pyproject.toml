@@ -7,7 +7,7 @@ name = "opentui"
 version = "0.1.0"
 description = "Python bindings for OpenTUI - Build terminal UIs with signals"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 license = { text = "MIT" }
 authors = [
     { name = "OpenTUI Team", email = "hello@opentui.com" }
