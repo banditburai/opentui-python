@@ -122,7 +122,6 @@ class EditBuffer:
     def undo(self) -> bool:
         """Undo last action."""
         if hasattr(self._lib, "editBufferUndo"):
-
             buf = b"\x00" * 1024
             length = self._lib.editBufferUndo(self._ptr, buf, len(buf))
             return length > 0
@@ -131,7 +130,6 @@ class EditBuffer:
     def redo(self) -> bool:
         """Redo last undone action."""
         if hasattr(self._lib, "editBufferRedo"):
-
             buf = b"\x00" * 1024
             length = self._lib.editBufferRedo(self._ptr, buf, len(buf))
             return length > 0
@@ -155,12 +153,17 @@ class EditorView:
     def __init__(self, edit_buffer: EditBuffer, width: int, height: int):
         self._edit_buffer = edit_buffer
         self._lib = edit_buffer._lib
+        self._valid = False
 
         if hasattr(self._lib, "createEditorView"):
             ptr = self._lib.createEditorView(edit_buffer.ptr, c_uint32(width), c_uint32(height))
             self._ptr = ptr
+            self._valid = True
         else:
             self._ptr = None
+            raise RuntimeError(
+                "EditorView not available: createEditorView function not found in native bindings"
+            )
 
     def set_viewport_size(self, width: int, height: int) -> None:
         """Set the viewport dimensions."""
