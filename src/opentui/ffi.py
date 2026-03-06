@@ -1,7 +1,8 @@
-"""FFI layer for OpenTUI core library."""
+"""FFI layer for OpenTUI core library - uses nanobind when available, falls back to ctypes."""
 
 import ctypes
 import platform
+from ctypes import CDLL
 from ctypes import (
     POINTER,
     c_bool,
@@ -18,11 +19,60 @@ from ctypes import (
     c_void_p,
 )
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Optional
+import os
+import sys
+import importlib
+import importlib.util
+
+if TYPE_CHECKING:
+    from ctypes import CDLL
+
+# Try to import nanobind bindings directly (not via opentui package to avoid yoga dependency)
+_NATIVE_AVAILABLE = False
+_native_module = None
+
+
+def _try_load_nanobind():
+    global _NATIVE_AVAILABLE, _native_module
+
+    # Try to find and load the .so file directly
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    package_dir = os.path.dirname(current_dir)
+    bindings_dir = os.path.join(package_dir, "opentui_bindings")
+
+    if os.path.isdir(bindings_dir):
+        for f in os.listdir(bindings_dir):
+            if f.endswith(".so"):
+                so_file = os.path.join(bindings_dir, f)
+                try:
+                    spec = importlib.util.spec_from_file_location("opentui_bindings", so_file)
+                    if spec and spec.loader:
+                        _native_module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(_native_module)
+                        _NATIVE_AVAILABLE = True
+                        return
+                except Exception:
+                    pass
+
+    # Also try via import
+    try:
+        sys.path.insert(0, os.path.join(package_dir, "opentui_bindings"))
+        import opentui_bindings
+
+        _native_module = opentui_bindings
+        _NATIVE_AVAILABLE = True
+    except ImportError:
+        pass
+
+
+_try_load_nanobind()
 
 
 class OpenTUILibrary:
     """Wrapper for the OpenTUI shared library."""
+
+    _lib: Optional["CDLL"]
 
     def __init__(self, lib_path: str | Path | None = None):
         self._lib = None
@@ -579,6 +629,247 @@ class OpenTUILibrary:
         lib.getArenaAllocatedBytes.argtypes = []
         lib.getArenaAllocatedBytes.restype = c_size_t
 
+        # Buffer direct access functions (used as workaround for hanging bufferDrawText etc.)
+        lib.bufferGetCharPtr.argtypes = [c_void_p]
+        lib.bufferGetCharPtr.restype = c_void_p
+
+        lib.bufferGetFgPtr.argtypes = [c_void_p]
+        lib.bufferGetFgPtr.restype = c_void_p
+
+        lib.bufferGetBgPtr.argtypes = [c_void_p]
+        lib.bufferGetBgPtr.restype = c_void_p
+
+        lib.bufferGetAttributesPtr.argtypes = [c_void_p]
+        lib.bufferGetAttributesPtr.restype = c_void_p
+
+        lib.bufferGetRealCharSize.argtypes = [c_void_p]
+        lib.bufferGetRealCharSize.restype = c_uint32
+
+    def buffer_draw_text(
+        self,
+        buffer: int,
+        text: str | bytes,
+        x: int,
+        y: int,
+        fg: tuple[float, float, float, float] | None = None,
+        bg: tuple[float, float, float, float] | None = None,
+        attributes: int = 0,
+    ) -> None:
+        """Draw text directly to buffer memory (workaround for hanging bufferDrawText).
+
+        Args:
+            buffer: Buffer pointer from getNextBuffer() or getCurrentBuffer()
+            text: Text string to draw
+            x: X position
+            y: Y position
+            fg: Foreground color as (r, g, b, a) floats 0-1, or None
+            bg: Background color as (r, g, b, a) floats 0-1, or None
+            attributes: Cell attributes flags
+        """
+        lib = self._lib
+        if isinstance(text, str):
+            text = text.encode("utf-8")
+
+        buffer_ptr = int(buffer) if hasattr(buffer, "__int__") else buffer
+        char_ptr = lib.bufferGetCharPtr(buffer_ptr)
+        fg_ptr = lib.bufferGetFgPtr(buffer_ptr)
+        bg_ptr = lib.bufferGetBgPtr(buffer_ptr)
+        attr_ptr = lib.bufferGetAttributesPtr(buffer)
+
+        width = self.get_buffer_width(buffer)
+        height = self.get_buffer_height(buffer)
+
+        for i, byte in enumerate(text[: width - x]):
+            if x + i >= width:
+                break
+            if y >= height:
+                break
+
+            offset = y * width + (x + i)
+
+            ctypes.memmove(char_ptr + offset, bytes([byte]), 1)
+
+            if fg is not None:
+                fg_offset = offset * 4
+                ctypes.memmove(
+                    fg_ptr + fg_offset,
+                    (c_float * 4)(*fg),
+                    16,
+                )
+
+            if bg is not None:
+                bg_offset = offset * 4
+                ctypes.memmove(
+                    bg_ptr + bg_offset,
+                    (c_float * 4)(*bg),
+                    16,
+                )
+
+            if attributes != 0:
+                attr_offset = offset * 4
+                ctypes.memmove(
+                    attr_ptr + attr_offset,
+                    ctypes.c_uint32(attributes).value,
+                    4,
+                )
+
+    def buffer_set_cell(
+        self,
+        buffer: int,
+        x: int,
+        y: int,
+        char: int,
+        fg: tuple[float, float, float, float] | None = None,
+        bg: tuple[float, float, float, float] | None = None,
+        attributes: int = 0,
+    ) -> None:
+        """Set a single cell directly in buffer memory (workaround for hanging bufferSetCell).
+
+        Args:
+            buffer: Buffer pointer from getNextBuffer() or getCurrentBuffer()
+            x: X position
+            y: Y position
+            char: Character code (0-255)
+            fg: Foreground color as (r, g, b, a) floats 0-1, or None
+            bg: Background color as (r, g, b, a) floats 0-1, or None
+            attributes: Cell attributes flags
+        """
+        lib = self._lib
+        buffer_ptr = int(buffer) if hasattr(buffer, "__int__") else buffer
+
+        char_ptr = lib.bufferGetCharPtr(buffer_ptr)
+        fg_ptr = lib.bufferGetFgPtr(buffer_ptr)
+        bg_ptr = lib.bufferGetBgPtr(buffer_ptr)
+        attr_ptr = lib.bufferGetAttributesPtr(buffer_ptr)
+
+        width = self.get_buffer_width(buffer_ptr)
+        height = self.get_buffer_height(buffer_ptr)
+
+        if x >= width or y >= height:
+            return
+
+        offset = y * width + x
+
+        ctypes.memmove(char_ptr + offset, bytes([char & 0xFF]), 1)
+
+        if fg is not None:
+            fg_offset = offset * 4
+            ctypes.memmove(
+                fg_ptr + fg_offset,
+                (c_float * 4)(*fg),
+                16,
+            )
+
+        if bg is not None:
+            bg_offset = offset * 4
+            ctypes.memmove(
+                bg_ptr + bg_offset,
+                (c_float * 4)(*bg),
+                16,
+            )
+
+        if attributes != 0:
+            attr_offset = offset * 4
+            ctypes.memmove(
+                attr_ptr + attr_offset,
+                ctypes.c_uint32(attributes).value,
+                4,
+            )
+
+    def buffer_fill_rect(
+        self,
+        buffer: int,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        char: int = 0x20,
+        fg: tuple[float, float, float, float] | None = None,
+        bg: tuple[float, float, float, float] | None = None,
+        attributes: int = 0,
+    ) -> None:
+        """Fill a rectangle directly in buffer memory (workaround for hanging bufferFillRect).
+
+        Args:
+            buffer: Buffer pointer from getNextBuffer() or getCurrentBuffer()
+            x: X position
+            y: Y position
+            width: Rectangle width
+            height: Rectangle height
+            char: Fill character (default: space 0x20)
+            fg: Foreground color as (r, g, b, a) floats 0-1, or None
+            bg: Background color as (r, g, b, a) floats 0-1, or None
+            attributes: Cell attributes flags
+        """
+        buffer_ptr = int(buffer) if hasattr(buffer, "__int__") else buffer
+        buffer_width = self.get_buffer_width(buffer_ptr)
+        buffer_height = self.get_buffer_height(buffer_ptr)
+
+        for dy in range(height):
+            for dx in range(width):
+                px = x + dx
+                py = y + dy
+                if px < buffer_width and py < buffer_height:
+                    self.buffer_set_cell(buffer_ptr, px, py, char, fg, bg, attributes)
+
+    def buffer_clear(
+        self, buffer: int, color: tuple[float, float, float, float] | None = None
+    ) -> None:
+        """Clear buffer directly.
+
+        Args:
+            buffer: Buffer pointer from getNextBuffer() or getCurrentBuffer()
+            color: Background color as (r, g, b, a) floats 0-1, or None for default
+        """
+        lib = self._lib
+        buffer_ptr = int(buffer) if hasattr(buffer, "__int__") else buffer
+
+        char_ptr = lib.bufferGetCharPtr(buffer_ptr)
+        fg_ptr = lib.bufferGetFgPtr(buffer_ptr)
+        bg_ptr = lib.bufferGetBgPtr(buffer_ptr)
+
+        buffer_width = self.get_buffer_width(buffer_ptr)
+        buffer_height = self.get_buffer_height(buffer_ptr)
+        size = buffer_width * buffer_height
+
+        ctypes.memset(char_ptr, 0x20, size)
+
+        if color is not None:
+            color_array = (c_float * 4)(*color)
+            for i in range(size):
+                ctypes.memmove(fg_ptr + i * 4, color_array, 16)
+                ctypes.memmove(bg_ptr + i * 4, color_array, 16)
+
+    def get_buffer_width(self, buffer: int) -> int:
+        """Get buffer width."""
+        buffer_ptr = int(buffer) if hasattr(buffer, "__int__") else buffer
+        return self._lib.getBufferWidth(buffer_ptr)
+
+    def get_buffer_height(self, buffer: int) -> int:
+        """Get buffer height."""
+        buffer_ptr = int(buffer) if hasattr(buffer, "__int__") else buffer
+        return self._lib.getBufferHeight(buffer_ptr)
+
+    def buffer_get_char_ptr(self, buffer: int) -> int:
+        """Get pointer to character data."""
+        buffer_ptr = int(buffer) if hasattr(buffer, "__int__") else buffer
+        return self._lib.bufferGetCharPtr(buffer_ptr)
+
+    def buffer_get_fg_ptr(self, buffer: int) -> int:
+        """Get pointer to foreground color data."""
+        buffer_ptr = int(buffer) if hasattr(buffer, "__int__") else buffer
+        return self._lib.bufferGetFgPtr(buffer_ptr)
+
+    def buffer_get_bg_ptr(self, buffer: int) -> int:
+        """Get pointer to background color data."""
+        buffer_ptr = int(buffer) if hasattr(buffer, "__int__") else buffer
+        return self._lib.bufferGetBgPtr(buffer_ptr)
+
+    def buffer_get_attributes_ptr(self, buffer: int) -> int:
+        """Get pointer to attributes data."""
+        buffer_ptr = int(buffer) if hasattr(buffer, "__int__") else buffer
+        return self._lib.bufferGetAttributesPtr(buffer_ptr)
+
     def __getattr__(self, name: str) -> Any:
         """Forward attribute access to the library."""
         if self._lib is None:
@@ -619,4 +910,16 @@ __all__ = [
     "c_size_t",
     "c_void_p",
     "POINTER",
+    "is_native_available",
+    "get_native",
 ]
+
+
+def is_native_available() -> bool:
+    """Check if nanobind native bindings are available."""
+    return _NATIVE_AVAILABLE
+
+
+def get_native():
+    """Get the native bindings module if available."""
+    return _native_module

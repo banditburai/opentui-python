@@ -53,30 +53,43 @@ class TerminalCapabilities:
 class Buffer:
     """Wrapper around native buffer."""
 
-    def __init__(self, ptr: c_void_p, lib: ffi.OpenTUILibrary):
+    def __init__(self, ptr: int, lib: ffi.OpenTUILibrary, native_buffer: Any = None):
         self._ptr = ptr
         self._lib = lib
+        self._native = native_buffer  # Nanobind buffer (if available)
 
     @property
     def width(self) -> int:
-        if hasattr(self._lib, "bufferGetWidth"):
-            return self._lib.bufferGetWidth(self._ptr)
+        if self._native:
+            return self._native.get_buffer_width(self._ptr)
+        if hasattr(self._lib, "get_buffer_width"):
+            return self._lib.get_buffer_width(self._ptr)
         return 80
 
     @property
     def height(self) -> int:
-        if hasattr(self._lib, "bufferGetHeight"):
-            return self._lib.bufferGetHeight(self._ptr)
+        if self._native:
+            return self._native.get_buffer_height(self._ptr)
+        if hasattr(self._lib, "get_buffer_height"):
+            return self._lib.get_buffer_height(self._ptr)
         return 24
 
     def clear(self, bg: s.RGBA | None = None) -> None:
-        if bg is None:
-            bg = s.RGBA(0, 0, 0, 1)
-        bg_array = (c_float * 4)(bg.r, bg.g, bg.b, bg.a)
-        self._lib.bufferClear(self._ptr, bg_array)
+        """Clear buffer using nanobind or ctypes."""
+        if self._native:
+            self._native.buffer_clear(self._ptr)
+        else:
+            if bg is None:
+                bg = s.RGBA(0, 0, 0, 1)
+            bg_tuple = (bg.r, bg.g, bg.b, bg.a)
+            buffer_ptr = int(self._ptr) if hasattr(self._ptr, "__int__") else self._ptr
+            self._lib.buffer_clear(buffer_ptr, bg_tuple)
 
     def resize(self, width: int, height: int) -> None:
-        self._lib.bufferResize(self._ptr, c_uint32(width), c_uint32(height))
+        if self._native:
+            self._native.buffer_resize(self._ptr, width, height)
+        else:
+            self._lib.bufferResize(self._ptr, c_uint32(width), c_uint32(height))
 
     def draw_text(
         self,
@@ -87,36 +100,52 @@ class Buffer:
         bg: s.RGBA | None = None,
         attributes: int = 0,
     ) -> None:
-        """Draw text at position."""
-        text_bytes = text.encode("utf-8")
+        """Draw text at position using nanobind or ctypes."""
+        if isinstance(text, str):
+            text_bytes = text.encode("utf-8")
+        else:
+            text_bytes = text
 
-        fg_array = None
-        if fg:
-            fg_array = (c_float * 4)(fg.r, fg.g, fg.b, fg.a)
+        if self._native:
+            self._native.buffer_draw_text(self._ptr, text_bytes, len(text_bytes), x, y)
+        else:
+            fg_tuple = None
+            if fg:
+                fg_tuple = (fg.r, fg.g, fg.b, fg.a)
 
-        bg_array = None
-        if bg:
-            bg_array = (c_float * 4)(bg.r, bg.g, bg.b, bg.a)
+            bg_tuple = None
+            if bg:
+                bg_tuple = (bg.r, bg.g, bg.b, bg.a)
 
-        self._lib.bufferDrawText(
-            self._ptr,
-            text_bytes,
-            len(text_bytes),
-            c_uint32(x),
-            c_uint32(y),
-            fg_array,
-            bg_array,
-            c_uint32(attributes),
-        )
+            buffer_ptr = int(self._ptr) if hasattr(self._ptr, "__int__") else self._ptr
+            self._lib.buffer_draw_text(
+                buffer_ptr,
+                text,
+                x,
+                y,
+                fg_tuple,
+                bg_tuple,
+                attributes,
+            )
 
-    def fill_rect(self, x: int, y: int, width: int, height: int, bg: s.RGBA | None = None) -> None:
-        """Fill a rectangle with background color."""
-        if bg is None:
-            bg = s.RGBA(0, 0, 0, 1)
-        bg_array = (c_float * 4)(bg.r, bg.g, bg.b, bg.a)
-        self._lib.bufferFillRect(
-            self._ptr, c_uint32(x), c_uint32(y), c_uint32(width), c_uint32(height), bg_array
-        )
+    def fill_rect(
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        bg: s.RGBA | None = None,
+    ) -> None:
+        """Fill rectangle using nanobind or ctypes."""
+        if self._native:
+            self._native.buffer_fill_rect(self._ptr, x, y, width, height)
+        else:
+            if bg is None:
+                bg = s.RGBA(0, 0, 0, 1)
+            bg_tuple = (bg.r, bg.g, bg.b, bg.a)
+
+            buffer_ptr = int(self._ptr) if hasattr(self._ptr, "__int__") else self._ptr
+            self._lib.buffer_fill_rect(buffer_ptr, x, y, width, height, char=0x20, bg=bg_tuple)
 
     def get_span_lines(self) -> list[dict]:
         """Get span lines for diff testing.
@@ -126,29 +155,50 @@ class Buffer:
         """
         import ctypes
 
-        if not hasattr(self._lib, "bufferWriteResolvedChars"):
-            return []
+        # Try nanobind first, fall back to ctypes
+        if self._native:
+            try:
+                w = self._native.get_buffer_width(self._ptr)
+                h = self._native.get_buffer_height(self._ptr)
+            except Exception:
+                return []
+        else:
+            if not hasattr(self._lib, "bufferWriteResolvedChars"):
+                return []
 
-        try:
-            w = self._lib.getBufferWidth(self._ptr) if hasattr(self._lib, "getBufferWidth") else 0
-            h = self._lib.getBufferHeight(self._ptr) if hasattr(self._lib, "getBufferHeight") else 0
-        except Exception:
-            return []
+            try:
+                w = (
+                    self._lib.getBufferWidth(self._ptr)
+                    if hasattr(self._lib, "getBufferWidth")
+                    else 0
+                )
+                h = (
+                    self._lib.getBufferHeight(self._ptr)
+                    if hasattr(self._lib, "getBufferHeight")
+                    else 0
+                )
+            except Exception:
+                return []
 
         if w <= 0 or h <= 0:
             return []
 
         try:
-            real_size = self._lib.bufferGetRealCharSize(self._ptr)
-            if real_size <= 0:
-                return []
-            output_buffer = ctypes.create_string_buffer(real_size)
-            bytes_written = self._lib.bufferWriteResolvedChars(
-                self._ptr, ctypes.byref(output_buffer), ctypes.c_bool(True)
-            )
-            if bytes_written <= 0:
-                return []
-            real_text = output_buffer.raw[:bytes_written].decode("utf-8", errors="replace")
+            if self._native:
+                # For nanobind, use buffer_write_resolved_chars - it returns a string
+                resolved = self._native.buffer_write_resolved_chars(self._ptr, True)
+                real_text = resolved if resolved else ""
+            else:
+                real_size = self._lib.bufferGetRealCharSize(self._ptr)
+                if real_size <= 0:
+                    return []
+                output_buffer = ctypes.create_string_buffer(real_size)
+                bytes_written = self._lib.bufferWriteResolvedChars(
+                    self._ptr, ctypes.byref(output_buffer), ctypes.c_bool(True)
+                )
+                if bytes_written <= 0:
+                    return []
+                real_text = output_buffer.raw[:bytes_written].decode("utf-8", errors="replace")
         except Exception:
             return []
 
@@ -175,6 +225,7 @@ class CliRenderer:
         self._component_fn: Callable | None = None
         self._signal_state: Any = None
         self._last_component: Any = None
+        self._native: Any = None  # Native nanobind renderer if available
 
         if config.testing:
             self._width = config.width
@@ -209,43 +260,98 @@ class CliRenderer:
 
     def setup(self) -> None:
         """Set up the terminal."""
-        self._lib.setupTerminal(self._ptr, c_bool(True))
+        # In testing mode, skip terminal setup to avoid I/O issues
+        if self._config.testing:
+            return
+
+        if self._native:
+            self._native.renderer.setup_terminal(self._ptr, False)
+        else:
+            self._lib.setupTerminal(self._ptr, c_bool(False))
 
     def suspend(self) -> None:
         """Suspend the renderer (for Ctrl+Z)."""
-        self._lib.suspendRenderer(self._ptr)
+        if self._native:
+            self._native.renderer.suspend_renderer(self._ptr)
+        else:
+            self._lib.suspendRenderer(self._ptr)
 
     def resume(self) -> None:
         """Resume the renderer."""
-        self._lib.resumeRenderer(self._ptr)
+        if self._native:
+            self._native.renderer.resume_renderer(self._ptr)
+        else:
+            self._lib.resumeRenderer(self._ptr)
 
     def clear(self) -> None:
         """Clear the terminal."""
-        self._lib.clearTerminal(self._ptr)
+        if self._native:
+            self._native.renderer.clear_terminal(self._ptr)
+        else:
+            self._lib.clearTerminal(self._ptr)
 
     def set_title(self, title: str) -> None:
         """Set the terminal title."""
-        title_bytes = title.encode("utf-8")
-        self._lib.setTerminalTitle(self._ptr, title_bytes, len(title_bytes))
+        if self._native:
+            self._native.renderer.set_terminal_title(self._ptr, title)
+        else:
+            title_bytes = title.encode("utf-8")
+            self._lib.setTerminalTitle(self._ptr, title_bytes, len(title_bytes))
 
     def enable_mouse(self, enable_movement: bool = False) -> None:
         """Enable mouse tracking."""
-        self._lib.enableMouse(self._ptr, c_bool(enable_movement))
+        if self._native:
+            self._native.renderer.enable_mouse(self._ptr, enable_movement)
+        else:
+            self._lib.enableMouse(self._ptr, c_bool(enable_movement))
 
     def disable_mouse(self) -> None:
         """Disable mouse tracking."""
-        self._lib.disableMouse(self._ptr)
+        if self._native:
+            self._native.renderer.disable_mouse(self._ptr)
+        else:
+            self._lib.disableMouse(self._ptr)
 
     def enable_keyboard(self, flags: int = 0) -> None:
         """Enable kitty keyboard protocol."""
-        self._lib.enableKittyKeyboard(self._ptr, c_uint8(flags))
+        if self._native:
+            self._native.renderer.enable_kitty_keyboard(self._ptr, flags)
+        else:
+            self._lib.enableKittyKeyboard(self._ptr, c_uint8(flags))
 
     def disable_keyboard(self) -> None:
         """Disable kitty keyboard protocol."""
-        self._lib.disableKittyKeyboard(self._ptr)
+        if self._native:
+            self._native.renderer.disable_kitty_keyboard(self._ptr)
+        else:
+            self._lib.disableKittyKeyboard(self._ptr)
 
     def get_capabilities(self) -> TerminalCapabilities:
         """Get terminal capabilities."""
+        # Try nanobind first
+        if self._native and hasattr(self._native.renderer, "get_terminal_capabilities"):
+            caps_dict = self._native.renderer.get_terminal_capabilities(self._ptr)
+            return TerminalCapabilities(
+                kitty_keyboard=caps_dict.get("kitty_keyboard", False),
+                kitty_graphics=caps_dict.get("kitty_graphics", False),
+                rgb=caps_dict.get("rgb", False),
+                unicode="unicode" if caps_dict.get("unicode", False) else "wcwidth",
+                sgr_pixels=caps_dict.get("sgr_pixels", False),
+                color_scheme_updates=caps_dict.get("color_scheme_updates", False),
+                explicit_width=caps_dict.get("explicit_width", False),
+                scaled_text=caps_dict.get("scaled_text", False),
+                sixel=caps_dict.get("sixel", False),
+                focus_tracking=caps_dict.get("focus_tracking", False),
+                sync=caps_dict.get("sync", False),
+                bracketed_paste=caps_dict.get("bracketed_paste", False),
+                hyperlinks=caps_dict.get("hyperlinks", False),
+                osc52=caps_dict.get("osc52", False),
+                explicit_cursor_positioning=caps_dict.get("explicit_cursor_positioning", False),
+                term_name="",
+                term_version="",
+            )
+
+        # Fall back to ctypes
         caps = s.ExternalCapabilities()
         self._lib.getTerminalCapabilities(self._ptr, POINTER(s.ExternalCapabilities)(caps))
 
@@ -270,22 +376,40 @@ class CliRenderer:
         )
 
     def get_next_buffer(self) -> Buffer:
-        """Get the next buffer for rendering."""
-        ptr = self._lib.getNextBuffer(self._ptr)
-        return Buffer(ptr, self._lib)
+        """Get the next buffer."""
+        # Get buffer pointer via nanobind or ctypes
+        if self._native:
+            # self._native is the full nb module (has .renderer and .buffer)
+            # Don't convert to int - nanobind expects the capsule
+            ptr = self._native.renderer.get_next_buffer(self._ptr)
+            return Buffer(ptr, self._lib, self._native.buffer)
+        else:
+            ptr = int(self._lib.getNextBuffer(self._ptr))
+            return Buffer(ptr, self._lib, None)
 
     def get_current_buffer(self) -> Buffer:
         """Get the current buffer."""
-        ptr = self._lib.getCurrentBuffer(self._ptr)
-        return Buffer(ptr, self._lib)
+        if self._native:
+            # Don't convert to int - nanobind expects the capsule
+            ptr = self._native.renderer.get_current_buffer(self._ptr)
+            return Buffer(ptr, self._lib, self._native.buffer)
+        else:
+            ptr = int(self._lib.getCurrentBuffer(self._ptr))
+            return Buffer(ptr, self._lib, None)
 
     def render(self, force: bool = False) -> None:
         """Render the current frame."""
-        self._lib.render(self._ptr, c_bool(force))
+        if self._native:
+            self._native.renderer.render(self._ptr, force)
+        else:
+            self._lib.render(self._ptr, c_bool(force))
 
     def resize(self, width: int, height: int) -> None:
         """Resize the renderer."""
-        self._lib.resizeRenderer(self._ptr, c_uint32(width), c_uint32(height))
+        if self._native:
+            self._native.renderer.resize_renderer(self._ptr, width, height)
+        else:
+            self._lib.resizeRenderer(self._ptr, c_uint32(width), c_uint32(height))
         self._width = width
         self._height = height
 
@@ -334,7 +458,9 @@ class CliRenderer:
                 raise
         finally:
             # Restore terminal
-            if hasattr(self._lib, "restoreTerminalModes"):
+            if self._native:
+                self._native.renderer.restore_terminal_modes(self._ptr)
+            elif hasattr(self._lib, "restoreTerminalModes"):
                 self._lib.restoreTerminalModes(self._ptr)
 
     def _render_frame(self, delta_time: float) -> None:
@@ -424,7 +550,10 @@ class CliRenderer:
     def destroy(self) -> None:
         """Destroy the renderer and free resources."""
         if self._ptr:
-            self._lib.destroyRenderer(self._ptr)
+            if self._native:
+                self._native.renderer.destroy_renderer(self._ptr)
+            else:
+                self._lib.destroyRenderer(self._ptr)
             self._ptr = None
 
 
@@ -456,18 +585,46 @@ async def create_cli_renderer(config: CliRendererConfig | None = None) -> CliRen
 
     lib = get_library()
 
-    ptr = lib.createRenderer(
-        c_uint32(config.width),
-        c_uint32(config.height),
-        c_bool(config.testing),
-        c_bool(config.remote),
-    )
+    # Try to use nanobind for renderer operations
+    from opentui import ffi as ffi_module
 
-    if not ptr:
-        raise RuntimeError("Failed to create renderer")
+    native_module = None  # Full nanobind module (includes renderer and buffer)
+    native_renderer = None  # Nanobind-created renderer capsule
+
+    if ffi_module.is_native_available():
+        try:
+            nb = ffi_module.get_native()
+            if nb and hasattr(nb, "renderer"):
+                # Use nanobind directly for renderer operations
+                native_renderer = nb.renderer.create_renderer(
+                    config.width,
+                    config.height,
+                    config.testing,
+                    config.remote,
+                )
+                native_module = nb  # Store full module for buffer access
+                print("Using nanobind bindings for renderer")
+        except Exception as e:
+            print(f"Nanobind renderer failed: {e}, falling back to ctypes")
+            native_renderer = None
+
+    # Use nanobind renderer if available, otherwise create with ctypes
+    if native_renderer is not None:
+        ptr = native_renderer
+    else:
+        ptr = lib.createRenderer(
+            c_uint32(config.width),
+            c_uint32(config.height),
+            c_bool(config.testing),
+            c_bool(config.remote),
+        )
+        if not ptr:
+            raise RuntimeError("Failed to create renderer")
 
     renderer = CliRenderer(ptr, config)
     renderer._root = RootRenderable(renderer)
+    # Store native module for buffer operations (nb.buffer) and renderer for renderer ops (nb.renderer)
+    renderer._native = native_module
 
     return renderer
 
