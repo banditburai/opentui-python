@@ -82,6 +82,7 @@ from .filters import (
     ImageRenderer,
     InvertFilter,
     SepiaFilter,
+    ClipboardHandler,
 )
 
 # Hooks
@@ -367,6 +368,7 @@ __all__ = [
     "Animation",
     # Filters
     "ImageRenderer",
+    "ClipboardHandler",
     "Filter",
     "GrayscaleFilter",
     "BlurFilter",
