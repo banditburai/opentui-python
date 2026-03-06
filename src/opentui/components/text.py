@@ -31,6 +31,8 @@ class Text(Renderable):
         italic: bool = False,
         underline: bool = False,
         strikethrough: bool = False,
+        # Text wrap mode
+        wrap_mode: str = "word",
         # Content (can be positional or keyword)
         **kwargs,
     ):
@@ -53,7 +55,7 @@ class Text(Renderable):
         self._italic = italic
         self._underline = underline
         self._strikethrough = strikethrough
-        self._wrap_mode = "word"
+        self._wrap_mode = wrap_mode if wrap_mode in ("none", "char", "word") else "word"
 
         # Process children as text modifiers
         self._text_modifiers: list[TextModifier] = []
@@ -99,14 +101,29 @@ class Text(Renderable):
         def measure(yoga_node, width, width_mode, height, height_mode):
             import yoga
 
-            effective_width = 0 if width_mode == yoga.MeasureMode.Undefined else int(width)
             total_padding = self._padding_left + self._padding_right
-            content_width = effective_width - total_padding
-            content_width = max(0, content_width)
+            vertical_padding = self._padding_top + self._padding_bottom
 
+            # Undefined = max-content (no wrapping)
+            if width_mode == yoga.MeasureMode.Undefined:
+                effective_width = 0
+            else:
+                effective_width = int(width)
+
+            content_width = max(0, effective_width - total_padding)
             w, h = measure_text(self._content, content_width, self._wrap_mode)
 
-            return (w + total_padding, h + self._padding_top + self._padding_bottom)
+            measured_w = w + total_padding
+            measured_h = h + vertical_padding
+
+            # AtMost mode: return min of available and measured
+            if width_mode == yoga.MeasureMode.AtMost:
+                measured_w = min(width, measured_w)
+
+            # Exactly mode: should return measured, but yoga sometimes ignores it
+            # Return measured size regardless
+
+            return (measured_w, measured_h)
 
         node.set_measure_func(measure)
 

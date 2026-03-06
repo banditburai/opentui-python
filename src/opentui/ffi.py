@@ -9,10 +9,12 @@ from ctypes import (
     c_double,
     c_float,
     c_int32,
+    c_int64,
     c_size_t,
     c_uint8,
     c_uint16,
     c_uint32,
+    c_uint64,
     c_void_p,
 )
 from pathlib import Path
@@ -301,6 +303,281 @@ class OpenTUILibrary:
         lib.createEditorView.restype = c_void_p
         lib.destroyEditorView.argtypes = [c_void_p]
         lib.destroyEditorView.restype = None
+        lib.editorViewSetViewportSize.argtypes = [c_void_p, c_uint32, c_uint32]
+        lib.editorViewSetViewportSize.restype = None
+        lib.editorViewSetViewport.argtypes = [
+            c_void_p,
+            c_uint32,
+            c_uint32,
+            c_uint32,
+            c_uint32,
+            c_bool,
+        ]
+        lib.editorViewSetViewport.restype = None
+        lib.editorViewGetViewport.argtypes = [c_void_p, c_void_p, c_void_p, c_void_p, c_void_p]
+        lib.editorViewGetViewport.restype = None
+
+        # OptimizedBuffer pointer accessors
+        lib.bufferGetCharPtr.argtypes = [c_void_p]
+        lib.bufferGetCharPtr.restype = c_void_p
+        lib.bufferGetFgPtr.argtypes = [c_void_p]
+        lib.bufferGetFgPtr.restype = c_void_p
+        lib.bufferGetBgPtr.argtypes = [c_void_p]
+        lib.bufferGetBgPtr.restype = c_void_p
+        lib.bufferGetAttributesPtr.argtypes = [c_void_p]
+        lib.bufferGetAttributesPtr.restype = c_void_p
+        lib.bufferGetRespectAlpha.argtypes = [c_void_p]
+        lib.bufferGetRespectAlpha.restype = c_bool
+        lib.bufferSetRespectAlpha.argtypes = [c_void_p, c_bool]
+        lib.bufferSetRespectAlpha.restype = None
+        lib.bufferGetId.argtypes = [c_void_p, c_void_p, c_size_t]
+        lib.bufferGetId.restype = c_size_t
+        lib.bufferGetRealCharSize.argtypes = [c_void_p]
+        lib.bufferGetRealCharSize.restype = c_uint32
+        lib.bufferWriteResolvedChars.argtypes = [c_void_p, c_void_p, c_bool]
+        lib.bufferWriteResolvedChars.restype = c_uint32
+        lib.bufferSetCellWithAlphaBlending.argtypes = [
+            c_void_p,
+            c_uint32,
+            c_uint32,
+            c_uint32,
+            POINTER(c_float),
+            POINTER(c_float),
+            c_uint32,
+        ]
+        lib.bufferSetCellWithAlphaBlending.restype = None
+        # Buffer dimensions - use getBufferWidth/Height (not bufferGetWidth/Height)
+        lib.getBufferWidth.argtypes = [c_void_p]
+        lib.getBufferWidth.restype = c_uint32
+        lib.getBufferHeight.argtypes = [c_void_p]
+        lib.getBufferHeight.restype = c_uint32
+
+        # Graphics functions
+        lib.bufferDrawBox.argtypes = [
+            c_void_p,
+            c_int32,
+            c_int32,
+            c_uint32,
+            c_uint32,
+            c_void_p,
+            c_uint32,
+            c_void_p,
+            c_void_p,
+            c_void_p,
+            c_uint32,
+        ]
+        lib.bufferDrawBox.restype = None
+        lib.bufferDrawGrid.argtypes = [
+            c_void_p,
+            c_void_p,
+            c_void_p,
+            c_void_p,
+            c_void_p,
+            c_uint32,
+            c_void_p,
+            c_uint32,
+            c_void_p,
+        ]
+        lib.bufferDrawGrid.restype = None
+        lib.bufferPushScissorRect.argtypes = [c_void_p, c_int32, c_int32, c_uint32, c_uint32]
+        lib.bufferPushScissorRect.restype = None
+        lib.bufferPopScissorRect.argtypes = [c_void_p]
+        lib.bufferPopScissorRect.restype = None
+        lib.bufferClearScissorRects.argtypes = [c_void_p]
+        lib.bufferClearScissorRects.restype = None
+        lib.bufferPushOpacity.argtypes = [c_void_p, c_float]
+        lib.bufferPushOpacity.restype = None
+        lib.bufferPopOpacity.argtypes = [c_void_p]
+        lib.bufferPopOpacity.restype = None
+        lib.bufferGetCurrentOpacity.argtypes = [c_void_p]
+        lib.bufferGetCurrentOpacity.restype = c_float
+        lib.bufferClearOpacity.argtypes = [c_void_p]
+        lib.bufferClearOpacity.restype = None
+
+        # Graphics buffer
+        lib.bufferDrawSuperSampleBuffer.argtypes = [
+            c_void_p,
+            c_uint32,
+            c_uint32,
+            c_void_p,
+            c_size_t,
+            c_uint8,
+            c_uint32,
+        ]
+        lib.bufferDrawSuperSampleBuffer.restype = None
+        lib.bufferDrawPackedBuffer.argtypes = [
+            c_void_p,
+            c_void_p,
+            c_size_t,
+            c_uint32,
+            c_uint32,
+            c_uint32,
+            c_uint32,
+        ]
+        lib.bufferDrawPackedBuffer.restype = None
+        lib.bufferDrawGrayscaleBuffer.argtypes = [
+            c_void_p,
+            c_int32,
+            c_int32,
+            c_void_p,
+            c_uint32,
+            c_uint32,
+            c_void_p,
+            c_void_p,
+        ]
+        lib.bufferDrawGrayscaleBuffer.restype = None
+        lib.bufferDrawGrayscaleBufferSupersampled.argtypes = [
+            c_void_p,
+            c_int32,
+            c_int32,
+            c_void_p,
+            c_uint32,
+            c_uint32,
+            c_void_p,
+            c_void_p,
+        ]
+        lib.bufferDrawGrayscaleBufferSupersampled.restype = None
+
+        # Extended hit grid
+        lib.hitGridPushScissorRect.argtypes = [c_void_p, c_int32, c_int32, c_uint32, c_uint32]
+        lib.hitGridPushScissorRect.restype = None
+        lib.hitGridPopScissorRect.argtypes = [c_void_p]
+        lib.hitGridPopScissorRect.restype = None
+        lib.hitGridClearScissorRects.argtypes = [c_void_p]
+        lib.hitGridClearScissorRects.restype = None
+        lib.addToCurrentHitGridClipped.argtypes = [
+            c_void_p,
+            c_int32,
+            c_int32,
+            c_uint32,
+            c_uint32,
+            c_uint32,
+        ]
+        lib.addToCurrentHitGridClipped.restype = None
+        lib.getHitGridDirty.argtypes = [c_void_p]
+        lib.getHitGridDirty.restype = c_bool
+
+        # Extended TextBuffer
+        lib.textBufferReset.argtypes = [c_void_p]
+        lib.textBufferReset.restype = None
+        lib.textBufferClear.argtypes = [c_void_p]
+        lib.textBufferClear.restype = None
+        lib.textBufferSetDefaultFg.argtypes = [c_void_p, POINTER(c_float)]
+        lib.textBufferSetDefaultFg.restype = None
+        lib.textBufferSetDefaultBg.argtypes = [c_void_p, POINTER(c_float)]
+        lib.textBufferSetDefaultBg.restype = None
+        lib.textBufferSetDefaultAttributes.argtypes = [c_void_p, POINTER(c_uint32)]
+        lib.textBufferSetDefaultAttributes.restype = None
+        lib.textBufferResetDefaults.argtypes = [c_void_p]
+        lib.textBufferResetDefaults.restype = None
+        lib.textBufferGetTabWidth.argtypes = [c_void_p]
+        lib.textBufferGetTabWidth.restype = c_uint8
+        lib.textBufferSetTabWidth.argtypes = [c_void_p, c_uint8]
+        lib.textBufferSetTabWidth.restype = None
+        lib.textBufferGetLineCount.argtypes = [c_void_p]
+        lib.textBufferGetLineCount.restype = c_uint32
+        lib.textBufferGetPlainText.argtypes = [c_void_p, c_void_p, c_size_t]
+        lib.textBufferGetPlainText.restype = c_size_t
+        lib.textBufferGetTextRange.argtypes = [c_void_p, c_uint32, c_uint32, c_void_p, c_size_t]
+        lib.textBufferGetTextRange.restype = c_size_t
+
+        # Extended EditBuffer
+        lib.editBufferSetText.argtypes = [c_void_p, c_void_p, c_size_t]
+        lib.editBufferSetText.restype = None
+        lib.editBufferDeleteChar.argtypes = [c_void_p]
+        lib.editBufferDeleteChar.restype = None
+        lib.editBufferDeleteCharBackward.argtypes = [c_void_p]
+        lib.editBufferDeleteCharBackward.restype = None
+        lib.editBufferDeleteRange.argtypes = [c_void_p, c_uint32, c_uint32, c_uint32, c_uint32]
+        lib.editBufferDeleteRange.restype = None
+        lib.editBufferNewLine.argtypes = [c_void_p]
+        lib.editBufferNewLine.restype = None
+        lib.editBufferMoveCursorLeft.argtypes = [c_void_p]
+        lib.editBufferMoveCursorLeft.restype = None
+        lib.editBufferMoveCursorRight.argtypes = [c_void_p]
+        lib.editBufferMoveCursorRight.restype = None
+        lib.editBufferMoveCursorUp.argtypes = [c_void_p]
+        lib.editBufferMoveCursorUp.restype = None
+        lib.editBufferMoveCursorDown.argtypes = [c_void_p]
+        lib.editBufferMoveCursorDown.restype = None
+        lib.editBufferGotoLine.argtypes = [c_void_p, c_uint32]
+        lib.editBufferGotoLine.restype = None
+        lib.editBufferSetCursor.argtypes = [c_void_p, c_uint32, c_uint32]
+        lib.editBufferSetCursor.restype = None
+        lib.editBufferGetCursorPosition.argtypes = [c_void_p, c_void_p]
+        lib.editBufferGetCursorPosition.restype = None
+        lib.editBufferUndo.argtypes = [c_void_p, c_void_p, c_size_t]
+        lib.editBufferUndo.restype = c_size_t
+        lib.editBufferRedo.argtypes = [c_void_p, c_void_p, c_size_t]
+        lib.editBufferRedo.restype = c_size_t
+        lib.editBufferCanUndo.argtypes = [c_void_p]
+        lib.editBufferCanUndo.restype = c_bool
+        lib.editBufferCanRedo.argtypes = [c_void_p]
+        lib.editBufferCanRedo.restype = c_bool
+
+        # TextBufferView
+        lib.createTextBufferView.argtypes = [c_void_p]
+        lib.createTextBufferView.restype = c_void_p
+        lib.destroyTextBufferView.argtypes = [c_void_p]
+        lib.destroyTextBufferView.restype = None
+        lib.textBufferViewSetSelection.argtypes = [c_void_p, c_uint32, c_uint32, c_void_p, c_void_p]
+        lib.textBufferViewSetSelection.restype = None
+        lib.textBufferViewResetSelection.argtypes = [c_void_p]
+        lib.textBufferViewResetSelection.restype = None
+        lib.textBufferViewSetWrapWidth.argtypes = [c_void_p, c_uint32]
+        lib.textBufferViewSetWrapWidth.restype = None
+        lib.textBufferViewSetWrapMode.argtypes = [c_void_p, c_uint8]
+        lib.textBufferViewSetWrapMode.restype = None
+        lib.textBufferViewSetViewportSize.argtypes = [c_void_p, c_uint32, c_uint32]
+        lib.textBufferViewSetViewportSize.restype = None
+        lib.textBufferViewGetVirtualLineCount.argtypes = [c_void_p]
+        lib.textBufferViewGetVirtualLineCount.restype = c_uint32
+        lib.bufferDrawTextBufferView.argtypes = [c_void_p, c_void_p, c_int32, c_int32]
+        lib.bufferDrawTextBufferView.restype = None
+
+        # Kitty keyboard
+        lib.setKittyKeyboardFlags.argtypes = [c_void_p, c_uint8]
+        lib.setKittyKeyboardFlags.restype = None
+        lib.getKittyKeyboardFlags.argtypes = [c_void_p]
+        lib.getKittyKeyboardFlags.restype = c_uint8
+
+        # Additional terminal functions
+        lib.copyToClipboardOSC52.argtypes = [c_void_p, c_uint8, c_void_p, c_size_t]
+        lib.copyToClipboardOSC52.restype = c_bool
+        lib.clearClipboardOSC52.argtypes = [c_void_p, c_uint8]
+        lib.clearClipboardOSC52.restype = c_bool
+        lib.queryPixelResolution.argtypes = [c_void_p]
+        lib.queryPixelResolution.restype = None
+        lib.writeOut.argtypes = [c_void_p, c_void_p, c_uint64]
+        lib.writeOut.restype = None
+        lib.restoreTerminalModes.argtypes = [c_void_p]
+        lib.restoreTerminalModes.restype = None
+        lib.dumpHitGrid.argtypes = [c_void_p]
+        lib.dumpHitGrid.restype = None
+        lib.dumpBuffers.argtypes = [c_void_p, c_int64]
+        lib.dumpBuffers.restype = None
+        lib.dumpStdoutBuffer.argtypes = [c_void_p, c_int64]
+        lib.dumpStdoutBuffer.restype = None
+
+        # TextBuffer memory
+        lib.textBufferRegisterMemBuffer.argtypes = [c_void_p, c_void_p, c_size_t, c_bool]
+        lib.textBufferRegisterMemBuffer.restype = c_uint16
+        lib.textBufferReplaceMemBuffer.argtypes = [c_void_p, c_uint8, c_void_p, c_size_t, c_bool]
+        lib.textBufferReplaceMemBuffer.restype = c_bool
+        lib.textBufferClearMemRegistry.argtypes = [c_void_p]
+        lib.textBufferClearMemRegistry.restype = None
+        lib.textBufferSetTextFromMem.argtypes = [c_void_p, c_uint8]
+        lib.textBufferSetTextFromMem.restype = None
+        lib.textBufferLoadFile.argtypes = [c_void_p, c_void_p, c_size_t]
+        lib.textBufferLoadFile.restype = c_bool
+        lib.textBufferSetStyledText.argtypes = [c_void_p, c_void_p, c_size_t]
+        lib.textBufferSetStyledText.restype = None
+        lib.textBufferGetByteSize.argtypes = [c_void_p]
+        lib.textBufferGetByteSize.restype = c_uint32
+
+        # Stats
+        lib.getArenaAllocatedBytes.argtypes = []
+        lib.getArenaAllocatedBytes.restype = c_size_t
 
     def __getattr__(self, name: str) -> Any:
         """Forward attribute access to the library."""

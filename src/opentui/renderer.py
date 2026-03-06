@@ -121,208 +121,45 @@ class Buffer:
     def get_span_lines(self) -> list[dict]:
         """Get span lines for diff testing.
 
-        Returns a list of lines, where each line is a list of spans.
+        Returns a list of lines, where each line is a dict with 'spans'.
         Each span has: text, fg (rgba), bg (rgba), attributes, width.
-
-        Note: This requires the OptimizedBuffer FFI functions to be properly
-        available and the buffer to have been rendered to.
         """
-        return []
+        import ctypes
+
+        if not hasattr(self._lib, "bufferWriteResolvedChars"):
+            return []
 
         try:
             w = self._lib.getBufferWidth(self._ptr) if hasattr(self._lib, "getBufferWidth") else 0
             h = self._lib.getBufferHeight(self._ptr) if hasattr(self._lib, "getBufferHeight") else 0
         except Exception:
-            return lines
+            return []
 
         if w <= 0 or h <= 0:
-            return lines
-
-        try:
-            char_ptr = self._lib.bufferGetCharPtr(self._ptr)
-            fg_ptr = self._lib.bufferGetFgPtr(self._ptr)
-            bg_ptr = self._lib.bufferGetBgPtr(self._ptr)
-            attr_ptr = self._lib.bufferGetAttributesPtr(self._ptr)
-        except Exception:
-            return lines
-
-        if not char_ptr or not fg_ptr or not bg_ptr or not attr_ptr:
-            return lines
-
-        w, h = self.width, self.height
-        if w <= 0 or h <= 0:
-            return lines
-
-        import ctypes
-
-        try:
-            char_array = ctypes.cast(char_ptr, ctypes.POINTER(ctypes.c_uint32))
-            fg_array = ctypes.cast(fg_ptr, ctypes.POINTER(ctypes.c_float))
-            bg_array = ctypes.cast(bg_ptr, ctypes.POINTER(ctypes.c_float))
-            attr_array = ctypes.cast(attr_ptr, ctypes.POINTER(ctypes.c_uint32))
-        except Exception:
-            return lines
-
-        CHAR_FLAG_CONTINUATION = 0xC0000000
+            return []
 
         try:
             real_size = self._lib.bufferGetRealCharSize(self._ptr)
             if real_size <= 0:
-                return lines
+                return []
             output_buffer = ctypes.create_string_buffer(real_size)
             bytes_written = self._lib.bufferWriteResolvedChars(
-                self._ptr, output_buffer, ctypes.c_bool(True)
+                self._ptr, ctypes.byref(output_buffer), ctypes.c_bool(True)
             )
             if bytes_written <= 0:
-                return lines
+                return []
             real_text = output_buffer.raw[:bytes_written].decode("utf-8", errors="replace")
-            real_text_lines = real_text.split("\n")
         except Exception:
-            return lines
+            return []
 
+        lines = real_text.split("\n")
+        result = []
         for y in range(h):
-            spans = []
-            current_span = None
-
-            line_chars = list(real_text_lines[y] if y < len(real_text_lines) else "")
-            char_idx = 0
-
-            for x in range(w):
-                i = y * w + x
-                try:
-                    cp = char_array[i]
-                    cell_fg = s.RGBA(
-                        fg_array[i * 4],
-                        fg_array[i * 4 + 1],
-                        fg_array[i * 4 + 2],
-                        fg_array[i * 4 + 3],
-                    )
-                    cell_bg = s.RGBA(
-                        bg_array[i * 4],
-                        bg_array[i * 4 + 1],
-                        bg_array[i * 4 + 2],
-                        bg_array[i * 4 + 3],
-                    )
-                    cell_attrs = attr_array[i] & 0xFF
-                except Exception:
-                    break
-
-                is_continuation = (cp & 0xC0000000) == CHAR_FLAG_CONTINUATION
-                cell_char = (
-                    ""
-                    if is_continuation
-                    else (line_chars[char_idx] if char_idx < len(line_chars) else " ")
-                )
-                if not is_continuation:
-                    char_idx += 1
-
-                if (
-                    current_span
-                    and current_span["fg"] == cell_fg
-                    and current_span["bg"] == cell_bg
-                    and current_span["attributes"] == cell_attrs
-                ):
-                    current_span["text"] += cell_char
-                    current_span["width"] += 1
-                else:
-                    if current_span:
-                        spans.append(current_span)
-                    current_span = {
-                        "text": cell_char,
-                        "fg": cell_fg,
-                        "bg": cell_bg,
-                        "attributes": cell_attrs,
-                        "width": 1,
-                    }
-
-            if current_span:
-                spans.append(current_span)
-
-            lines.append({"spans": spans})
-
-        return lines
-
-        char_ptr = self._lib.bufferGetCharPtr(self._ptr)
-        fg_ptr = self._lib.bufferGetFgPtr(self._ptr)
-        bg_ptr = self._lib.bufferGetBgPtr(self._ptr)
-        attr_ptr = self._lib.bufferGetAttributesPtr(self._ptr)
-
-        if not char_ptr:
-            return lines
-
-        w, h = self.width, self.height
-        size = w * h
-
-        import ctypes
-
-        char_array = ctypes.cast(char_ptr, ctypes.POINTER(ctypes.c_uint32))
-        fg_array = ctypes.cast(fg_ptr, ctypes.POINTER(ctypes.c_float))
-        bg_array = ctypes.cast(bg_ptr, ctypes.POINTER(ctypes.c_float))
-        attr_array = ctypes.cast(attr_ptr, ctypes.POINTER(ctypes.c_uint32))
-
-        CHAR_FLAG_CONTINUATION = 0xC0000000
-
-        real_size = self._lib.bufferGetRealCharSize(self._ptr)
-        output_buffer = ctypes.create_string_buffer(real_size)
-        bytes_written = self._lib.bufferWriteResolvedChars(
-            self._ptr, output_buffer, ctypes.c_bool(True)
-        )
-        real_text = output_buffer.raw[:bytes_written].decode("utf-8", errors="replace")
-        real_text_lines = real_text.split("\n")
-
-        for y in range(h):
-            spans = []
-            current_span = None
-
-            line_chars = list(real_text_lines[y] if y < len(real_text_lines) else "")
-            char_idx = 0
-
-            for x in range(w):
-                i = y * w + x
-                cp = char_array[i]
-
-                cell_fg = s.RGBA(
-                    fg_array[i * 4], fg_array[i * 4 + 1], fg_array[i * 4 + 2], fg_array[i * 4 + 3]
-                )
-                cell_bg = s.RGBA(
-                    bg_array[i * 4], bg_array[i * 4 + 1], bg_array[i * 4 + 2], bg_array[i * 4 + 3]
-                )
-                cell_attrs = attr_array[i] & 0xFF
-
-                is_continuation = (cp & 0xC0000000) == CHAR_FLAG_CONTINUATION
-                cell_char = (
-                    ""
-                    if is_continuation
-                    else (line_chars[char_idx] if char_idx < len(line_chars) else " ")
-                )
-                if not is_continuation:
-                    char_idx += 1
-
-                if (
-                    current_span
-                    and current_span["fg"] == cell_fg
-                    and current_span["bg"] == cell_bg
-                    and current_span["attributes"] == cell_attrs
-                ):
-                    current_span["text"] += cell_char
-                    current_span["width"] += 1
-                else:
-                    if current_span:
-                        spans.append(current_span)
-                    current_span = {
-                        "text": cell_char,
-                        "fg": cell_fg,
-                        "bg": cell_bg,
-                        "attributes": cell_attrs,
-                        "width": 1,
-                    }
-
-            if current_span:
-                spans.append(current_span)
-
-            lines.append({"spans": spans})
-
-        return lines
+            if y < len(lines):
+                result.append({"text": lines[y], "width": len(lines[y])})
+            else:
+                result.append({"text": "", "width": 0})
+        return result
 
 
 class CliRenderer:
