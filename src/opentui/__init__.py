@@ -54,6 +54,13 @@ from .components import (
     Underline,
 )
 
+# Edit buffer
+from .edit_buffer import (
+    EditBuffer,
+    EditorView,
+    create_edit_buffer,
+)
+
 # Events
 from .events import (
     FocusEvent,
@@ -84,13 +91,6 @@ from .renderer import (
     RootRenderable,
     TerminalCapabilities,
     create_cli_renderer,
-)
-
-# Edit buffer
-from .edit_buffer import (
-    EditBuffer,
-    EditorView,
-    create_edit_buffer,
 )
 
 # Signals (StarHTML-aligned)
