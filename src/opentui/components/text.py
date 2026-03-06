@@ -253,24 +253,25 @@ class TextModifier(Renderable):
                     original_fg = child._fg
                     original_bg = child._background_color
 
-                    if self._bold:
-                        child._bold = True
-                    if self._italic:
-                        child._italic = True
-                    if self._underline:
-                        child._underline = True
-                    if self._fg is not None:
-                        child._fg = self._fg  # type: ignore[assignment]
-                    if self._bg is not None:
-                        child._background_color = self._bg  # type: ignore[assignment]
+                    try:
+                        if self._bold:
+                            child._bold = True
+                        if self._italic:
+                            child._italic = True
+                        if self._underline:
+                            child._underline = True
+                        if self._fg is not None:
+                            child._fg = self._fg  # type: ignore[assignment]
+                        if self._bg is not None:
+                            child._background_color = self._bg  # type: ignore[assignment]
 
-                    child.render(buffer, delta_time)
-
-                    child._bold = original_bold
-                    child._italic = original_italic
-                    child._underline = original_underline
-                    child._fg = original_fg
-                    child._background_color = original_bg
+                        child.render(buffer, delta_time)
+                    finally:
+                        child._bold = original_bold
+                        child._italic = original_italic
+                        child._underline = original_underline
+                        child._fg = original_fg
+                        child._background_color = original_bg
                 else:
                     child.render(buffer, delta_time)
 

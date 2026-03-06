@@ -7,6 +7,7 @@ This module provides:
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -57,6 +58,8 @@ class ImageRenderer:
                 sixel_data = f.read()
             image.draw_sixel(sixel_data, x=10, y=5, width=40, height=20)
         """
+        # TODO: Implement SIXEL graphics protocol escape sequence generation
+        # Requires terminal detection and SIXEL encoder
         return False
 
     def draw_kitty(
@@ -90,6 +93,8 @@ class ImageRenderer:
                 png_data = f.read()
             image.draw_kitty(png_data, x=0, y=0, width=50, height=25)
         """
+        # TODO: Implement Kitty graphics protocol escape sequence generation
+        # Requires terminal detection and PNG/JPEG encoding
         return False
 
     def draw_image_plain(
@@ -149,11 +154,12 @@ class Filter:
                 return processed_data
     """
 
-    def apply(self, data: bytes) -> bytes:
+    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply filter to image data.
 
         Args:
-            data: Raw image data (typically RGBA or RGB format)
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
 
         Returns:
             Filtered image data
@@ -169,14 +175,15 @@ class GrayscaleFilter(Filter):
 
     Example:
         filter = GrayscaleFilter()
-        grayscale_data = filter.apply(rgba_data)
+        grayscale_data = filter.apply(rgba_data, format="RGBA")
     """
 
-    def apply(self, data: bytes) -> bytes:
+    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply grayscale conversion to image data.
 
         Args:
-            data: Raw RGBA or RGB image data
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
 
         Returns:
             Grayscale image data (same format as input)
@@ -184,20 +191,22 @@ class GrayscaleFilter(Filter):
         if len(data) < 3:
             return data
 
-        result = bytearray(data)
-        is_rgba = len(data) % 4 == 0
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
 
-        for i in range(0, len(data), 4 if is_rgba else 3):
+        result = bytearray(data)
+
+        for i in range(0, len(data), bytes_per_pixel):
             r = data[i]
-            g = data[i + 1] if is_rgba else data[i + 1]
-            b = data[i + 2] if is_rgba else data[i + 2]
+            g = data[i + 1]
+            b = data[i + 2]
 
             gray = int(0.299 * r + 0.587 * g + 0.114 * b)
 
             result[i] = gray
-            if is_rgba:
+            if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
-            elif i + 2 < len(data):
+            elif not is_rgba and i + 2 < len(data):
                 result[i + 1] = gray
                 result[i + 2] = gray
 
@@ -212,7 +221,7 @@ class BlurFilter(Filter):
     Example:
         # Apply mild blur
         blur = BlurFilter(radius=2.0)
-        blurred = blur.apply(image_data)
+        blurred = blur.apply(image_data, width=100, height=100)
 
         # Apply strong blur
         strong_blur = BlurFilter(radius=5.0)
@@ -226,11 +235,16 @@ class BlurFilter(Filter):
         """
         self._radius = radius
 
-    def apply(self, data: bytes) -> bytes:
+    def apply(
+        self, data: bytes, width: int | None = None, height: int | None = None, format: str = "RGBA"
+    ) -> bytes:
         """Apply Gaussian blur to image data.
 
         Args:
-            data: Raw RGBA image data
+            data: Raw image data
+            width: Image width in pixels (required for non-square images)
+            height: Image height in pixels (optional, defaults to width)
+            format: Image format - "RGBA" or "RGB"
 
         Returns:
             Blurred image data
@@ -238,10 +252,21 @@ class BlurFilter(Filter):
         if len(data) < 4:
             return data
 
-        width = int(len(data) ** 0.5)
-        height = width
-        if width * height * 4 != len(data):
-            return data
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
+
+        if width is None:
+            width = int(len(data) / bytes_per_pixel)
+            if height is None:
+                height = width
+        elif height is None:
+            height = len(data) // (width * bytes_per_pixel)
+
+        expected_size = width * height * bytes_per_pixel
+        if len(data) != expected_size:
+            raise ValueError(
+                f"Data size {len(data)} doesn't match dimensions {width}x{height} with format {format}"
+            )
 
         radius = int(self._radius)
         if radius < 1:
@@ -264,41 +289,46 @@ class BlurFilter(Filter):
                         px = max(0, min(width - 1, x + kx))
                         py = max(0, min(height - 1, y + ky))
 
-                        idx = (py * width + px) * 4
+                        idx = (py * width + px) * bytes_per_pixel
                         weight = kernel[(ky + radius) * kernel_size + (kx + radius)]
 
                         r_sum += data[idx] * weight
                         g_sum += data[idx + 1] * weight
                         b_sum += data[idx + 2] * weight
-                        a_sum += data[idx + 3] * weight
+                        if is_rgba:
+                            a_sum += data[idx + 3] * weight
                         weight_sum += weight
 
-                result_idx = (y * width + x) * 4
+                result_idx = (y * width + x) * bytes_per_pixel
                 result[result_idx] = min(255, int(r_sum / weight_sum))
                 result[result_idx + 1] = min(255, int(g_sum / weight_sum))
                 result[result_idx + 2] = min(255, int(b_sum / weight_sum))
-                result[result_idx + 3] = min(255, int(a_sum / weight_sum))
+                if is_rgba and result_idx + 3 < len(result):
+                    result[result_idx + 3] = min(255, int(a_sum / weight_sum))
 
         return bytes(result)
 
     def _create_gaussian_kernel(self, size: int, sigma: float) -> list[float]:
-        """Create a Gaussian kernel."""
+        """Create a Gaussian kernel.
+
+        Args:
+            size: Kernel size (must be odd)
+            sigma: Standard deviation for Gaussian
+
+        Returns:
+            Flattened kernel values
+        """
         kernel = []
         half = size // 2
         sum_val = 0.0
 
         for y in range(size):
-            row = []
             for x in range(size):
                 dx = x - half
                 dy = y - half
-                value = (1 / (2 * 3.14159 * sigma**2)) * (
-                    -(dx * dx + dy * dy) / (2 * sigma * sigma)
-                )
-                value = 2.71828**value
-                row.append(value)
+                value = math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma))
+                kernel.append(value)
                 sum_val += value
-            kernel.extend(row)
 
         return [k / sum_val for k in kernel]
 
@@ -324,11 +354,12 @@ class BrightnessFilter(Filter):
         """
         self._factor = factor
 
-    def apply(self, data: bytes) -> bytes:
+    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply brightness adjustment to image data.
 
         Args:
-            data: Raw RGBA or RGB image data
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
 
         Returns:
             Brightness-adjusted image data
@@ -337,14 +368,15 @@ class BrightnessFilter(Filter):
             return data
 
         result = bytearray(data)
-        is_rgba = len(data) % 4 == 0
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
         factor = self._factor
 
-        for i in range(0, len(data), 4 if is_rgba else 3):
+        for i in range(0, len(data), bytes_per_pixel):
             result[i] = min(255, int(data[i] * factor))
-            if is_rgba:
+            if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
-            elif i + 2 < len(data):
+            elif not is_rgba and i + 2 < len(data):
                 result[i + 1] = min(255, int(data[i + 1] * factor))
                 result[i + 2] = min(255, int(data[i + 2] * factor))
 
@@ -372,11 +404,12 @@ class ContrastFilter(Filter):
         """
         self._factor = factor
 
-    def apply(self, data: bytes) -> bytes:
+    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply contrast adjustment to image data.
 
         Args:
-            data: Raw RGBA or RGB image data
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
 
         Returns:
             Contrast-adjusted image data
@@ -385,15 +418,16 @@ class ContrastFilter(Filter):
             return data
 
         result = bytearray(data)
-        is_rgba = len(data) % 4 == 0
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
         factor = self._factor
         midpoint = 128
 
-        for i in range(0, len(data), 4 if is_rgba else 3):
+        for i in range(0, len(data), bytes_per_pixel):
             result[i] = max(0, min(255, int(midpoint + (data[i] - midpoint) * factor)))
-            if is_rgba:
+            if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
-            elif i + 2 < len(data):
+            elif not is_rgba and i + 2 < len(data):
                 result[i + 1] = max(0, min(255, int(midpoint + (data[i + 1] - midpoint) * factor)))
                 result[i + 2] = max(0, min(255, int(midpoint + (data[i + 2] - midpoint) * factor)))
 
@@ -407,10 +441,10 @@ class SepiaFilter(Filter):
 
     Example:
         sepia = SepiaFilter()
-        sepia_data = sepia.apply(image_data)
+        sepia_data = sepia.apply(image_data, format="RGBA")
     """
 
-    def apply(self, data: bytes) -> bytes:
+    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply sepia effect to image data.
 
         Uses the standard sepia transformation matrix:
@@ -419,7 +453,8 @@ class SepiaFilter(Filter):
         B' = 0.272*R + 0.534*G + 0.131*B
 
         Args:
-            data: Raw RGBA or RGB image data
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
 
         Returns:
             Sepia-toned image data
@@ -428,21 +463,22 @@ class SepiaFilter(Filter):
             return data
 
         result = bytearray(data)
-        is_rgba = len(data) % 4 == 0
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
 
-        for i in range(0, len(data), 4 if is_rgba else 3):
+        for i in range(0, len(data), bytes_per_pixel):
             r = data[i]
-            g = data[i + 1] if (is_rgba or i + 1 < len(data)) else data[i]
-            b = data[i + 2] if (is_rgba or i + 2 < len(data)) else data[i]
+            g = data[i + 1] if i + 1 < len(data) else data[i]
+            b = data[i + 2] if i + 2 < len(data) else data[i]
 
             new_r = min(255, int(0.393 * r + 0.769 * g + 0.189 * b))
             new_g = min(255, int(0.349 * r + 0.686 * g + 0.168 * b))
             new_b = min(255, int(0.272 * r + 0.534 * g + 0.131 * b))
 
             result[i] = new_r
-            if is_rgba:
+            if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
-            elif i + 2 < len(data):
+            elif not is_rgba and i + 2 < len(data):
                 result[i + 1] = new_g
                 result[i + 2] = new_b
 
@@ -456,14 +492,15 @@ class InvertFilter(Filter):
 
     Example:
         invert = InvertFilter()
-        inverted_data = invert.apply(image_data)
+        inverted_data = invert.apply(image_data, format="RGBA")
     """
 
-    def apply(self, data: bytes) -> bytes:
+    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply color inversion to image data.
 
         Args:
-            data: Raw RGBA or RGB image data
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
 
         Returns:
             Inverted image data
@@ -472,11 +509,12 @@ class InvertFilter(Filter):
             return data
 
         result = bytearray(data)
-        is_rgba = len(data) % 4 == 0
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
 
-        for i in range(0, len(data), 4 if is_rgba else 3):
+        for i in range(0, len(data), bytes_per_pixel):
             result[i] = 255 - data[i]
-            if is_rgba:
+            if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
             elif i + 2 < len(data):
                 result[i + 1] = 255 - data[i + 1]
@@ -519,18 +557,19 @@ class FilterChain:
         self._filters.append(filter_)
         return self
 
-    def apply(self, data: bytes) -> bytes:
+    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply all filters in sequence.
 
         Args:
             data: Raw image data
+            format: Image format - "RGBA" or "RGB"
 
         Returns:
             Processed image data
         """
         result = data
         for filter_ in self._filters:
-            result = filter_.apply(result)
+            result = filter_.apply(result, format=format)
         return result
 
     def clear(self) -> None:
