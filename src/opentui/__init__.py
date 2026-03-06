@@ -71,6 +71,19 @@ from .events import (
     ResizeEvent,
 )
 
+# Filters
+from .filters import (
+    BlurFilter,
+    BrightnessFilter,
+    ContrastFilter,
+    Filter,
+    FilterChain,
+    GrayscaleFilter,
+    ImageRenderer,
+    InvertFilter,
+    SepiaFilter,
+)
+
 # Hooks
 from .hooks import (
     Animation,
@@ -352,6 +365,16 @@ __all__ = [
     "use_timeline",
     "Timeline",
     "Animation",
+    # Filters
+    "ImageRenderer",
+    "Filter",
+    "GrayscaleFilter",
+    "BlurFilter",
+    "BrightnessFilter",
+    "ContrastFilter",
+    "SepiaFilter",
+    "InvertFilter",
+    "FilterChain",
     # Extension
     "extend",
     "get_component_catalogue",

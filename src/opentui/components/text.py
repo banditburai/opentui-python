@@ -190,20 +190,89 @@ class Text(Renderable):
 
 
 class TextModifier(Renderable):
-    """Base class for text modifiers (Bold, Italic, etc.)."""
+    """Base class for text modifiers (Bold, Italic, etc.).
 
-    def __init__(self, *children: Any, **kwargs):
+    Text modifiers apply styling to their child content.
+    They can be nested within Text components.
+    """
+
+    def __init__(
+        self,
+        *children: Any,
+        bold: bool = False,
+        italic: bool = False,
+        underline: bool = False,
+        fg: s.RGBA | str | None = None,
+        bg: s.RGBA | str | None = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
+        self._bold = bold
+        self._italic = italic
+        self._underline = underline
+        self._fg = fg
+        self._bg = bg
 
         # Process children
         for child in children:
             if isinstance(child, str):
                 # Strings are added as Text nodes
-                self.add(Text(child))
+                self.add(Text(child, bold=bold, italic=italic, underline=underline, fg=fg, bg=bg))
             elif isinstance(child, Renderable):
+                # For nested modifiers, pass along the combined style
+                if hasattr(child, "_bold") or hasattr(child, "_italic"):
+                    # This is another modifier, apply our style to it
+                    self._apply_style_to_child(child)
                 self.add(child)
             else:
-                self.add(Text(str(child)))
+                self.add(
+                    Text(str(child), bold=bold, italic=italic, underline=underline, fg=fg, bg=bg)
+                )
+
+    def _apply_style_to_child(self, child: Renderable) -> None:
+        """Apply this modifier's style to a child renderable."""
+        if hasattr(child, "_bold") and self._bold:
+            child._bold = True  # type: ignore[attr-defined]
+        if hasattr(child, "_italic") and self._italic:
+            child._italic = True  # type: ignore[attr-defined]
+        if hasattr(child, "_underline") and self._underline:
+            child._underline = True  # type: ignore[attr-defined]
+
+    def render(self, buffer: Buffer, delta_time: float = 0) -> None:
+        """Render children with this modifier's styling applied."""
+        if not self._visible:
+            return
+
+        for child in self._children:
+            if isinstance(child, Renderable):
+                # Temporarily apply our style to the child if it's Text
+                if isinstance(child, Text):
+                    original_bold = child._bold
+                    original_italic = child._italic
+                    original_underline = child._underline
+                    original_fg = child._fg
+                    original_bg = child._background_color
+
+                    if self._bold:
+                        child._bold = True
+                    if self._italic:
+                        child._italic = True
+                    if self._underline:
+                        child._underline = True
+                    if self._fg is not None:
+                        child._fg = self._fg  # type: ignore[assignment]
+                    if self._bg is not None:
+                        child._background_color = self._bg  # type: ignore[assignment]
+
+                    child.render(buffer, delta_time)
+
+                    child._bold = original_bold
+                    child._italic = original_italic
+                    child._underline = original_underline
+                    child._fg = original_fg
+                    child._background_color = original_bg
+                else:
+                    child.render(buffer, delta_time)
 
 
 class Span(TextModifier):
