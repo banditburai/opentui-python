@@ -3,38 +3,44 @@
 This module provides:
 - ImageRenderer: Renders images using terminal graphics protocols (SIXEL, Kitty)
 - Filter classes: Apply image processing effects (grayscale, blur, brightness, contrast)
+- ClipboardHandler: Handle pasted image data from terminal
 """
 
 from __future__ import annotations
 
+import io
 import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .renderer import Buffer
+    from .renderer import Buffer, TerminalCapabilities
 
 
 class ImageRenderer:
     """Renders images using terminal graphics protocols.
 
-    Supports SIXEL and Kitty graphics protocols. The renderer writes
-    escape sequences to the buffer for displaying images.
+    Supports SIXEL and Kitty graphics protocols. The renderer uses
+    native libopentui functions for rendering when available.
 
     Example:
         buffer = renderer.get_current_buffer()
-        image = ImageRenderer(buffer)
-        image.draw_kitty(png_data, x=0, y=0, width=100, height=100)
+        caps = renderer.get_capabilities()
+        image = ImageRenderer(buffer, caps)
+        image.draw_image(rgba_data, x=0, y=0, width=100, height=100)
     """
 
     _graphics_id: int = 0
 
-    def __init__(self, buffer: Buffer):
+    def __init__(self, buffer: Buffer, capabilities: TerminalCapabilities | None = None):
         """Initialize image renderer with a buffer.
 
         Args:
             buffer: The buffer to render images to
+            capabilities: Terminal capabilities (optional, defaults to empty)
         """
         self._buffer = buffer
+        self._caps = capabilities if capabilities is not None else _EmptyCapabilities()
+        self._native = buffer._native if hasattr(buffer, "_native") else None
 
     def draw_sixel(self, data: bytes, x: int, y: int, width: int, height: int) -> bool:
         """Draw SIXEL image data.
@@ -139,6 +145,278 @@ class ImageRenderer:
         """
         cls._graphics_id += 1
         return cls._graphics_id
+
+    def draw_image(
+        self,
+        data: bytes,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        format: str = "RGBA",
+    ) -> bool:
+        """Draw an image using native libopentui functions.
+
+        Uses buffer_draw_packed_buffer if terminal supports SIXEL or Kitty graphics.
+
+        Args:
+            data: Raw image data (RGBA format)
+            x: X position in cells
+            y: Y position in cells
+            width: Image width in pixels
+            height: Image height in pixels
+            format: Image format (RGBA, RGB, etc.)
+
+        Returns:
+            True if successful, False if terminal doesn't support graphics
+        """
+        if not (self._caps.sixel or self._caps.kitty_graphics):
+            return False
+
+        if self._native is None:
+            return False
+
+        try:
+            packed_data, pitch = _convert_to_packed(data, width, height)
+
+            self._native.buffer_draw_packed_buffer(
+                self._buffer._ptr,
+                packed_data,
+                width,
+                height,
+                pitch,
+                1,  # cell_height
+            )
+            return True
+        except Exception:
+            return False
+
+    def draw_grayscale(
+        self,
+        data: bytes,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+    ) -> bool:
+        """Draw a grayscale image.
+
+        Uses buffer_draw_grayscale_buffer native function.
+
+        Args:
+            data: Raw RGBA image data
+            x: X position in cells
+            y: Y position in cells
+            width: Image width in pixels
+            height: Image height in pixels
+
+        Returns:
+            True if successful
+        """
+        if self._native is None:
+            return False
+
+        try:
+            gray_data = _convert_to_grayscale(data, width, height)
+
+            self._native.buffer_draw_grayscale_buffer(
+                self._buffer._ptr,
+                x,
+                y,
+                gray_data,
+                width,
+                height,
+            )
+            return True
+        except Exception:
+            return False
+
+    def load_image(self, path: str) -> tuple[bytes, int, int]:
+        """Load an image from file and return as RGBA.
+
+        Requires Pillow: pip install pillow
+
+        Args:
+            path: Path to image file (PNG, JPEG, etc.)
+
+        Returns:
+            Tuple of (RGBA_data, width, height)
+        """
+        try:
+            from PIL import Image
+        except ImportError:
+            raise ImportError("Pillow required for image loading: pip install pillow")
+
+        with Image.open(path) as img:
+            if img.mode != "RGBA":
+                img = img.convert("RGBA")
+            width, height = img.size
+            return img.tobytes(), width, height
+
+
+class _EmptyCapabilities:
+    """Empty terminal capabilities for default case."""
+
+    sixel: bool = False
+    kitty_graphics: bool = False
+    rgb: bool = False
+
+
+def _convert_to_packed(data: bytes, width: int, height: int) -> tuple[bytes, int]:
+    """Convert RGBA image data to packed format.
+
+    Args:
+        data: Raw RGBA image data
+        width: Image width in pixels
+        height: Image height in pixels
+
+    Returns:
+        Tuple of (packed_data, pitch) where pitch is bytes per row
+    """
+    if len(data) < 3:
+        return b"", 0
+
+    bytes_per_pixel = 4  # RGBA
+    pitch = width * bytes_per_pixel
+
+    expected_size = width * height * bytes_per_pixel
+    if len(data) >= expected_size:
+        return data[:expected_size], pitch
+
+    padded = bytearray(expected_size)
+    padded[: len(data)] = data
+    return bytes(padded), pitch
+
+
+def _convert_to_grayscale(data: bytes, width: int, height: int) -> bytes:
+    """Convert RGBA image data to 16-bit grayscale.
+
+    Args:
+        data: Raw RGBA image data
+        width: Image width in pixels
+        height: Image height in pixels
+
+    Returns:
+        16-bit grayscale image data (2 bytes per pixel)
+    """
+    if len(data) < 4:
+        return b""
+
+    bytes_per_pixel = 4  # RGBA
+    expected = width * height * bytes_per_pixel
+    if len(data) < expected:
+        return b""
+
+    result = bytearray(width * height * 2)
+
+    for i in range(width * height):
+        idx = i * bytes_per_pixel
+        r = data[idx]
+        g = data[idx + 1]
+        b = data[idx + 2]
+
+        gray = int(0.299 * r + 0.587 * g + 0.114 * b)
+
+        result[i * 2] = gray & 0xFF
+        result[i * 2 + 1] = (gray >> 8) & 0xFF
+
+    return bytes(result)
+
+
+class ClipboardHandler:
+    """Handles clipboard paste events, detecting image data.
+
+    Supports detecting PNG and JPEG image data from terminal paste events.
+
+    Example:
+        handler = ClipboardHandler(capabilities)
+        result = handler.handle_paste(paste_data)
+        if result:
+            rgba_data, width, height = result
+            renderer.draw_image(rgba_data, x, y, width, height)
+    """
+
+    PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+    JPEG_MAGIC = b"\xff\xd8"
+
+    def __init__(self, capabilities: TerminalCapabilities | None = None):
+        """Initialize clipboard handler.
+
+        Args:
+            capabilities: Terminal capabilities
+        """
+        self._caps = capabilities if capabilities is not None else _EmptyCapabilities()
+
+    def is_image_data(self, data: bytes) -> bool:
+        """Check if data is an image (PNG or JPEG).
+
+        Args:
+            data: Raw clipboard data
+
+        Returns:
+            True if data appears to be an image
+        """
+        if len(data) < 8:
+            if len(data) >= 2 and data[:2] == self.JPEG_MAGIC:
+                return True
+            return False
+
+        return data[:8] == self.PNG_MAGIC or data[:2] == self.JPEG_MAGIC
+
+    def handle_paste(self, data: bytes) -> tuple[bytes, int, int] | None:
+        """Handle pasted data, converting images to RGBA.
+
+        Args:
+            data: Raw clipboard data
+
+        Returns:
+            Tuple of (RGBA_data, width, height) if image, None otherwise
+        """
+        if not self.is_image_data(data):
+            return None
+
+        try:
+            return self._decode_image(data)
+        except Exception:
+            return None
+
+    def _decode_image(self, data: bytes) -> tuple[bytes, int, int]:
+        """Decode image data to RGBA.
+
+        Args:
+            data: PNG or JPEG image data
+
+        Returns:
+            Tuple of (RGBA_data, width, height)
+        """
+        try:
+            from PIL import Image
+        except ImportError:
+            return self._decode_image_fallback(data)
+
+        img = Image.open(io.BytesIO(data))
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        width, height = img.size
+        return img.tobytes(), width, height
+
+    def _decode_image_fallback(self, data: bytes) -> tuple[bytes, int, int]:
+        """Fallback image decode without Pillow.
+
+        Args:
+            data: Image data
+
+        Returns:
+            Tuple of (RGBA_data, width, height)
+
+        Raises:
+            ImportError: If Pillow is not installed
+        """
+        if data[:4] == self.PNG_MAGIC:
+            raise ImportError("Pillow required for PNG: pip install pillow")
+        elif data[:2] == self.JPEG_MAGIC:
+            raise ImportError("Pillow required for JPEG: pip install pillow")
+        raise ValueError("Unsupported image format")
 
 
 class Filter:
