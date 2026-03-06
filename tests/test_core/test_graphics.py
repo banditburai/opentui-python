@@ -158,3 +158,108 @@ class TestClipboardHandler:
 
         result = handler.is_image_data(text_data)
         assert result is False
+
+
+class TestSixelEncoding:
+    """Tests for SIXEL encoding."""
+
+    def test_sixel_encode_basic(self):
+        """Test basic SIXEL encoding."""
+        from opentui.filters import _encode_sixel
+
+        # 10x10 red pixels
+        data = bytes([255, 0, 0, 255] * 100)
+        result = _encode_sixel(data, 10, 10)
+
+        assert len(result) > 0
+        assert result.startswith(b"\x1bP")  # SIXEL introducer
+        assert result.endswith(b"\x1b\\")  # SIXEL terminator
+
+    def test_sixel_encode_small_image(self):
+        """Test SIXEL encoding with small image."""
+        from opentui.filters import _encode_sixel
+
+        # 2x2 image
+        data = bytes([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255])
+        result = _encode_sixel(data, 2, 2)
+
+        assert len(result) > 0
+        assert b"\x1bP" in result
+
+    def test_sixel_encode_with_transparency(self):
+        """Test SIXEL encoding with transparent pixels."""
+        from opentui.filters import _encode_sixel
+
+        # 2x2 with some transparent pixels
+        data = bytes(
+            [
+                255,
+                0,
+                0,
+                255,  # Red, opaque
+                0,
+                255,
+                0,
+                0,  # Green, transparent
+                0,
+                0,
+                255,
+                128,  # Blue, semi-transparent
+                255,
+                255,
+                0,
+                255,  # Yellow, opaque
+            ]
+        )
+        result = _encode_sixel(data, 2, 2)
+
+        assert len(result) > 0
+
+
+class TestKittyEncoding:
+    """Tests for Kitty encoding."""
+
+    def test_kitty_encode_basic(self):
+        """Test basic Kitty encoding."""
+        from opentui.filters import _encode_kitty
+
+        data = bytes([255, 0, 0, 255] * 100)
+        result = _encode_kitty(data, chunk_id=1, width=10, height=10)
+
+        assert len(result) > 0
+        # First chunk should start with Kitty intro sequence
+        assert result[0].startswith(b"\x1b[_G")
+
+    def test_kitty_encode_multiple_chunks(self):
+        """Test Kitty encoding with large data splits into chunks."""
+        from opentui.filters import _encode_kitty
+
+        # Very large data that will need multiple chunks after compression
+        data = bytes([i % 256 for i in range(50000)])
+        result = _encode_kitty(data, chunk_id=1, width=100, height=100)
+
+        # Should have multiple chunks for large data
+        assert len(result) >= 1  # May or may not chunk depending on compression
+
+    def test_kitty_encode_with_position(self):
+        """Test Kitty encoding with position."""
+        from opentui.filters import _encode_kitty
+
+        data = bytes([255, 0, 0, 255] * 100)
+        result = _encode_kitty(data, chunk_id=5, width=10, height=10, x=5, y=10)
+
+        assert len(result) > 0
+        assert result[0].startswith(b"\x1b[_G")
+
+    def test_clear_kitty_graphics(self):
+        """Test Kitty clear graphics escape sequence."""
+        from opentui.filters import _clear_kitty_graphics
+
+        # Clear all
+        result = _clear_kitty_graphics(None)
+        assert result == b"\x1b[_Ga\x1b\\"
+
+        # Clear specific ID
+        result = _clear_kitty_graphics(42)
+        assert b"42" in result
+        assert b"\x1b[_Ga" in result

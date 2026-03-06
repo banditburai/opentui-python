@@ -181,7 +181,13 @@ class ImageRenderer:
         Args:
             graphics_id: Specific graphics ID to clear, or None to clear all
         """
-        pass
+        try:
+            # Use Kitty protocol to clear (works for both Kitty and SIXEL)
+            clear_seq = _clear_kitty_graphics(graphics_id)
+            self._get_stdout().write(clear_seq)
+            self._get_stdout().flush()
+        except Exception:
+            pass
 
     @classmethod
     def get_next_graphics_id(cls) -> int:
