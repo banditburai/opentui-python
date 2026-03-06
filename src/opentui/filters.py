@@ -41,32 +41,62 @@ class ImageRenderer:
         self._buffer = buffer
         self._caps = capabilities if capabilities is not None else _EmptyCapabilities()
         self._native = buffer._native if hasattr(buffer, "_native") else None
+        self._stdout = None  # For direct terminal output
 
-    def draw_sixel(self, data: bytes, x: int, y: int, width: int, height: int) -> bool:
+    def _get_stdout(self):
+        """Get stdout for writing escape sequences."""
+        if self._stdout is None:
+            import sys
+
+            self._stdout = sys.stdout.buffer
+        return self._stdout
+
+    def draw_sixel(
+        self,
+        data: bytes,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        bg_color: tuple[int, int, int] = (0, 0, 0),
+    ) -> bool:
         """Draw SIXEL image data.
 
         SIXEL is a terminal graphics protocol used by many terminals
         (including xterm, iTerm2, Windows Terminal).
 
         Args:
-            data: Raw SIXEL image data
+            data: Raw RGBA image data
             x: X position in cells
             y: Y position in cells
-            width: Image width in cells
-            height: Image height in cells
+            width: Image width in pixels
+            height: Image height in pixels
+            bg_color: Background color as (r, g, b) tuple 0-255
 
         Returns:
             True if successful, False if terminal doesn't support SIXEL
 
         Example:
-            # Load and draw a SIXEL image
-            with open('image.sixel', 'rb') as f:
-                sixel_data = f.read()
-            image.draw_sixel(sixel_data, x=10, y=5, width=40, height=20)
+            # Draw a SIXEL image
+            image.draw_sixel(rgba_data, x=10, y=5, width=40, height=20)
         """
-        # TODO: Implement SIXEL graphics protocol escape sequence generation
-        # Requires terminal detection and SIXEL encoder
-        return False
+        if not self._caps.sixel:
+            return False
+
+        try:
+            sixel_data = _encode_sixel(data, width, height, bg_color)
+            if not sixel_data:
+                return False
+
+            # Position cursor
+            self._get_stdout().write(f"\x1b[{y + 1};{x + 1}H".encode())
+
+            # Write SIXEL data
+            self._get_stdout().write(sixel_data)
+            self._get_stdout().flush()
+            return True
+        except Exception:
+            return False
 
     def draw_kitty(
         self,
@@ -76,6 +106,7 @@ class ImageRenderer:
         width: int,
         height: int,
         transmission: str = "direct",
+        frame: int = 0,
     ) -> bool:
         """Draw Kitty graphics protocol image.
 
@@ -83,25 +114,41 @@ class ImageRenderer:
         supported by kitty, iTerm2, and Windows Terminal.
 
         Args:
-            data: PNG or JPEG image data
+            data: PNG or JPEG image data (raw bytes)
             x: X position in cells
             y: Y position in cells
             width: Display width in cells
             height: Display height in cells
             transmission: "direct" for inline data, "file" for file transfer
+            frame: Animation frame number (0 for static)
 
         Returns:
             True if successful, False if terminal doesn't support Kitty graphics
 
         Example:
-            # Load and draw a PNG image
+            # Draw a PNG image using Kitty protocol
             with open('image.png', 'rb') as f:
                 png_data = f.read()
             image.draw_kitty(png_data, x=0, y=0, width=50, height=25)
         """
-        # TODO: Implement Kitty graphics protocol escape sequence generation
-        # Requires terminal detection and PNG/JPEG encoding
-        return False
+        if not self._caps.kitty_graphics:
+            return False
+
+        try:
+            # Generate unique chunk ID for this image
+            chunk_id = self.get_next_graphics_id()
+
+            # Encode data for Kitty protocol
+            chunks = _encode_kitty(data, chunk_id, width, height, x, y, transmission)
+
+            stdout = self._get_stdout()
+            for chunk in chunks:
+                stdout.write(chunk)
+                stdout.flush()
+
+            return True
+        except Exception:
+            return False
 
     def draw_image_plain(
         self,
@@ -321,6 +368,237 @@ def _convert_to_grayscale(data: bytes, width: int, height: int) -> bytes:
         result[i * 2 + 1] = (gray >> 8) & 0xFF
 
     return bytes(result)
+
+
+def _encode_sixel(
+    data: bytes,
+    width: int,
+    height: int,
+    bg_color: tuple[int, int, int] = (0, 0, 0),
+) -> bytes:
+    """Encode RGBA image data as SIXEL graphics escape sequence.
+
+    SIXEL encodes 6 vertical pixels as 6 bits (0-63 values).
+    Each group of 6 pixels becomes one character.
+
+    Args:
+        data: Raw RGBA image data
+        width: Image width in pixels
+        height: Image height in pixels
+        bg_color: Background color as (r, g, b) tuple 0-255
+
+    Returns:
+        Complete SIXEL escape sequence bytes
+    """
+    if len(data) < 4:
+        return b""
+
+    bytes_per_pixel = 4
+    expected = width * height * bytes_per_pixel
+    if len(data) < expected:
+        return b""
+
+    # Build color palette (max 256 colors)
+    palette: dict[tuple[int, int, int], int] = {}
+    palette_list: list[tuple[int, int, int]] = []
+
+    # Convert RGB to 6-bit values (0-63) for SIXEL
+    def rgb_to_sixel(r: int, g: int, b: int) -> tuple[int, int, int]:
+        return (r * 63 // 255, g * 63 // 255, b * 63 // 255)
+
+    # Get or create palette index
+    def get_color_index(r: int, g: int, b: int) -> int:
+        key = (r, g, b)
+        if key in palette:
+            return palette[key]
+        if len(palette_list) >= 256:
+            # Find closest existing color
+            return 0
+        idx = len(palette_list)
+        palette_list.append(key)
+        palette[key] = idx
+        return idx
+
+    # Process pixels into SIXEL format
+    raster_parts: list[bytes] = []
+    palette_used: set[int] = set()
+
+    # For each column, encode vertical strips of 6 pixels
+    num_strips = (height + 5) // 6  # Each strip is 6 pixels tall
+
+    for x in range(width):
+        column_data = []
+
+        for strip in range(num_strips):
+            strip_start = strip * 6
+            strip_height = min(6, height - strip_start)
+
+            # Get pixel values for this 6-pixel strip
+            values = []
+            for dy in range(strip_height):
+                y = strip_start + dy
+                idx = (y * width + x) * bytes_per_pixel
+
+                if idx + 3 >= len(data):
+                    values.append(-1)  # Transparent
+                    continue
+
+                r = data[idx]
+                g = data[idx + 1]
+                b = data[idx + 2]
+                a = data[idx + 3]
+
+                if a < 128:  # Transparent
+                    values.append(-1)
+                else:
+                    sixel_rgb = rgb_to_sixel(r, g, b)
+                    color_idx = get_color_index(*sixel_rgb)
+                    values.append(color_idx)
+                    palette_used.add(color_idx)
+
+            # Pad to 6 pixels
+            while len(values) < 6:
+                values.append(-1)
+
+            # Encode as SIXEL: each pixel is a bit, palette index + 32 gives printable
+            for v in values:
+                if v >= 0:
+                    column_data.append(v + 32)  # SIXEL graphic characters start at 32
+
+        if column_data:
+            raster_parts.append(bytes(column_data))
+
+    # Build palette string
+    palette_parts = []
+    for i in range(len(palette_list)):
+        r, g, b = palette_list[i]
+        # Convert back from 6-bit to 8-bit
+        r8 = r * 255 // 63
+        g8 = g * 255 // 63
+        b8 = b * 255 // 63
+        palette_parts.append(f"#{i + 1};2;{r8};{g8};{b8}".encode())
+
+    palette_str = b"".join(palette_parts)
+
+    # Build final SIXEL sequence
+    # Format: ESC P q {params} {palette} {raster} ESC \
+    result = bytearray()
+    result.extend(b"\x1bP")  # SIXEL introducer
+    result.extend(b"q")  # Sixel graphics
+
+    # Raster attributes: width;height;ph;pv;colors;raster-style
+    result.extend(f"{width};{height};1;1;{len(palette_list)};1".encode())
+
+    # Add palette if any colors used
+    if palette_str:
+        result.extend(b";")
+        result.extend(palette_str)
+
+    # Add raster data (each column is a SIXEL character)
+    for part in raster_parts:
+        result.extend(part)
+
+    result.extend(b"\x1b\\")  # SIXEL terminator
+
+    return bytes(result)
+
+
+def _encode_kitty(
+    data: bytes,
+    chunk_id: int,
+    width: int,
+    height: int,
+    x: int = 0,
+    y: int = 0,
+    transmission: str = "direct",
+) -> list[bytes]:
+    """Encode image data as Kitty graphics protocol chunks.
+
+    Kitty protocol uses base64-encoded data with escape sequences.
+    Large images are split into multiple chunks.
+
+    Args:
+        data: Raw image data (PNG/JPEG or RGBA)
+        chunk_id: Unique identifier for this image
+        width: Image width in pixels
+        height: Image height in pixels
+        x: X position in cells
+        y: Y position in cells
+        transmission: "direct" or "file"
+
+    Returns:
+        List of escape sequence chunks to send
+    """
+    import base64
+    import zlib
+
+    # Compress data
+    try:
+        compressed = zlib.compress(data, 9)
+    except Exception:
+        compressed = data
+
+    # Base64 encode
+    encoded = base64.b64encode(compressed)
+
+    # Split into chunks (max ~4096 bytes per chunk for Kitty)
+    CHUNK_SIZE = 4000
+    chunks: list[bytes] = []
+
+    # Determine if we need large or small dimension encoding
+    use_large = width > 4095 or height > 4095
+
+    num_chunks = (len(encoded) + CHUNK_SIZE - 1) // CHUNK_SIZE
+
+    for i in range(num_chunks):
+        chunk_data = encoded[i * CHUNK_SIZE : (i + 1) * CHUNK_SIZE]
+        is_first = i == 0
+        is_last = i == num_chunks - 1
+
+        # Build chunk header
+        # Format: ESC _ G {opts} ; {id} ; {w} ; {h} ; {x} ; {y} ; {data} ESC \
+        # Small: s = 16-bit, S = 32-bit
+        # p = transmission: f=file, s=small, m=medium, l=large
+
+        if transmission == "file":
+            # File transfer mode
+            header = f"{chunk_id};{i + 1};{num_chunks}".encode()
+            chunk = b"\x1b[_Gf" + header + b";" + chunk_data + b"\x1b\\"
+        else:
+            # Inline mode
+            if is_first:
+                if use_large:
+                    # Large format: S = 32-bit dimensions
+                    header = f"0;{chunk_id};{width};{height};{x};{y};{len(encoded)}".encode()
+                    chunk = b"\x1b[_G" + b"m" + header + chunk_data
+                else:
+                    # Small format: s = 16-bit dimensions
+                    header = f"{chunk_id};{width};{height};{x};{y}".encode()
+                    chunk = b"\x1b[_Gs" + header + b";" + chunk_data
+
+            elif is_last:
+                chunk = chunk_data + b"\x1b\\"
+            else:
+                chunk = chunk_data
+
+        chunks.append(chunk)
+
+    return chunks
+
+
+def _clear_kitty_graphics(graphics_id: int | None = None) -> bytes:
+    """Generate escape sequence to clear Kitty graphics.
+
+    Args:
+        graphics_id: Specific ID to clear, or None to clear all
+
+    Returns:
+        Escape sequence bytes
+    """
+    if graphics_id is not None:
+        return f"\x1b[_Ga{graphics_id}\x1b\\".encode()
+    else:
+        return b"\x1b[_Ga\x1b\\"
 
 
 class ClipboardHandler:
