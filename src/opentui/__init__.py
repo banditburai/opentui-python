@@ -86,6 +86,13 @@ from .renderer import (
     create_cli_renderer,
 )
 
+# Edit buffer
+from .edit_buffer import (
+    EditBuffer,
+    EditorView,
+    create_edit_buffer,
+)
+
 # Signals (StarHTML-aligned)
 from .signals import (
     Assignment,
@@ -288,6 +295,10 @@ __all__ = [
     "Buffer",
     "RootRenderable",
     "create_cli_renderer",
+    # EditBuffer
+    "EditBuffer",
+    "EditorView",
+    "create_edit_buffer",
     # Components
     "BaseRenderable",
     "Renderable",
