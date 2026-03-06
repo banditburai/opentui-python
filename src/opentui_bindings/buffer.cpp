@@ -1,6 +1,7 @@
 #include <nanobind/nanobind.h>
 #include <cstring>
 #include <cstdint>
+#include <string>
 
 namespace nb = nanobind;
 
@@ -22,6 +23,10 @@ extern "C" {
     bool bufferGetRespectAlpha(void* buffer);
     void bufferSetRespectAlpha(void* buffer, bool respect);
     size_t getArenaAllocatedBytes();
+    void* createOptimizedBuffer(uint32_t width, uint32_t height, bool respectAlpha, uint8_t encoding, const char* id, size_t idLen);
+    void destroyOptimizedBuffer(void* buffer);
+    void drawFrameBuffer(void* buffer);
+    size_t bufferGetId(void* buffer, void* out, size_t maxLen);
 }
 
 void bind_buffer(nb::module_& m) {
@@ -112,4 +117,21 @@ void bind_buffer(nb::module_& m) {
     m.def("buffer_set_respect_alpha", &bufferSetRespectAlpha, nb::arg("buffer"), nb::arg("respect"));
 
     m.def("get_arena_allocated_bytes", &getArenaAllocatedBytes);
+
+    // OptimizedBuffer functions
+    m.def("create_optimized_buffer", [](uint32_t width, uint32_t height, bool respectAlpha, 
+                                        uint8_t encoding, const char* id) -> void* {
+        size_t idLen = id ? std::strlen(id) : 0;
+        return createOptimizedBuffer(width, height, respectAlpha, encoding, id, idLen);
+    }, nb::arg("width"), nb::arg("height"), nb::arg("respect_alpha") = true,
+       nb::arg("encoding") = 0, nb::arg("id") = "");
+
+    m.def("destroy_optimized_buffer", &destroyOptimizedBuffer, nb::arg("buffer"));
+    m.def("draw_frame_buffer", &drawFrameBuffer, nb::arg("buffer"));
+
+    m.def("buffer_get_id", [](void* buffer, size_t maxLen) -> nb::bytes {
+        std::string out(maxLen, '\0');
+        size_t len = bufferGetId(buffer, out.data(), maxLen);
+        return nb::bytes(out.data(), len);
+    }, nb::arg("buffer"), nb::arg("max_len") = 256);
 }

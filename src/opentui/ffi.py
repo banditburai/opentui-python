@@ -881,16 +881,50 @@ class OpenTUILibrary:
 _lib: OpenTUILibrary | None = None
 
 
-def get_library() -> OpenTUILibrary:
-    """Get the global library instance."""
+class NanobindLibrary:
+    """Wrapper for nanobind bindings - uses C++ bindings instead of ctypes."""
+
+    def __init__(self):
+        self._native = _native_module
+
+    def __getattr__(self, name: str):
+        """Forward attribute access to the native module."""
+        if self._native is None:
+            raise RuntimeError("Native bindings not available")
+        return getattr(self._native, name)
+
+    def get_buffer_width(self, buffer):
+        return self._native.buffer.get_buffer_width(buffer)
+
+    def get_buffer_height(self, buffer):
+        return self._native.buffer.get_buffer_height(buffer)
+
+    def buffer_get_char_ptr(self, buffer):
+        return self._native.buffer.buffer_get_char_ptr(buffer)
+
+    def buffer_get_fg_ptr(self, buffer):
+        return self._native.buffer.buffer_get_fg_ptr(buffer)
+
+    def buffer_get_bg_ptr(self, buffer):
+        return self._native.buffer.buffer_get_bg_ptr(buffer)
+
+    def buffer_get_attributes_ptr(self, buffer):
+        return self._native.buffer.buffer_get_attributes_ptr(buffer)
+
+
+def get_library() -> OpenTUILibrary | NanobindLibrary:
+    """Get the global library instance. Prefers nanobind if available."""
     global _lib
     if _lib is None:
-        _lib = OpenTUILibrary()
+        if _NATIVE_AVAILABLE and _native_module is not None:
+            _lib = NanobindLibrary()
+        else:
+            _lib = OpenTUILibrary()
     return _lib
 
 
 def load_library(lib_path: str | Path) -> OpenTUILibrary:
-    """Load a specific library path."""
+    """Load a specific library path (ctypes only)."""
     global _lib
     _lib = OpenTUILibrary(lib_path)
     return _lib
@@ -898,6 +932,7 @@ def load_library(lib_path: str | Path) -> OpenTUILibrary:
 
 __all__ = [
     "OpenTUILibrary",
+    "NanobindLibrary",
     "get_library",
     "load_library",
     "c_uint8",

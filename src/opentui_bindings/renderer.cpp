@@ -150,4 +150,38 @@ void bind_renderer(nb::module_& m) {
         result[nb::str("explicit_cursor_positioning")] = caps.explicit_cursor_positioning;
         return result;
     }, nb::arg("renderer"));
+
+    // Get cursor state
+    m.def("get_cursor_state", [](void* renderer) {
+        struct CursorState {
+            uint32_t x;
+            uint32_t y;
+            bool visible;
+            uint8_t style;
+            bool blinking;
+            float r;
+            float g;
+            float b;
+            float a;
+        } state;
+        
+        getCursorState(renderer, &state);
+        
+        nb::dict result;
+        result[nb::str("x")] = state.x;
+        result[nb::str("y")] = state.y;
+        result[nb::str("visible")] = state.visible;
+        result[nb::str("style")] = state.style;
+        result[nb::str("blinking")] = state.blinking;
+        result[nb::str("r")] = state.r;
+        result[nb::str("g")] = state.g;
+        result[nb::str("b")] = state.b;
+        result[nb::str("a")] = state.a;
+        return result;
+    }, nb::arg("renderer"));
+
+    // Write out raw data
+    m.def("write_out", [](void* renderer, nb::bytes data) {
+        writeOut(renderer, (void*)data.c_str(), data.size());
+    }, nb::arg("renderer"), nb::arg("data"));
 }

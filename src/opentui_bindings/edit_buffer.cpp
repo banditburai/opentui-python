@@ -9,6 +9,7 @@ extern "C" {
     void* createEditBuffer(uint8_t encoding);
     void destroyEditBuffer(void* buffer);
     void editBufferInsertText(void* buffer, const char* text, size_t len);
+    size_t editBufferGetText(void* buffer, char* out, size_t maxLen);
     void editBufferDeleteChar(void* buffer);
     void editBufferDeleteCharBackward(void* buffer);
     void editBufferSetText(void* buffer, const char* text, size_t len);
@@ -34,6 +35,13 @@ void bind_edit_buffer(nb::module_& m) {
         size_t len = std::strlen(text);
         editBufferInsertText(buffer, text, len);
     }, nb::arg("buffer"), nb::arg("text"));
+
+    m.def("edit_buffer_get_text", [](void* buffer, size_t maxLen) -> nb::bytes {
+        std::string out(maxLen, '\0');
+        size_t len = editBufferGetText(buffer, out.data(), maxLen);
+        return nb::bytes(out.data(), len);
+    }, nb::arg("buffer"), nb::arg("max_len") = 4096);
+
     m.def("edit_buffer_delete_char", &editBufferDeleteChar, nb::arg("buffer"));
     m.def("edit_buffer_delete_char_backward", &editBufferDeleteCharBackward, nb::arg("buffer"));
     m.def("edit_buffer_set_text", [](void* buffer, const char* text) {

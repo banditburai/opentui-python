@@ -1,5 +1,6 @@
 #include <nanobind/nanobind.h>
 #include <cstdint>
+#include <cstddef>
 
 namespace nb = nanobind;
 
@@ -15,6 +16,14 @@ extern "C" {
                       void* fg, uint32_t fgLen, void* bg, void* corners, void* attrs, uint32_t style);
     void bufferDrawGrid(void* buffer, void* cells, void* fg, void* bg, void* attrs, 
                       uint32_t cellCount, void* positions, uint32_t positionCount, void* cellColors);
+    void bufferDrawSuperSampleBuffer(void* buffer, uint32_t width, uint32_t height, 
+                                    void* data, size_t dataLen, uint8_t cellWidth, uint32_t cellHeight);
+    void bufferDrawPackedBuffer(void* buffer, void* data, size_t dataLen, 
+                                uint32_t width, uint32_t height, uint32_t pitch, uint32_t cellHeight);
+    void bufferDrawGrayscaleBuffer(void* buffer, int32_t x, int32_t y, 
+                                   void* data, uint32_t width, uint32_t height, void* fg, void* bg);
+    void bufferDrawGrayscaleBufferSupersampled(void* buffer, int32_t x, int32_t y,
+                                                void* data, uint32_t width, uint32_t height, void* fg, void* bg);
 }
 
 void bind_graphics(nb::module_& m) {
@@ -35,4 +44,27 @@ void bind_graphics(nb::module_& m) {
     m.def("buffer_draw_grid", &bufferDrawGrid,
           nb::arg("buffer"), nb::arg("cells"), nb::arg("fg"), nb::arg("bg"), nb::arg("attrs"),
           nb::arg("cell_count"), nb::arg("positions"), nb::arg("position_count"), nb::arg("cell_colors"));
+
+    // Graphics buffer drawing functions
+    m.def("buffer_draw_super_sample_buffer", [](void* buffer, uint32_t width, uint32_t height,
+                                                 nb::bytes data, uint8_t cellWidth, uint32_t cellHeight) {
+        bufferDrawSuperSampleBuffer(buffer, width, height, (void*)data.c_str(), data.size(), cellWidth, cellHeight);
+    }, nb::arg("buffer"), nb::arg("width"), nb::arg("height"), nb::arg("data"),
+       nb::arg("cell_width"), nb::arg("cell_height"));
+
+    m.def("buffer_draw_packed_buffer", [](void* buffer, nb::bytes data, 
+                                          uint32_t width, uint32_t height, uint32_t pitch, uint32_t cellHeight) {
+        bufferDrawPackedBuffer(buffer, (void*)data.c_str(), data.size(), width, height, pitch, cellHeight);
+    }, nb::arg("buffer"), nb::arg("data"), nb::arg("width"), nb::arg("height"),
+       nb::arg("pitch"), nb::arg("cell_height"));
+
+    m.def("buffer_draw_grayscale_buffer", [](void* buffer, int32_t x, int32_t y,
+                                              nb::bytes data, uint32_t width, uint32_t height) {
+        bufferDrawGrayscaleBuffer(buffer, x, y, (void*)data.c_str(), width, height, nullptr, nullptr);
+    }, nb::arg("buffer"), nb::arg("x"), nb::arg("y"), nb::arg("data"), nb::arg("width"), nb::arg("height"));
+
+    m.def("buffer_draw_grayscale_buffer_supersampled", [](void* buffer, int32_t x, int32_t y,
+                                                           nb::bytes data, uint32_t width, uint32_t height) {
+        bufferDrawGrayscaleBufferSupersampled(buffer, x, y, (void*)data.c_str(), width, height, nullptr, nullptr);
+    }, nb::arg("buffer"), nb::arg("x"), nb::arg("y"), nb::arg("data"), nb::arg("width"), nb::arg("height"));
 }
