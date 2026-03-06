@@ -404,81 +404,76 @@ def _encode_sixel(
     if len(data) < expected:
         return b""
 
-    # Build color palette (max 256 colors)
+    # Build color palette - map RGB to palette index
     palette: dict[tuple[int, int, int], int] = {}
     palette_list: list[tuple[int, int, int]] = []
+
+    # Add background color as first palette entry
+    bg_sixel = (bg_color[0] * 63 // 255, bg_color[1] * 63 // 255, bg_color[2] * 63 // 255)
+    palette[bg_sixel] = 0
+    palette_list.append(bg_sixel)
 
     # Convert RGB to 6-bit values (0-63) for SIXEL
     def rgb_to_sixel(r: int, g: int, b: int) -> tuple[int, int, int]:
         return (r * 63 // 255, g * 63 // 255, b * 63 // 255)
 
-    # Get or create palette index
     def get_color_index(r: int, g: int, b: int) -> int:
         key = (r, g, b)
         if key in palette:
             return palette[key]
         if len(palette_list) >= 256:
-            # Find closest existing color
+            # Find closest existing color - use first palette color as fallback
             return 0
         idx = len(palette_list)
         palette_list.append(key)
         palette[key] = idx
         return idx
 
-    # Process pixels into SIXEL format
-    raster_parts: list[bytes] = []
-    palette_used: set[int] = set()
-
-    # For each column, encode vertical strips of 6 pixels
-    num_strips = (height + 5) // 6  # Each strip is 6 pixels tall
+    # SIXEL encoding: each 6 vertical pixels become one character
+    # We encode column by column
+    num_strips = (height + 5) // 6  # 6-pixel high strips
+    raster_data = bytearray()
 
     for x in range(width):
-        column_data = []
-
         for strip in range(num_strips):
             strip_start = strip * 6
             strip_height = min(6, height - strip_start)
 
-            # Get pixel values for this 6-pixel strip
+            # Build 6-pixel values for this strip
             values = []
             for dy in range(strip_height):
                 y = strip_start + dy
                 idx = (y * width + x) * bytes_per_pixel
 
-                if idx + 3 >= len(data):
-                    values.append(-1)  # Transparent
-                    continue
-
                 r = data[idx]
                 g = data[idx + 1]
                 b = data[idx + 2]
-                a = data[idx + 3]
+                a = data[idx + 3] if idx + 3 < len(data) else 255
 
-                if a < 128:  # Transparent
-                    values.append(-1)
+                if a < 128:  # Transparent - use background
+                    values.append(0)  # Background color index
                 else:
                     sixel_rgb = rgb_to_sixel(r, g, b)
-                    color_idx = get_color_index(*sixel_rgb)
-                    values.append(color_idx)
-                    palette_used.add(color_idx)
+                    values.append(get_color_index(*sixel_rgb))
 
-            # Pad to 6 pixels
+            # Pad to 6 pixels with background
             while len(values) < 6:
-                values.append(-1)
+                values.append(0)
 
-            # Encode as SIXEL: each pixel is a bit, palette index + 32 gives printable
-            for v in values:
-                if v >= 0:
-                    column_data.append(v + 32)  # SIXEL graphic characters start at 32
+            # SIXEL encoding: each pixel is a bit in a 6-bit value
+            # Bit 0 = top pixel, bit 5 = bottom pixel
+            sixel_value = 0
+            for i, color_idx in enumerate(values):
+                if color_idx > 0:  # Only set bit if not background
+                    sixel_value |= 1 << i
 
-        if column_data:
-            raster_parts.append(bytes(column_data))
+            # Output: Select color if different from previous, then output character
+            # For simplicity, we output color select + character
+            raster_data.append(63 + values[0])  # Single color encoding
 
     # Build palette string
     palette_parts = []
-    for i in range(len(palette_list)):
-        r, g, b = palette_list[i]
-        # Convert back from 6-bit to 8-bit
+    for i, (r, g, b) in enumerate(palette_list):
         r8 = r * 255 // 63
         g8 = g * 255 // 63
         b8 = b * 255 // 63
@@ -487,7 +482,6 @@ def _encode_sixel(
     palette_str = b"".join(palette_parts)
 
     # Build final SIXEL sequence
-    # Format: ESC P q {params} {palette} {raster} ESC \
     result = bytearray()
     result.extend(b"\x1bP")  # SIXEL introducer
     result.extend(b"q")  # Sixel graphics
@@ -495,15 +489,11 @@ def _encode_sixel(
     # Raster attributes: width;height;ph;pv;colors;raster-style
     result.extend(f"{width};{height};1;1;{len(palette_list)};1".encode())
 
-    # Add palette if any colors used
     if palette_str:
         result.extend(b";")
         result.extend(palette_str)
 
-    # Add raster data (each column is a SIXEL character)
-    for part in raster_parts:
-        result.extend(part)
-
+    result.extend(raster_data)
     result.extend(b"\x1b\\")  # SIXEL terminator
 
     return bytes(result)
@@ -538,7 +528,7 @@ def _encode_kitty(
     import base64
     import zlib
 
-    # Compress data
+    # Compress data for smaller transmission
     try:
         compressed = zlib.compress(data, 9)
     except Exception:
@@ -552,7 +542,7 @@ def _encode_kitty(
     chunks: list[bytes] = []
 
     # Determine if we need large or small dimension encoding
-    use_large = width > 4095 or height > 4095
+    use_large = width > 4095 or height > 4095 or len(encoded) > 100000
 
     num_chunks = (len(encoded) + CHUNK_SIZE - 1) // CHUNK_SIZE
 
@@ -561,30 +551,26 @@ def _encode_kitty(
         is_first = i == 0
         is_last = i == num_chunks - 1
 
-        # Build chunk header
-        # Format: ESC _ G {opts} ; {id} ; {w} ; {h} ; {x} ; {y} ; {data} ESC \
-        # Small: s = 16-bit, S = 32-bit
-        # p = transmission: f=file, s=small, m=medium, l=large
-
         if transmission == "file":
             # File transfer mode
             header = f"{chunk_id};{i + 1};{num_chunks}".encode()
             chunk = b"\x1b[_Gf" + header + b";" + chunk_data + b"\x1b\\"
         else:
-            # Inline mode
+            # Inline mode - small format (s) or large format (m)
             if is_first:
                 if use_large:
-                    # Large format: S = 32-bit dimensions
-                    header = f"0;{chunk_id};{width};{height};{x};{y};{len(encoded)}".encode()
-                    chunk = b"\x1b[_G" + b"m" + header + chunk_data
+                    # Large format: m = medium (32-bit dims)
+                    header = f"{chunk_id};{width};{height};{x};{y}".encode()
+                    chunk = b"\x1b[_Gm" + header + b";" + chunk_data
                 else:
-                    # Small format: s = 16-bit dimensions
+                    # Small format: s = small (16-bit dims)
                     header = f"{chunk_id};{width};{height};{x};{y}".encode()
                     chunk = b"\x1b[_Gs" + header + b";" + chunk_data
-
             elif is_last:
+                # Last chunk - include terminator
                 chunk = chunk_data + b"\x1b\\"
             else:
+                # Continuation chunk - just data
                 chunk = chunk_data
 
         chunks.append(chunk)
