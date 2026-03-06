@@ -1,17 +1,19 @@
-"""EditBuffer and EditorView classes for text editing."""
+"""EditBuffer and EditorView classes for text editing using nanobind."""
 
 from __future__ import annotations
 
-from . import ffi
-from .ffi import c_uint8, c_uint32, get_library
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .ffi import NanobindLibrary
 
 
 class EditBuffer:
     """Wrapper around native EditBuffer for text editing with cursor."""
 
-    def __init__(self, ptr: int, lib: ffi.OpenTUILibrary | ffi.NanobindLibrary):
+    def __init__(self, ptr: Any, native: NanobindLibrary):
         self._ptr = ptr
-        self._lib = lib
+        self._native = native
 
     def insert_text(self, text: str) -> None:
         """Insert text at cursor position."""
@@ -19,130 +21,95 @@ class EditBuffer:
             text_bytes = text.encode("utf-8")
         else:
             text_bytes = text
-
-        if hasattr(self._lib, "editBufferInsertText"):
-            self._lib.editBufferInsertText(self._ptr, text_bytes, len(text_bytes))
+        self._native.edit_buffer.insert_text(self._ptr, text_bytes, len(text_bytes))
 
     def get_text(self) -> str:
         """Get the current text content."""
-        if hasattr(self._lib, "editBufferGetText"):
-            buf = b"\x00" * 65536
-            length = self._lib.editBufferGetText(self._ptr, buf, len(buf))
-            return buf[:length].decode("utf-8", errors="replace")
-        return ""
+        buf = b"\x00" * 65536
+        length = self._native.edit_buffer.get_text(self._ptr, buf, len(buf))
+        return buf[:length].decode("utf-8", errors="replace")
 
     def set_text(self, text: str) -> None:
         """Set the text content."""
-        if hasattr(self._lib, "editBufferSetText"):
-            if isinstance(text, str):
-                text_bytes = text.encode("utf-8")
-            else:
-                text_bytes = text
-            self._lib.editBufferSetText(self._ptr, text_bytes, len(text_bytes))
+        if isinstance(text, str):
+            text_bytes = text.encode("utf-8")
+        else:
+            text_bytes = text
+        self._native.edit_buffer.set_text(self._ptr, text_bytes, len(text_bytes))
 
     def delete_char(self) -> None:
         """Delete character at cursor."""
-        if hasattr(self._lib, "editBufferDeleteChar"):
-            self._lib.editBufferDeleteChar(self._ptr)
+        self._native.edit_buffer.delete_char(self._ptr)
 
     def delete_char_backward(self) -> None:
         """Delete character before cursor (backspace)."""
-        if hasattr(self._lib, "editBufferDeleteCharBackward"):
-            self._lib.editBufferDeleteCharBackward(self._ptr)
+        self._native.edit_buffer.delete_char_backward(self._ptr)
 
     def delete_range(self, start_line: int, start_col: int, end_line: int, end_col: int) -> None:
         """Delete a range of text."""
-        if hasattr(self._lib, "editBufferDeleteRange"):
-            self._lib.editBufferDeleteRange(
-                self._ptr,
-                c_uint32(start_line),
-                c_uint32(start_col),
-                c_uint32(end_line),
-                c_uint32(end_col),
-            )
+        self._native.edit_buffer.delete_range(self._ptr, start_line, start_col, end_line, end_col)
 
     def newline(self) -> None:
         """Insert a newline at cursor."""
-        if hasattr(self._lib, "editBufferNewLine"):
-            self._lib.editBufferNewLine(self._ptr)
+        self._native.edit_buffer.newline(self._ptr)
 
     def move_cursor_left(self) -> None:
         """Move cursor left."""
-        if hasattr(self._lib, "editBufferMoveCursorLeft"):
-            self._lib.editBufferMoveCursorLeft(self._ptr)
+        self._native.edit_buffer.move_cursor_left(self._ptr)
 
     def move_cursor_right(self) -> None:
         """Move cursor right."""
-        if hasattr(self._lib, "editBufferMoveCursorRight"):
-            self._lib.editBufferMoveCursorRight(self._ptr)
+        self._native.edit_buffer.move_cursor_right(self._ptr)
 
     def move_cursor_up(self) -> None:
         """Move cursor up."""
-        if hasattr(self._lib, "editBufferMoveCursorUp"):
-            self._lib.editBufferMoveCursorUp(self._ptr)
+        self._native.edit_buffer.move_cursor_up(self._ptr)
 
     def move_cursor_down(self) -> None:
         """Move cursor down."""
-        if hasattr(self._lib, "editBufferMoveCursorDown"):
-            self._lib.editBufferMoveCursorDown(self._ptr)
+        self._native.edit_buffer.move_cursor_down(self._ptr)
 
     def goto_line(self, line: int) -> None:
         """Go to a specific line."""
-        if hasattr(self._lib, "editBufferGotoLine"):
-            self._lib.editBufferGotoLine(self._ptr, c_uint32(line))
+        self._native.edit_buffer.goto_line(self._ptr, line)
 
     def set_cursor(self, line: int, col: int) -> None:
         """Set cursor position."""
-        if hasattr(self._lib, "editBufferSetCursor"):
-            self._lib.editBufferSetCursor(self._ptr, c_uint32(line), c_uint32(col))
+        self._native.edit_buffer.set_cursor(self._ptr, line, col)
 
     def get_cursor_position(self) -> tuple[int, int]:
         """Get current cursor position as (line, col)."""
-        if hasattr(self._lib, "editBufferGetCursorPosition"):
-            import ctypes
-
-            line = ctypes.c_uint32()
-            col = ctypes.c_uint32()
-            self._lib.editBufferGetCursorPosition(self._ptr, ctypes.byref(line), ctypes.byref(col))
-            return (line.value, col.value)
-        return (0, 0)
+        result = self._native.edit_buffer.get_cursor_position(self._ptr)
+        return (result[0], result[1])
 
     def can_undo(self) -> bool:
         """Check if undo is available."""
-        if hasattr(self._lib, "editBufferCanUndo"):
-            return self._lib.editBufferCanUndo(self._ptr)
-        return False
+        return self._native.edit_buffer.can_undo(self._ptr)
 
     def can_redo(self) -> bool:
         """Check if redo is available."""
-        if hasattr(self._lib, "editBufferCanRedo"):
-            return self._lib.editBufferCanRedo(self._ptr)
-        return False
+        return self._native.edit_buffer.can_redo(self._ptr)
 
     def undo(self) -> bool:
         """Undo last action."""
-        if hasattr(self._lib, "editBufferUndo"):
-            buf = b"\x00" * 1024
-            length = self._lib.editBufferUndo(self._ptr, buf, len(buf))
-            return length > 0
-        return False
+        buf = b"\x00" * 1024
+        length = self._native.edit_buffer.undo(self._ptr, buf, len(buf))
+        return length > 0
 
     def redo(self) -> bool:
         """Redo last undone action."""
-        if hasattr(self._lib, "editBufferRedo"):
-            buf = b"\x00" * 1024
-            length = self._lib.editBufferRedo(self._ptr, buf, len(buf))
-            return length > 0
-        return False
+        buf = b"\x00" * 1024
+        length = self._native.edit_buffer.redo(self._ptr, buf, len(buf))
+        return length > 0
 
     def destroy(self) -> None:
         """Destroy the edit buffer and free resources."""
-        if self._ptr and hasattr(self._lib, "destroyEditBuffer"):
-            self._lib.destroyEditBuffer(self._ptr)
+        if self._ptr:
+            self._native.edit_buffer.destroy(self._ptr)
             self._ptr = None
 
     @property
-    def ptr(self) -> int | None:
+    def ptr(self) -> Any:
         """Get the raw pointer."""
         return self._ptr
 
@@ -152,65 +119,42 @@ class EditorView:
 
     def __init__(self, edit_buffer: EditBuffer, width: int, height: int):
         self._edit_buffer = edit_buffer
-        self._lib = edit_buffer._lib
+        self._native = edit_buffer._native
         self._valid = False
 
-        if hasattr(self._lib, "createEditorView"):
-            ptr = self._lib.createEditorView(edit_buffer.ptr, c_uint32(width), c_uint32(height))
-            self._ptr = ptr
-            self._valid = True
-        else:
-            self._ptr = None
-            raise RuntimeError(
-                "EditorView not available: createEditorView function not found in native bindings"
-            )
+        ptr = self._native.editor_view.create(edit_buffer.ptr, width, height)
+        self._ptr = ptr
+        self._valid = True
 
     def set_viewport_size(self, width: int, height: int) -> None:
         """Set the viewport dimensions."""
-        if self._ptr and hasattr(self._lib, "editorViewSetViewportSize"):
-            self._lib.editorViewSetViewportSize(self._ptr, c_uint32(width), c_uint32(height))
+        if self._ptr:
+            self._native.editor_view.set_viewport_size(self._ptr, width, height)
 
     def set_viewport(
         self, scroll_x: int, scroll_y: int, width: int, height: int, smooth: bool = False
     ) -> None:
         """Set the viewport position and size."""
-        if self._ptr and hasattr(self._lib, "editorViewSetViewport"):
-            self._lib.editorViewSetViewport(
-                self._ptr,
-                c_uint32(scroll_x),
-                c_uint32(scroll_y),
-                c_uint32(width),
-                c_uint32(height),
-                smooth,
+        if self._ptr:
+            self._native.editor_view.set_viewport(
+                self._ptr, scroll_x, scroll_y, width, height, smooth
             )
 
     def get_viewport(self) -> tuple[int, int, int, int]:
         """Get the viewport as (scroll_x, scroll_y, width, height)."""
-        if self._ptr and hasattr(self._lib, "editorViewGetViewport"):
-            import ctypes
-
-            scroll_x = ctypes.c_uint32()
-            scroll_y = ctypes.c_uint32()
-            width = ctypes.c_uint32()
-            height = ctypes.c_uint32()
-            self._lib.editorViewGetViewport(
-                self._ptr,
-                ctypes.byref(scroll_x),
-                ctypes.byref(scroll_y),
-                ctypes.byref(width),
-                ctypes.byref(height),
-            )
-            return (scroll_x.value, scroll_y.value, width.value, height.value)
+        if self._ptr:
+            result = self._native.editor_view.get_viewport(self._ptr)
+            return (result[0], result[1], result[2], result[3])
         return (0, 0, 80, 24)
 
     def destroy(self) -> None:
         """Destroy the editor view and free resources."""
-        if self._ptr and hasattr(self._lib, "destroyEditorView"):
-            self._lib.destroyEditorView(self._ptr)
+        if self._ptr:
+            self._native.editor_view.destroy(self._ptr)
             self._ptr = None
 
     @property
-    def ptr(self) -> int | None:
+    def ptr(self) -> Any:
         """Get the raw pointer."""
         return self._ptr
 
@@ -229,13 +173,14 @@ def create_edit_buffer(default_attributes: int = 0) -> EditBuffer:
     Returns:
         EditBuffer instance
     """
-    lib = get_library()
+    from .ffi import get_native
 
-    if hasattr(lib, "createEditBuffer"):
-        ptr = lib.createEditBuffer(c_uint8(default_attributes))
-        return EditBuffer(ptr, lib)
+    native = get_native()
+    if native is None:
+        raise RuntimeError("Native bindings not available")
 
-    raise RuntimeError("createEditBuffer not available")
+    ptr = native.edit_buffer.create(default_attributes)
+    return EditBuffer(ptr, native)
 
 
 __all__ = [
