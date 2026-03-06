@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..events import KeyEvent
 from .base import Renderable
 
 if TYPE_CHECKING:
@@ -37,6 +38,7 @@ class Input(Renderable):
         on_input: Callable[[str], None] | None = None,
         on_change: Callable[[str], None] | None = None,
         on_submit: Callable[[str], None] | None = None,
+        on_key: Callable[[KeyEvent], bool] | None = None,
         # Style
         **kwargs,
     ):
@@ -57,8 +59,11 @@ class Input(Renderable):
             self.on("change", on_change)
         if on_submit:
             self.on("submit", on_submit)
+        if on_key:
+            self.on("key", on_key)
 
         self._focusable = True
+        self._on_key = on_key
 
     @property
     def value(self) -> str:
@@ -104,6 +109,45 @@ class Input(Renderable):
         """Move cursor by offset."""
         new_pos = self._cursor_position + offset
         self._cursor_position = max(0, min(len(self._value), new_pos))
+
+    def handle_key(self, event: KeyEvent) -> bool:
+        """Handle keyboard input.
+
+        Returns True if the event was handled.
+        """
+        key = event.key.lower()
+
+        if key == "backspace":
+            self.delete_char(forward=False)
+            return True
+        elif key == "delete":
+            self.delete_char(forward=True)
+            return True
+        elif key == "left":
+            self.move_cursor(-1)
+            return True
+        elif key == "right":
+            self.move_cursor(1)
+            return True
+        elif key == "home":
+            self._cursor_position = 0
+            return True
+        elif key == "end":
+            self._cursor_position = len(self._value)
+            return True
+        elif key == "return" or key == "enter":
+            self.emit("submit", self._value)
+            return True
+        elif key == "escape":
+            return True
+        elif len(key) == 1:
+            self.insert_text(key)
+            return True
+
+        if self._on_key:
+            return self._on_key(event)
+
+        return False
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         """Render the input."""
