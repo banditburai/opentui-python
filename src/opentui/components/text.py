@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..text_utils import measure_text
 from .base import Renderable
 
 if TYPE_CHECKING:
@@ -164,8 +165,6 @@ class Text(Renderable):
             and self._selection_end is not None
             and self._selection_start < self._selection_end
         ):
-            from ..text_utils import measure_text
-
             content = self._content
             start_pos = max(0, self._selection_start)
             end_pos = min(len(content), self._selection_end)

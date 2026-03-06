@@ -186,6 +186,10 @@ class Box(Renderable):
         if self._border and width > 0 and height > 0:
             self._draw_border(buffer, width, height)
 
+        # Draw focus ring if focused
+        if self._focused and width > 0 and height > 0:
+            self._draw_focus_ring(buffer, width, height)
+
         # Calculate content area
         content_x = self._x + self._padding_left
         content_y = self._y + self._padding_top
@@ -208,12 +212,24 @@ class Box(Renderable):
                 child._y = content_y
                 child.render(buffer, delta_time)
 
+    def _get_border_chars(self) -> dict:
+        """Get border characters with validation."""
+        if self._border_chars:
+            required_keys = {
+                "top_left",
+                "top_right",
+                "bottom_left",
+                "bottom_right",
+                "horizontal",
+                "vertical",
+            }
+            if required_keys.issubset(self._border_chars.keys()):
+                return self._border_chars
+        return BORDER_CHARS.get(self._border_style, BORDER_CHARS["single"])
+
     def _draw_border(self, buffer: Buffer, width: int, height: int) -> None:
         """Draw the box border."""
-        if self._border_chars:
-            chars = self._border_chars
-        else:
-            chars = BORDER_CHARS.get(self._border_style, BORDER_CHARS["single"])
+        chars = self._get_border_chars()
 
         border_color = self._border_color or self._fg
         bg = self._background_color
@@ -281,6 +297,38 @@ class Box(Renderable):
                 title_x = self._x + width - len(self._title) - 2
 
             buffer.draw_text(self._title, title_x, self._y, border_color, bg)
+
+    def _draw_focus_ring(self, buffer: Buffer, width: int, height: int) -> None:
+        """Draw a focus ring around the box."""
+        focus_color = s.RGBA(0.3, 0.5, 1.0, 1.0)
+
+        # Top edge
+        for x in range(self._x, self._x + width):
+            buffer.draw_text("─", x, self._y - 1 if self._y > 0 else self._y, focus_color, None)
+
+        # Bottom edge
+        for x in range(self._x, self._x + width):
+            buffer.draw_text("─", x, self._y + height, focus_color, None)
+
+        # Left edge
+        for y in range(self._y, self._y + height):
+            buffer.draw_text("│", self._x - 1 if self._x > 0 else self._x, y, focus_color, None)
+
+        # Right edge
+        for y in range(self._y, self._y + height):
+            buffer.draw_text("│", self._x + width, y, focus_color, None)
+
+        # Corners
+        if self._x > 0:
+            buffer.draw_text(
+                "┌", self._x - 1, self._y - 1 if self._y > 0 else self._y, focus_color, None
+            )
+            buffer.draw_text("└", self._x - 1, self._y + height, focus_color, None)
+        if self._x + width < buffer.width:
+            buffer.draw_text(
+                "┐", self._x + width, self._y - 1 if self._y > 0 else self._y, focus_color, None
+            )
+            buffer.draw_text("┘", self._x + width, self._y + height, focus_color, None)
 
 
 class ScrollBox(Box):
