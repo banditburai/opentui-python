@@ -12,6 +12,7 @@ from .progress import Progress
 from .select import Select, SelectItem
 from .separator import Separator
 from .switch import Switch, Toggle
+from .table import Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow
 from .button import Button
 from .card import Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle
 from .input import Input
@@ -54,5 +55,12 @@ __all__ = [
     "SelectItem",
     "Separator",
     "Switch",
+    "Table",
+    "TableBody",
+    "TableCaption",
+    "TableCell",
+    "TableHead",
+    "TableHeader",
+    "TableRow",
     "Toggle",
 ]
