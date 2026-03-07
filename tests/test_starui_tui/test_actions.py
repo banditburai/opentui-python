@@ -1,5 +1,7 @@
 """Tests for declarative Action system and event dispatch."""
 
+import pytest
+
 from starui_tui.actions import (
     Action,
     AddAction,
@@ -111,3 +113,12 @@ class TestDispatchAction:
         s = Signal("x", 0)
         dispatch_action([AddAction(s, 1), [AddAction(s, 2), AddAction(s, 3)]])
         assert s() == 6
+
+    def test_dispatch_tuple(self):
+        s = Signal("x", 0)
+        dispatch_action((AddAction(s, 1), AddAction(s, 2)))
+        assert s() == 3
+
+    def test_dispatch_invalid_type_raises(self):
+        with pytest.raises(TypeError, match="Cannot dispatch"):
+            dispatch_action(42)  # type: ignore[arg-type]
