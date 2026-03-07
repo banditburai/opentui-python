@@ -60,6 +60,7 @@ class TestParagraphStyles:
     def test_inline_code(self):
         c = InlineCode("var x = 1")
         assert isinstance(c, Text)
+        assert c._fg is not None
 
     def test_kwargs_passthrough(self):
         p = P("Custom", fg="#ff0000")

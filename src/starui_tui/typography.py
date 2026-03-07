@@ -6,6 +6,8 @@ from typing import Any
 
 from opentui.components import Text
 
+from .theme import resolve_props
+
 
 def Label(content: str = "", **kwargs: Any) -> Text:
     """Styled label (bold text)."""
@@ -54,9 +56,11 @@ def Small(content: str = "", **kwargs: Any) -> Text:
 
 def Muted(content: str = "", **kwargs: Any) -> Text:
     """Muted/secondary text."""
-    return Text(content, fg="#888888", **kwargs)
+    props = {**resolve_props("muted", variant="default"), **kwargs}
+    return Text(content, **props)
 
 
 def InlineCode(content: str = "", **kwargs: Any) -> Text:
-    """Inline code snippet."""
-    return Text(content, **kwargs)
+    """Inline code snippet (highlighted)."""
+    props = {**resolve_props("inline_code", variant="default"), **kwargs}
+    return Text(content, **props)

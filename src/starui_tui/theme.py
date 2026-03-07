@@ -57,6 +57,9 @@ TUI_THEME: dict[tuple[str, str, str], dict[str, Any]] = {
     ("card_description", "variant", "default"): {"fg": "#888888"},
     ("card_header", "variant", "default"): {"flex_direction": "column"},
     ("card_footer", "variant", "default"): {"flex_direction": "row", "justify_content": "flex-end"},
+    # Typography
+    ("muted", "variant", "default"): {"fg": "#888888"},
+    ("inline_code", "variant", "default"): {"fg": "#d4af37", "bg": "#2d2d44"},
     # Badge
     ("badge", "variant", "default"): {"bg": "#3498db", "fg": "#ffffff"},
     ("badge", "variant", "secondary"): {"bg": "#2d2d44", "fg": "#e0e0e0"},
