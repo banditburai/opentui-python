@@ -16,13 +16,18 @@ class TestBadge:
         b = Badge("Error", variant="destructive")
         assert isinstance(b, Text)
 
-    def test_outline_variant(self):
+    def test_outline_variant_has_fg(self):
         b = Badge("Info", variant="outline")
         assert isinstance(b, Text)
+        assert b._fg is not None
 
     def test_secondary_variant(self):
         b = Badge("Note", variant="secondary")
         assert isinstance(b, Text)
+
+    def test_kwargs_passthrough(self):
+        b = Badge("Bold", bold=True)
+        assert b._bold is True
 
     def test_all_variants(self):
         for v in ("default", "secondary", "destructive", "outline"):
