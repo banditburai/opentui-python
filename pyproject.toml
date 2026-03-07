@@ -41,7 +41,7 @@ numpy = [
 opentui = "opentui.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/opentui"]
+packages = ["src/opentui", "src/starui_tui"]
 
 [tool.ruff]
 line-length = 100
