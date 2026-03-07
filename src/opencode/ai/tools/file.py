@@ -13,9 +13,11 @@ def read_file_tool() -> Tool:
 
     async def execute(*, path: str, **_: object) -> str:
         try:
-            return Path(path).read_text()
+            return Path(path).read_text(encoding="utf-8")
         except FileNotFoundError:
             return f"Error: file not found: {path}"
+        except UnicodeDecodeError:
+            return f"Error: {path} is a binary file"
         except OSError as e:
             return f"Error: {e}"
 
@@ -41,7 +43,7 @@ def write_file_tool() -> Tool:
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content)
-            return f"Wrote {len(content)} bytes to {path}"
+            return f"Wrote {len(content)} chars to {path}"
         except OSError as e:
             return f"Error: {e}"
 
@@ -64,7 +66,7 @@ def search_files_tool() -> Tool:
     """Create a search_files tool."""
 
     async def execute(*, pattern: str, directory: str = ".", **_: object) -> str:
-        matches = sorted(_glob.glob(pattern, root_dir=directory))
+        matches = sorted(_glob.glob(pattern, root_dir=directory, recursive=True))
         if not matches:
             return "No matches found."
         return "\n".join(matches)

@@ -113,6 +113,13 @@ class TestReadFileTool:
         result = asyncio.run(t.execute(path=str(tmp_path / "nope.txt")))
         assert "error" in result.lower() or "not found" in result.lower()
 
+    def test_read_binary_file(self, tmp_path):
+        f = tmp_path / "data.bin"
+        f.write_bytes(b"\x00\x01\x80\xff")
+        t = read_file_tool()
+        result = asyncio.run(t.execute(path=str(f)))
+        assert "binary" in result.lower() or "error" in result.lower()
+
 
 class TestWriteFileTool:
     def test_tool_metadata(self):
@@ -150,6 +157,14 @@ class TestSearchFilesTool:
         assert "a.py" in result
         assert "b.py" in result
         assert "c.txt" not in result
+
+    def test_search_recursive(self, tmp_path):
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "deep.py").write_text("")
+        t = search_files_tool()
+        result = asyncio.run(t.execute(pattern="**/*.py", directory=str(tmp_path)))
+        assert "deep.py" in result
 
     def test_search_no_matches(self, tmp_path):
         t = search_files_tool()
