@@ -9,6 +9,7 @@ from .alert import Alert, AlertDescription, AlertTitle
 from .badge import Badge
 from .checkbox import Checkbox, RadioGroup, RadioGroupItem
 from .select import Select, SelectItem
+from .switch import Switch, Toggle
 from .button import Button
 from .card import Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle
 from .input import Input
@@ -48,4 +49,6 @@ __all__ = [
     "RadioGroupItem",
     "Select",
     "SelectItem",
+    "Switch",
+    "Toggle",
 ]
