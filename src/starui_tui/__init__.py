@@ -10,6 +10,7 @@ from .badge import Badge
 from .button import Button
 from .card import Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle
 from .input import Input
+from .textarea import Textarea
 from .theme import TUI_THEME, resolve_props
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "CardHeader",
     "CardTitle",
     "Input",
+    "Textarea",
 ]
