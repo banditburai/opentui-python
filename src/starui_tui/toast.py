@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from opentui.components import Box, Text
 
+from .props import split_props
 from .signals import Signal
 from .theme import resolve_props
 
@@ -28,22 +29,18 @@ def Toast(
     **kwargs: Any,
 ) -> Box:
     """Single toast notification box."""
-    props = resolve_props("toast", variant=variant)
-    fg = props.get("fg", "#e0e0e0")
+    props = {**resolve_props("toast", variant=variant), **kwargs}
+    text_props, box_props = split_props(props)
     indicator = _VARIANT_INDICATORS.get(variant, "")
 
-    children: list[Any] = [Text(f"{indicator} {title}", fg=fg, bold=True)]
-    if description:
-        children.append(Text(description, fg=fg))
+    children: list[Any] = [Text(f"{indicator} {title}", bold=True, **text_props)]
+    if description is not None:
+        children.append(Text(description, **text_props))
 
     return Box(
         *children,
         flex_direction="column",
-        border=True,
-        border_style="round",
-        padding_left=1,
-        padding_right=1,
-        **kwargs,
+        **box_props,
     )
 
 
