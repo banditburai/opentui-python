@@ -7,6 +7,7 @@ from typing import Any
 from opentui.components import Box, Text
 
 from .signals import Signal
+from .theme import resolve_props
 
 
 def Pagination(
@@ -16,6 +17,11 @@ def Pagination(
     **kwargs: Any,
 ) -> Box:
     """Pagination with prev/next and page number buttons."""
+    theme = resolve_props("pagination", variant="default")
+    active_fg = theme.get("active_fg", "#ffffff")
+    inactive_fg = theme.get("inactive_fg", "#888888")
+    nav_fg = theme.get("nav_fg", "#cccccc")
+
     current = signal()
 
     def _make_page_handler(page: int):
@@ -33,7 +39,7 @@ def Pagination(
         if cur < total_pages:
             signal.set(cur + 1)
 
-    prev_btn = Box(Text("<", fg="#cccccc"), padding_left=1, padding_right=1)
+    prev_btn = Box(Text("<", fg=nav_fg), padding_left=1, padding_right=1)
     prev_btn.on_mouse_down = _prev
 
     children: list[Any] = [prev_btn]
@@ -42,14 +48,14 @@ def Pagination(
         is_active = page == current
         text = Text(
             str(page),
-            fg="#ffffff" if is_active else "#888888",
+            fg=active_fg if is_active else inactive_fg,
             bold=is_active,
         )
         btn = Box(text, padding_left=0, padding_right=1)
         btn.on_mouse_down = _make_page_handler(page)
         children.append(btn)
 
-    next_btn = Box(Text(">", fg="#cccccc"), padding_left=1, padding_right=1)
+    next_btn = Box(Text(">", fg=nav_fg), padding_left=1, padding_right=1)
     next_btn.on_mouse_down = _next
     children.append(next_btn)
 

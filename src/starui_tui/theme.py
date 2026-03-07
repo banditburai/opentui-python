@@ -110,6 +110,15 @@ TUI_THEME: dict[tuple[str, str, str], dict[str, Any]] = {
         "active_bg": "#3498db",
         "inactive_fg": "#888888",
     },
+    # Breadcrumb
+    ("breadcrumb_separator", "variant", "default"): {"fg": "#666666"},
+    ("breadcrumb_item", "variant", "default"): {"fg": "#3498db"},
+    # Pagination
+    ("pagination", "variant", "default"): {
+        "active_fg": "#ffffff",
+        "inactive_fg": "#888888",
+        "nav_fg": "#cccccc",
+    },
     # Command
     ("command", "variant", "default"): {
         "border": True,
