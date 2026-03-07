@@ -21,6 +21,7 @@ class InputState:
         self.text: str = ""
         self.history: list[str] = []
         self.history_index: int = -1
+        self._draft: str = ""
         self.on_submit: Callable[[str], None] | None = None
 
     def submit(self) -> str:
@@ -37,6 +38,7 @@ class InputState:
         if not self.history:
             return
         if self.history_index == -1:
+            self._draft = self.text
             self.history_index = len(self.history) - 1
         elif self.history_index > 0:
             self.history_index -= 1
@@ -51,7 +53,7 @@ class InputState:
             self.text = self.history[self.history_index]
         else:
             self.history_index = -1
-            self.text = ""
+            self.text = self._draft
 
     def handle_key(self, event: KeyEvent) -> bool:
         """Process a key event. Returns True if handled."""
@@ -88,9 +90,9 @@ class InputState:
                 self.text = self.text[:-1]
             return True
 
-        # Regular character
-        if len(key) == 1 and not event.ctrl and not event.alt:
-            self.text += key
+        # Regular character — use original case from event.key
+        if len(event.key) == 1 and not event.ctrl and not event.alt:
+            self.text += event.key
             return True
 
         return False

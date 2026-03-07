@@ -78,14 +78,16 @@ class TestInputState:
         state.history_down()
         assert state.text == "two"
 
-    def test_history_down_past_end_clears(self):
+    def test_history_down_past_end_restores_draft(self):
         state = InputState()
         state.text = "cmd"
         state.submit()
+        # Type a new draft, then navigate up and back down
+        state.text = "my draft"
         state.history_up()
         assert state.text == "cmd"
         state.history_down()
-        assert state.text == ""
+        assert state.text == "my draft"  # draft restored, not empty
 
     def test_handle_key_enter_submits(self):
         state = InputState()
@@ -126,6 +128,13 @@ class TestInputState:
         event = KeyEvent(key="a")
         state.handle_key(event)
         assert state.text == "a"
+
+    def test_handle_key_preserves_case(self):
+        state = InputState()
+        state.handle_key(KeyEvent(key="A"))
+        state.handle_key(KeyEvent(key="b"))
+        state.handle_key(KeyEvent(key="C"))
+        assert state.text == "AbC"
 
     def test_handle_key_backspace(self):
         state = InputState()
