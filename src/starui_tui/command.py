@@ -26,12 +26,9 @@ def CommandInput(
     **kwargs: Any,
 ) -> Box:
     """Command palette search input."""
-    return Box(
-        Text(placeholder, fg="#888888"),
-        border=True,
-        border_style="single",
-        **kwargs,
-    )
+    props = {**resolve_props("command_input", variant="default"), **kwargs}
+    text_props, box_props = split_props(props)
+    return Box(Text(placeholder, **text_props), **box_props)
 
 
 def CommandList(
@@ -51,16 +48,16 @@ def CommandItem(
     **kwargs: Any,
 ) -> Box:
     """Command palette item with optional shortcut and callback."""
+    props = {**resolve_props("command_item", variant="default"), **kwargs}
+    _, box_props = split_props(props)
+
     children: list[Any] = [Text(label)]
     if shortcut is not None:
-        children.append(Text(shortcut, fg="#666666"))
+        sc_props = resolve_props("command_shortcut", variant="default")
+        sc_text, _ = split_props(sc_props)
+        children.append(Text(shortcut, **sc_text))
 
-    box = Box(
-        *children,
-        flex_direction="row",
-        justify_content="space-between",
-        **kwargs,
-    )
+    box = Box(*children, **box_props)
 
     if on_select is not None:
         def _handle(_evt: Any) -> None:
@@ -76,5 +73,7 @@ def CommandGroup(
     **kwargs: Any,
 ) -> Box:
     """Command palette group with heading."""
-    header = Text(heading, fg="#888888", bold=True)
+    h_props = resolve_props("command_group_heading", variant="default")
+    h_text, _ = split_props(h_props)
+    header = Text(heading, **h_text)
     return Box(header, *children, flex_direction="column", **kwargs)

@@ -125,6 +125,17 @@ TUI_THEME: dict[tuple[str, str, str], dict[str, Any]] = {
         "border_style": "round",
         "padding": 1,
     },
+    ("command_input", "variant", "default"): {
+        "border": True,
+        "border_style": "single",
+        "fg": "#888888",
+    },
+    ("command_item", "variant", "default"): {
+        "flex_direction": "row",
+        "justify_content": "space-between",
+    },
+    ("command_shortcut", "variant", "default"): {"fg": "#666666"},
+    ("command_group_heading", "variant", "default"): {"fg": "#888888", "bold": True},
     # Dialog
     ("dialog_content", "variant", "default"): {
         "border": True,
