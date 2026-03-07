@@ -606,8 +606,13 @@ class _SignalState:
         return cls._instance
 
     def register(self, signal: Signal) -> None:
+        # Use list but deduplicate on add
         if signal not in self._signals:
             self._signals.append(signal)
+
+    def get_notified_signals(self) -> set[Signal]:
+        """Return notified signals directly (caller should not mutate)."""
+        return self._notified
 
     def mark_read(self, signal: Signal) -> None:
         self._read_this_frame.add(signal)
@@ -617,9 +622,6 @@ class _SignalState:
 
     def has_changes(self) -> bool:
         return len(self._notified) > 0
-
-    def get_notified_signals(self) -> set[Signal]:
-        return self._notified.copy()
 
     def reset(self) -> None:
         self._notified.clear()

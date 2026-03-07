@@ -25,9 +25,14 @@ class EditBuffer:
 
     def get_text(self) -> str:
         """Get the current text content."""
-        buf = b"\x00" * 65536
-        length = self._native.edit_buffer.get_text(self._ptr, buf, len(buf))
-        return buf[:length].decode("utf-8", errors="replace")
+        buf_size = 4096
+        while True:
+            buf = b"\x00" * buf_size
+            length = self._native.edit_buffer.get_text(self._ptr, buf, len(buf))
+            if length < buf_size:
+                return buf[:length].decode("utf-8", errors="replace")
+            # Buffer was too small, double and retry
+            buf_size *= 2
 
     def set_text(self, text: str) -> None:
         """Set the text content."""

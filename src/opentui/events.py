@@ -1,6 +1,16 @@
 """Event types for OpenTUI Python."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+class MouseButton:
+    """Mouse button constants."""
+
+    LEFT = 0
+    MIDDLE = 1
+    RIGHT = 2
+    WHEEL_UP = 4
+    WHEEL_DOWN = 5
 
 
 @dataclass
@@ -15,6 +25,7 @@ class KeyEvent:
         alt: Whether Alt key is pressed
         meta: Whether Meta (Cmd/Windows) key is pressed
         repeated: Whether the key is being held down (auto-repeat)
+        event_type: "press" or "release"
     """
 
     key: str
@@ -24,6 +35,25 @@ class KeyEvent:
     alt: bool = False
     meta: bool = False
     repeated: bool = False
+    event_type: str = "press"
+    _propagation_stopped: bool = field(default=False, repr=False)
+    _default_prevented: bool = field(default=False, repr=False)
+
+    def stop_propagation(self) -> None:
+        """Stop event from propagating to parent handlers."""
+        self._propagation_stopped = True
+
+    def prevent_default(self) -> None:
+        """Prevent default action for this event."""
+        self._default_prevented = True
+
+    @property
+    def propagation_stopped(self) -> bool:
+        return self._propagation_stopped
+
+    @property
+    def default_prevented(self) -> bool:
+        return self._default_prevented
 
     @property
     def name(self) -> str:
@@ -57,6 +87,9 @@ class MouseEvent:
         shift: Whether Shift key is pressed
         ctrl: Whether Ctrl key is pressed
         alt: Whether Alt key is pressed
+        source: The renderable that originally received the event
+        target: The renderable that the event is being dispatched to
+        is_dragging: Whether a drag operation is in progress
     """
 
     type: str
@@ -67,6 +100,27 @@ class MouseEvent:
     shift: bool = False
     ctrl: bool = False
     alt: bool = False
+    source: object = None
+    target: object = None
+    is_dragging: bool = False
+    _propagation_stopped: bool = field(default=False, repr=False)
+    _default_prevented: bool = field(default=False, repr=False)
+
+    def stop_propagation(self) -> None:
+        """Stop event from propagating to parent handlers."""
+        self._propagation_stopped = True
+
+    def prevent_default(self) -> None:
+        """Prevent default action for this event."""
+        self._default_prevented = True
+
+    @property
+    def propagation_stopped(self) -> bool:
+        return self._propagation_stopped
+
+    @property
+    def default_prevented(self) -> bool:
+        return self._default_prevented
 
     @property
     def name(self) -> str:
@@ -86,6 +140,24 @@ class PasteEvent:
     """
 
     text: str
+    _propagation_stopped: bool = field(default=False, repr=False)
+    _default_prevented: bool = field(default=False, repr=False)
+
+    def stop_propagation(self) -> None:
+        """Stop event from propagating to parent handlers."""
+        self._propagation_stopped = True
+
+    def prevent_default(self) -> None:
+        """Prevent default action for this event."""
+        self._default_prevented = True
+
+    @property
+    def propagation_stopped(self) -> bool:
+        return self._propagation_stopped
+
+    @property
+    def default_prevented(self) -> bool:
+        return self._default_prevented
 
     def __str__(self) -> str:
         return f"PasteEvent({self.text[:20]!r}...)"
@@ -165,4 +237,5 @@ __all__ = [
     "FocusEvent",
     "ResizeEvent",
     "Keys",
+    "MouseButton",
 ]

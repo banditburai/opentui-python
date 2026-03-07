@@ -9,7 +9,7 @@ Build a Python library that provides full OpenTUI API parity, enabling Python de
 
 ## Solution Overview
 
-Create Python bindings to OpenTUI's native Zig core using ctypes, with a Pythonic API that mirrors StarHTML's tag factory pattern. The implementation will use character-by-character diff testing against the TypeScript reference to ensure exact parity.
+Create Python bindings to OpenTUI's native Zig core using nanobind, with a Pythonic API that mirrors StarHTML's tag factory pattern. The implementation will use character-by-character diff testing against the TypeScript reference to ensure exact parity.
 
 ## Architecture
 
@@ -23,10 +23,10 @@ Create Python bindings to OpenTUI's native Zig core using ctypes, with a Pythoni
 │  Renderer Layer                          │  Hooks Layer     │
 │  Buffer, Layout, Event Loop              │  useKeyboard...  │
 ├─────────────────────────────────────────────────────────────┤
-│  FFI Layer (ctypes)                                         │
+│  FFI Layer (nanobind)                                        │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  structs.py - C struct definitions                  │   │
-│  │  ffi.py    - Function bindings                     │   │
+│  │  opentui_bindings/ - C++ nanobind bindings          │   │
+│  │  ffi.py           - Python binding wrapper          │   │
 │  └─────────────────────────────────────────────────────┘   │
 ├─────────────────────────────────────────────────────────────┤
 │  OpenTUI Core (libopentui.dylib/so) - Zig compiled         │
@@ -137,7 +137,7 @@ lines = buffer.get_span_lines()
 
 ## Key Decisions
 
-1. **ctypes over Cython** - No compiled extensions, pure Python
+1. **nanobind C++ bindings** - Fast native extensions via nanobind
 2. **StarHTML-style API** - Tag factory pattern with positional children
 3. **Signals over hooks** - Fine-grained reactivity (matching SolidJS)
 4. **Testing at buffer level** - Compare span lines, not ANSI output
@@ -154,20 +154,24 @@ lines = buffer.get_span_lines()
 
 | Component | Status | Priority |
 |-----------|--------|----------|
-| Box | Partial | P0 |
-| Text | Partial | P0 |
-| Input | Partial | P0 |
-| Textarea | Missing | P1 |
-| Select | Partial | P1 |
-| ScrollBox | Partial | P1 |
-| TabSelect | Missing | P2 |
-| Slider | Missing | P2 |
-| Diff | Missing | P2 |
-| Markdown | Missing | P2 |
-| Code | Missing | P2 |
-| TextTable | Missing | P2 |
-| ASCIIFont | Missing | P2 |
-| LineNumber | Missing | P2 |
+| Box | Implemented | P0 |
+| Text | Implemented | P0 |
+| Input | Implemented | P0 |
+| Textarea | Implemented | P1 |
+| Select | Implemented | P1 |
+| ScrollBox | Implemented | P1 |
+| ScrollBar | Implemented | P1 |
+| TabSelect | Implemented | P2 |
+| Slider | Implemented | P2 |
+| Diff | Implemented | P2 |
+| Markdown | Implemented | P2 |
+| Code | Implemented | P2 |
+| TextTable | Implemented | P2 |
+| ASCIIFont | Implemented | P2 |
+| LineNumber | Implemented | P2 |
+| FrameBuffer | Implemented | P2 |
+| TextNode | Implemented | P2 |
+| VRenderable | Implemented | P2 |
 
 ## File Structure
 
@@ -175,16 +179,20 @@ lines = buffer.get_span_lines()
 opentui-python/
 ├── src/opentui/
 │   ├── __init__.py       # Main API exports
-│   ├── ffi.py            # ctypes bindings
-│   ├── structs.py       # C struct definitions
+│   ├── ffi.py            # nanobind bindings
+│   ├── structs.py       # Struct definitions
 │   ├── renderer.py      # CliRenderer, Buffer
 │   ├── components/
 │   │   ├── __init__.py
-│   │   ├── base.py      # BaseRenderable
+│   │   ├── base.py      # BaseRenderable, Renderable
 │   │   ├── box.py       # Box, ScrollBox
 │   │   ├── text.py      # Text, Span
 │   │   ├── input.py     # Input, Textarea
-│   │   └── advanced.py  # Diff, Code, etc.
+│   │   ├── advanced.py  # Diff, Code, etc.
+│   │   ├── scrollbar.py # ScrollBar
+│   │   ├── framebuffer.py # FrameBuffer
+│   │   ├── textnode.py  # TextNode
+│   │   └── composition.py # VRenderable
 │   ├── signals.py       # Signal, computed, effect
 │   ├── hooks.py         # use_* functions
 │   ├── events.py        # Event types

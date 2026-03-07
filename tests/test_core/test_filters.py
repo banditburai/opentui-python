@@ -114,10 +114,10 @@ class TestSepiaFilter:
         result = filter_.apply(data, format="RGBA")
 
         # Red should become warm brownish
-        # Sepia: R' = 0.393*R + 0.769*G + 0.189*B = 0.393*255 ≈ 100
-        assert result[0] == 100  # Red becomes ~100
-        assert result[1] == 0  # Green becomes 0
-        assert result[2] == 0  # Blue becomes 0
+        # Sepia: R' = int(0.393*255)=100, G' = int(0.349*255)=88, B' = int(0.272*255)=69
+        assert result[0] == 100  # Red channel
+        assert result[1] == 88   # Green channel
+        assert result[2] == 69   # Blue channel
 
     def test_sepia_preserves_alpha(self):
         """Test that sepia preserves alpha."""

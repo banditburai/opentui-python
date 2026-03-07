@@ -10,15 +10,21 @@ from .advanced import (
     TabSelect,
     TextTable,
 )
-from .base import BaseRenderable, Renderable
+from .base import BaseRenderable, LayoutOptions, Renderable, StyleOptions
 from .box import Box, ScrollBox
+from .composition import VRenderable
+from .framebuffer import FrameBuffer
 from .input import Input, Select, SelectOption, Textarea
+from .scrollbar import ScrollBar
 from .text import Bold, Italic, LineBreak, Link, Span, Text, TextModifier, Underline
+from .textnode import StyledChunk, TextNode, TextStyle
 
 __all__ = [
     # Base
     "BaseRenderable",
     "Renderable",
+    "LayoutOptions",
+    "StyleOptions",
     # Box
     "Box",
     "ScrollBox",
@@ -45,4 +51,11 @@ __all__ = [
     "TabSelect",
     "Slider",
     "TextTable",
+    # New components
+    "ScrollBar",
+    "FrameBuffer",
+    "TextNode",
+    "TextStyle",
+    "StyledChunk",
+    "VRenderable",
 ]

@@ -729,6 +729,24 @@ class GrayscaleFilter(Filter):
     def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply grayscale conversion to image data.
 
+        Tries NumPy-accelerated path first, falls back to pure Python.
+
+        Args:
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Grayscale image data (same format as input)
+        """
+        try:
+            import numpy as np
+            return self._apply_numpy(data, format)
+        except ImportError:
+            return self._apply_pure(data, format)
+
+    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+        """Apply grayscale conversion using pure Python.
+
         Args:
             data: Raw image data (RGBA or RGB format)
             format: Image format - "RGBA" or "RGB"
@@ -752,13 +770,48 @@ class GrayscaleFilter(Filter):
             gray = int(0.299 * r + 0.587 * g + 0.114 * b)
 
             result[i] = gray
+            result[i + 1] = gray
+            result[i + 2] = gray
             if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
-            elif not is_rgba and i + 2 < len(data):
-                result[i + 1] = gray
-                result[i + 2] = gray
 
         return bytes(result)
+
+    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+        """Apply grayscale conversion using NumPy vectorized operations.
+
+        Args:
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Grayscale image data (same format as input)
+        """
+        import numpy as np
+
+        if len(data) < 3:
+            return data
+
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
+
+        arr = np.frombuffer(data, dtype=np.uint8).copy()
+        num_pixels = len(arr) // bytes_per_pixel
+        arr = arr[: num_pixels * bytes_per_pixel]
+        pixels = arr.reshape(num_pixels, bytes_per_pixel)
+
+        r = pixels[:, 0].astype(np.float64)
+        g = pixels[:, 1].astype(np.float64)
+        b = pixels[:, 2].astype(np.float64)
+
+        gray = (0.299 * r + 0.587 * g + 0.114 * b).astype(np.uint8)
+
+        pixels[:, 0] = gray
+        pixels[:, 1] = gray
+        pixels[:, 2] = gray
+        # Alpha channel (index 3) is preserved as-is from the copy
+
+        return pixels.tobytes()
 
 
 class BlurFilter(Filter):
@@ -787,6 +840,28 @@ class BlurFilter(Filter):
         self, data: bytes, width: int | None = None, height: int | None = None, format: str = "RGBA"
     ) -> bytes:
         """Apply Gaussian blur to image data.
+
+        Tries NumPy-accelerated path first, falls back to pure Python.
+
+        Args:
+            data: Raw image data
+            width: Image width in pixels (required for non-square images)
+            height: Image height in pixels (optional, defaults to width)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Blurred image data
+        """
+        try:
+            import numpy as np
+            return self._apply_numpy(data, width, height, format)
+        except ImportError:
+            return self._apply_pure(data, width, height, format)
+
+    def _apply_pure(
+        self, data: bytes, width: int | None = None, height: int | None = None, format: str = "RGBA"
+    ) -> bytes:
+        """Apply Gaussian blur using pure Python.
 
         Args:
             data: Raw image data
@@ -856,6 +931,80 @@ class BlurFilter(Filter):
 
         return bytes(result)
 
+    def _apply_numpy(
+        self, data: bytes, width: int | None = None, height: int | None = None, format: str = "RGBA"
+    ) -> bytes:
+        """Apply Gaussian blur using NumPy with separable convolution.
+
+        Implements a two-pass separable Gaussian blur (horizontal then vertical),
+        which is O(n*k) instead of O(n*k^2) for the 2D kernel approach.
+
+        Args:
+            data: Raw image data
+            width: Image width in pixels (required for non-square images)
+            height: Image height in pixels (optional, defaults to width)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Blurred image data
+        """
+        import numpy as np
+
+        if len(data) < 4:
+            return data
+
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
+
+        if width is None:
+            width = int(len(data) / bytes_per_pixel)
+            if height is None:
+                height = width
+        elif height is None:
+            height = len(data) // (width * bytes_per_pixel)
+
+        expected_size = width * height * bytes_per_pixel
+        if len(data) != expected_size:
+            raise ValueError(
+                f"Data size {len(data)} doesn't match dimensions {width}x{height} with format {format}"
+            )
+
+        radius = int(self._radius)
+        if radius < 1:
+            return data
+
+        # Create 1D Gaussian kernel for separable convolution
+        sigma = radius / 3.0
+        kernel_1d = self._create_gaussian_kernel_1d(radius, sigma)
+
+        # Reshape data into (height, width, channels) float array
+        arr = np.frombuffer(data, dtype=np.uint8).reshape(height, width, bytes_per_pixel).astype(np.float64)
+
+        # Determine which channels to blur (all color channels, preserve alpha)
+        num_blur_channels = bytes_per_pixel  # blur all channels including alpha for consistency
+
+        # Pad the image with edge values (replicate border)
+        padded = np.pad(arr, ((radius, radius), (radius, radius), (0, 0)), mode="edge")
+
+        # Horizontal pass: convolve each row with the 1D kernel
+        kernel_h = kernel_1d.reshape(1, -1, 1)  # shape: (1, kernel_size, 1) for broadcasting
+        h_result = np.zeros_like(arr, dtype=np.float64)
+        for k in range(len(kernel_1d)):
+            h_result += padded[radius : radius + height, k : k + width, :] * kernel_1d[k]
+
+        # Pad the horizontal result for the vertical pass
+        padded_h = np.pad(h_result, ((radius, radius), (0, 0), (0, 0)), mode="edge")
+
+        # Vertical pass: convolve each column with the 1D kernel
+        v_result = np.zeros_like(arr, dtype=np.float64)
+        for k in range(len(kernel_1d)):
+            v_result += padded_h[k : k + height, :, :] * kernel_1d[k]
+
+        # Clamp to [0, 255] and convert back to uint8
+        result = np.clip(v_result, 0, 255).astype(np.uint8)
+
+        return result.tobytes()
+
     def _create_gaussian_kernel(self, size: int, sigma: float) -> list[float]:
         """Create a Gaussian kernel.
 
@@ -879,6 +1028,24 @@ class BlurFilter(Filter):
                 sum_val += value
 
         return [k / sum_val for k in kernel]
+
+    def _create_gaussian_kernel_1d(self, radius: int, sigma: float) -> "np.ndarray":
+        """Create a 1D Gaussian kernel for separable convolution.
+
+        Args:
+            radius: Kernel radius (kernel size = 2*radius + 1)
+            sigma: Standard deviation for Gaussian
+
+        Returns:
+            Normalized 1D NumPy kernel array
+        """
+        import numpy as np
+
+        size = radius * 2 + 1
+        x = np.arange(size) - radius
+        kernel = np.exp(-(x * x) / (2 * sigma * sigma))
+        kernel /= kernel.sum()
+        return kernel
 
 
 class BrightnessFilter(Filter):
@@ -905,6 +1072,24 @@ class BrightnessFilter(Filter):
     def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply brightness adjustment to image data.
 
+        Tries NumPy-accelerated path first, falls back to pure Python.
+
+        Args:
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Brightness-adjusted image data
+        """
+        try:
+            import numpy as np
+            return self._apply_numpy(data, format)
+        except ImportError:
+            return self._apply_pure(data, format)
+
+    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+        """Apply brightness adjustment using pure Python.
+
         Args:
             data: Raw image data (RGBA or RGB format)
             format: Image format - "RGBA" or "RGB"
@@ -922,13 +1107,41 @@ class BrightnessFilter(Filter):
 
         for i in range(0, len(data), bytes_per_pixel):
             result[i] = min(255, int(data[i] * factor))
+            result[i + 1] = min(255, int(data[i + 1] * factor))
+            result[i + 2] = min(255, int(data[i + 2] * factor))
             if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
-            elif not is_rgba and i + 2 < len(data):
-                result[i + 1] = min(255, int(data[i + 1] * factor))
-                result[i + 2] = min(255, int(data[i + 2] * factor))
 
         return bytes(result)
+
+    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+        """Apply brightness adjustment using NumPy vectorized operations.
+
+        Args:
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Brightness-adjusted image data
+        """
+        import numpy as np
+
+        if len(data) < 3:
+            return data
+
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
+
+        arr = np.frombuffer(data, dtype=np.uint8).copy()
+        num_pixels = len(arr) // bytes_per_pixel
+        arr = arr[: num_pixels * bytes_per_pixel]
+        pixels = arr.reshape(num_pixels, bytes_per_pixel)
+
+        # Scale color channels, leave alpha untouched
+        color = pixels[:, :3].astype(np.float64) * self._factor
+        pixels[:, :3] = np.clip(color, 0, 255).astype(np.uint8)
+
+        return pixels.tobytes()
 
 
 class ContrastFilter(Filter):
@@ -955,6 +1168,24 @@ class ContrastFilter(Filter):
     def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply contrast adjustment to image data.
 
+        Tries NumPy-accelerated path first, falls back to pure Python.
+
+        Args:
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Contrast-adjusted image data
+        """
+        try:
+            import numpy as np
+            return self._apply_numpy(data, format)
+        except ImportError:
+            return self._apply_pure(data, format)
+
+    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+        """Apply contrast adjustment using pure Python.
+
         Args:
             data: Raw image data (RGBA or RGB format)
             format: Image format - "RGBA" or "RGB"
@@ -973,13 +1204,42 @@ class ContrastFilter(Filter):
 
         for i in range(0, len(data), bytes_per_pixel):
             result[i] = max(0, min(255, int(midpoint + (data[i] - midpoint) * factor)))
+            result[i + 1] = max(0, min(255, int(midpoint + (data[i + 1] - midpoint) * factor)))
+            result[i + 2] = max(0, min(255, int(midpoint + (data[i + 2] - midpoint) * factor)))
             if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
-            elif not is_rgba and i + 2 < len(data):
-                result[i + 1] = max(0, min(255, int(midpoint + (data[i + 1] - midpoint) * factor)))
-                result[i + 2] = max(0, min(255, int(midpoint + (data[i + 2] - midpoint) * factor)))
 
         return bytes(result)
+
+    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+        """Apply contrast adjustment using NumPy vectorized operations.
+
+        Args:
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Contrast-adjusted image data
+        """
+        import numpy as np
+
+        if len(data) < 3:
+            return data
+
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
+
+        arr = np.frombuffer(data, dtype=np.uint8).copy()
+        num_pixels = len(arr) // bytes_per_pixel
+        arr = arr[: num_pixels * bytes_per_pixel]
+        pixels = arr.reshape(num_pixels, bytes_per_pixel)
+
+        # Apply contrast formula: midpoint + (value - midpoint) * factor
+        color = pixels[:, :3].astype(np.float64)
+        color = 128.0 + (color - 128.0) * self._factor
+        pixels[:, :3] = np.clip(color, 0, 255).astype(np.uint8)
+
+        return pixels.tobytes()
 
 
 class SepiaFilter(Filter):
@@ -994,6 +1254,29 @@ class SepiaFilter(Filter):
 
     def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply sepia effect to image data.
+
+        Tries NumPy-accelerated path first, falls back to pure Python.
+
+        Uses the standard sepia transformation matrix:
+        R' = 0.393*R + 0.769*G + 0.189*B
+        G' = 0.349*R + 0.686*G + 0.168*B
+        B' = 0.272*R + 0.534*G + 0.131*B
+
+        Args:
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Sepia-toned image data
+        """
+        try:
+            import numpy as np
+            return self._apply_numpy(data, format)
+        except ImportError:
+            return self._apply_pure(data, format)
+
+    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+        """Apply sepia effect using pure Python.
 
         Uses the standard sepia transformation matrix:
         R' = 0.393*R + 0.769*G + 0.189*B
@@ -1024,13 +1307,53 @@ class SepiaFilter(Filter):
             new_b = min(255, int(0.272 * r + 0.534 * g + 0.131 * b))
 
             result[i] = new_r
+            result[i + 1] = new_g
+            result[i + 2] = new_b
             if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
-            elif not is_rgba and i + 2 < len(data):
-                result[i + 1] = new_g
-                result[i + 2] = new_b
 
         return bytes(result)
+
+    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+        """Apply sepia effect using NumPy vectorized operations.
+
+        Args:
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Sepia-toned image data
+        """
+        import numpy as np
+
+        if len(data) < 3:
+            return data
+
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
+
+        arr = np.frombuffer(data, dtype=np.uint8).copy()
+        num_pixels = len(arr) // bytes_per_pixel
+        arr = arr[: num_pixels * bytes_per_pixel]
+        pixels = arr.reshape(num_pixels, bytes_per_pixel)
+
+        # Extract RGB channels as float
+        rgb = pixels[:, :3].astype(np.float64)
+
+        # Sepia transformation matrix (applied as matrix multiply)
+        # Each row produces one output channel from all three input channels
+        sepia_matrix = np.array([
+            [0.393, 0.769, 0.189],  # R' coefficients
+            [0.349, 0.686, 0.168],  # G' coefficients
+            [0.272, 0.534, 0.131],  # B' coefficients
+        ])
+
+        # Matrix multiply: (num_pixels, 3) @ (3, 3)^T -> (num_pixels, 3)
+        sepia_rgb = rgb @ sepia_matrix.T
+
+        pixels[:, :3] = np.clip(sepia_rgb, 0, 255).astype(np.uint8)
+
+        return pixels.tobytes()
 
 
 class InvertFilter(Filter):
@@ -1045,6 +1368,24 @@ class InvertFilter(Filter):
 
     def apply(self, data: bytes, format: str = "RGBA") -> bytes:
         """Apply color inversion to image data.
+
+        Tries NumPy-accelerated path first, falls back to pure Python.
+
+        Args:
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Inverted image data
+        """
+        try:
+            import numpy as np
+            return self._apply_numpy(data, format)
+        except ImportError:
+            return self._apply_pure(data, format)
+
+    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+        """Apply color inversion using pure Python.
 
         Args:
             data: Raw image data (RGBA or RGB format)
@@ -1062,13 +1403,40 @@ class InvertFilter(Filter):
 
         for i in range(0, len(data), bytes_per_pixel):
             result[i] = 255 - data[i]
+            result[i + 1] = 255 - data[i + 1]
+            result[i + 2] = 255 - data[i + 2]
             if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
-            elif i + 2 < len(data):
-                result[i + 1] = 255 - data[i + 1]
-                result[i + 2] = 255 - data[i + 2]
 
         return bytes(result)
+
+    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+        """Apply color inversion using NumPy vectorized operations.
+
+        Args:
+            data: Raw image data (RGBA or RGB format)
+            format: Image format - "RGBA" or "RGB"
+
+        Returns:
+            Inverted image data
+        """
+        import numpy as np
+
+        if len(data) < 3:
+            return data
+
+        is_rgba = format.upper() == "RGBA"
+        bytes_per_pixel = 4 if is_rgba else 3
+
+        arr = np.frombuffer(data, dtype=np.uint8).copy()
+        num_pixels = len(arr) // bytes_per_pixel
+        arr = arr[: num_pixels * bytes_per_pixel]
+        pixels = arr.reshape(num_pixels, bytes_per_pixel)
+
+        # Invert only color channels, preserve alpha
+        pixels[:, :3] = 255 - pixels[:, :3]
+
+        return pixels.tobytes()
 
 
 class FilterChain:

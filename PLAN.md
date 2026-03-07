@@ -8,12 +8,12 @@ Python bindings for OpenTUI's native Zig core, enabling Python developers to bui
 
 1. **Ecosystem Alignment**: Bind to OpenTUI core (not Rezi/Zireael) for maximum community support
 2. **API Parity**: Match OpenTUI's TypeScript API exactly for easy porting and TDD validation
-3. **Pure Python**: Use ctypes (like Bun FFI) - no Rust compilation needed for end users
+3. **nanobind bindings**: Fast C++ bindings via nanobind for performance
 
 ## Architecture
 
 ```
-OpenTUI (Zig) → libopentui.so/dylib → Python ctypes → Python API
+OpenTUI (Zig) → libopentui.so/dylib → nanobind C++ bindings → Python API
                         ↑
               Downloaded using bun
 ```

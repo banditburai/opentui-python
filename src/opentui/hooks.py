@@ -105,7 +105,23 @@ def use_keyboard(
         # With release events
         use_keyboard(on_key, {"release": True})
     """
-    _keyboard_handlers.append(handler)
+    if options and options.get("release"):
+        # Wrap handler to also receive release events
+        def wrapper(event: KeyEvent) -> None:
+            handler(event)
+
+        wrapper._original_handler = handler  # type: ignore[attr-defined]
+        wrapper._receive_release = True  # type: ignore[attr-defined]
+        _keyboard_handlers.append(wrapper)
+    else:
+        # Wrap handler to filter out release events
+        def press_only_wrapper(event: KeyEvent) -> None:
+            if not hasattr(event, "event_type") or event.event_type == "press":
+                handler(event)
+
+        press_only_wrapper._original_handler = handler  # type: ignore[attr-defined]
+        press_only_wrapper._receive_release = False  # type: ignore[attr-defined]
+        _keyboard_handlers.append(press_only_wrapper)
 
 
 def use_paste(callback: Callable[[str], None]) -> None:

@@ -201,17 +201,23 @@ class InputHandler:
 
         for handler in self._key_handlers:
             handler(event)
+            if event.propagation_stopped:
+                break
 
     def _emit_mouse(self, event: MouseEvent) -> None:
         """Emit a mouse event."""
         for handler in self._mouse_handlers:
             handler(event)
+            if event.propagation_stopped:
+                break
 
     def _emit_paste(self, text: str) -> None:
         """Emit a paste event."""
         event = PasteEvent(text=text)
         for handler in self._paste_handlers:
             handler(event)
+            if event.propagation_stopped:
+                break
 
 
 def _csi_num_to_key(num: int) -> str:

@@ -60,6 +60,8 @@ class Buffer:
         self._native = native
         self._width: int | None = None
         self._height: int | None = None
+        self._scissor_stack: list[tuple[int, int, int, int]] = []
+        self._opacity_stack: list[float] = []
 
     @property
     def width(self) -> int:
@@ -83,6 +85,15 @@ class Buffer:
         self._width = width
         self._height = height
 
+    def _apply_opacity_to_color(self, color: s.RGBA | None) -> s.RGBA | None:
+        """Apply current opacity stack to a color's alpha channel."""
+        if color is None or not self._opacity_stack:
+            return color
+        opacity = self.get_current_opacity()
+        if opacity >= 1.0:
+            return color
+        return s.RGBA(color.r, color.g, color.b, color.a * opacity)
+
     def draw_text(
         self,
         text: str,
@@ -92,7 +103,32 @@ class Buffer:
         bg: s.RGBA | None = None,
         attributes: int = 0,
     ) -> None:
-        # Native buffer_draw_text takes (buffer, text, len, x, y, fg, bg, attrs)
+        # Scissor clipping: skip if entirely outside clip rect
+        if self._scissor_stack:
+            sx, sy, sw, sh = self._scissor_stack[-1]
+            if sw <= 0 or sh <= 0:
+                return
+            if y < sy or y >= sy + sh:
+                return
+            # Clip text horizontally
+            text_len = len(text)
+            if x + text_len <= sx or x >= sx + sw:
+                return
+            # Trim characters outside scissor rect
+            if x < sx:
+                trim = sx - x
+                text = text[trim:]
+                x = sx
+            end = sx + sw
+            if x + len(text) > end:
+                text = text[: end - x]
+            if not text:
+                return
+
+        # Apply opacity
+        fg = self._apply_opacity_to_color(fg)
+        bg = self._apply_opacity_to_color(bg)
+
         if isinstance(text, str):
             text_bytes = text.encode("utf-8")
         else:
@@ -113,7 +149,22 @@ class Buffer:
         height: int,
         bg: s.RGBA | None = None,
     ) -> None:
-        # Native buffer_fill_rect takes (buffer, x, y, width, height, bg)
+        # Scissor clipping: intersect fill rect with scissor rect
+        if self._scissor_stack:
+            sx, sy, sw, sh = self._scissor_stack[-1]
+            if sw <= 0 or sh <= 0:
+                return
+            nx = max(x, sx)
+            ny = max(y, sy)
+            nw = min(x + width, sx + sw) - nx
+            nh = min(y + height, sy + sh) - ny
+            if nw <= 0 or nh <= 0:
+                return
+            x, y, width, height = nx, ny, nw, nh
+
+        # Apply opacity
+        bg = self._apply_opacity_to_color(bg)
+
         bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
         self._native.buffer_fill_rect(self._ptr, x, y, width, height, bg_tuple)
 
@@ -140,6 +191,140 @@ class Buffer:
                 result.append({"text": "", "width": 0})
         return result
 
+    # Scissor rect stack
+    def push_scissor_rect(self, x: int, y: int, width: int, height: int) -> None:
+        """Push a scissor rectangle. Drawing is clipped to the intersection of all active rects."""
+        if self._scissor_stack:
+            # Intersect with current scissor
+            cx, cy, cw, ch = self._scissor_stack[-1]
+            nx = max(x, cx)
+            ny = max(y, cy)
+            nw = min(x + width, cx + cw) - nx
+            nh = min(y + height, cy + ch) - ny
+            self._scissor_stack.append((nx, ny, max(0, nw), max(0, nh)))
+        else:
+            self._scissor_stack.append((x, y, width, height))
+
+    def pop_scissor_rect(self) -> None:
+        """Pop the most recent scissor rectangle."""
+        if self._scissor_stack:
+            self._scissor_stack.pop()
+
+    def get_scissor_rect(self) -> tuple[int, int, int, int] | None:
+        """Get the current scissor rectangle, or None if no clipping."""
+        return self._scissor_stack[-1] if self._scissor_stack else None
+
+    def _clip_coords(self, x: int, y: int) -> bool:
+        """Check if coordinates are within the current scissor rect."""
+        if not self._scissor_stack:
+            return True
+        sx, sy, sw, sh = self._scissor_stack[-1]
+        return sx <= x < sx + sw and sy <= y < sy + sh
+
+    # Opacity stack
+    def push_opacity(self, opacity: float) -> None:
+        """Push an opacity value. Combined multiplicatively with the stack."""
+        self._opacity_stack.append(opacity)
+
+    def pop_opacity(self) -> None:
+        """Pop the most recent opacity value."""
+        if self._opacity_stack:
+            self._opacity_stack.pop()
+
+    def get_current_opacity(self) -> float:
+        """Get the current combined opacity (product of all values in the stack)."""
+        if not self._opacity_stack:
+            return 1.0
+        result = 1.0
+        for o in self._opacity_stack:
+            result *= o
+        return result
+
+    # Additional drawing methods
+    def draw_rectangle(
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        border_style: str = "single",
+        border_color: s.RGBA | None = None,
+        bg: s.RGBA | None = None,
+    ) -> None:
+        """Draw a rectangle outline (no fill)."""
+        if width < 2 or height < 2:
+            return
+
+        chars = _get_border_chars(border_style)
+        tl, tr, bl, br, h_char, v_char = chars
+
+        # Top edge
+        self.draw_text(tl, x, y, fg=border_color, bg=bg)
+        for i in range(1, width - 1):
+            self.draw_text(h_char, x + i, y, fg=border_color, bg=bg)
+        self.draw_text(tr, x + width - 1, y, fg=border_color, bg=bg)
+
+        # Sides
+        for row in range(1, height - 1):
+            self.draw_text(v_char, x, y + row, fg=border_color, bg=bg)
+            self.draw_text(v_char, x + width - 1, y + row, fg=border_color, bg=bg)
+
+        # Bottom edge
+        self.draw_text(bl, x, y + height - 1, fg=border_color, bg=bg)
+        for i in range(1, width - 1):
+            self.draw_text(h_char, x + i, y + height - 1, fg=border_color, bg=bg)
+        self.draw_text(br, x + width - 1, y + height - 1, fg=border_color, bg=bg)
+
+    def draw_box(
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        border_style: str = "single",
+        border_color: s.RGBA | None = None,
+        bg: s.RGBA | None = None,
+        title: str | None = None,
+        title_alignment: str = "left",
+    ) -> None:
+        """Draw a full box with border, fill, and optional title."""
+        if width < 2 or height < 2:
+            return
+
+        # Fill interior
+        if bg:
+            self.fill_rect(x + 1, y + 1, width - 2, height - 2, bg=bg)
+
+        # Draw border
+        self.draw_rectangle(x, y, width, height, border_style, border_color, bg)
+
+        # Draw title
+        if title and width > 4:
+            max_title_len = width - 4
+            display_title = title[:max_title_len]
+            title_text = f" {display_title} "
+
+            if title_alignment == "center":
+                tx = x + (width - len(title_text)) // 2
+            elif title_alignment == "right":
+                tx = x + width - len(title_text) - 1
+            else:
+                tx = x + 1
+
+            self.draw_text(title_text, tx, y, fg=border_color, bg=bg)
+
+
+def _get_border_chars(style: str) -> tuple[str, str, str, str, str, str]:
+    """Get border characters for a style. Returns (tl, tr, bl, br, horizontal, vertical)."""
+    borders = {
+        "single": ("┌", "┐", "└", "┘", "─", "│"),
+        "double": ("╔", "╗", "╚", "╝", "═", "║"),
+        "round": ("╭", "╮", "╰", "╯", "─", "│"),
+        "bold": ("┏", "┓", "┗", "┛", "━", "┃"),
+        "block": ("█", "█", "█", "█", "█", "█"),
+    }
+    return borders.get(style, borders["single"])
+
 
 class CliRenderer:
     """CLI renderer - wraps the native OpenTUI renderer using nanobind."""
@@ -154,6 +339,14 @@ class CliRenderer:
         self._component_fn: Callable | None = None
         self._signal_state: Any = None
         self._last_component: Any = None
+        # Handler cache
+        self._handlers_dirty = True
+        self._cached_handlers: dict[str, list[Callable]] = {"key": [], "mouse": [], "paste": []}
+        # Post-processing and frame callbacks
+        self._post_process_fns: list[Callable] = []
+        self._frame_callbacks: list[Callable] = []
+        self._animation_frame_callbacks: dict[int, Callable] = {}
+        self._next_animation_id: int = 0
 
         if config.testing:
             self._width = config.width
@@ -307,6 +500,17 @@ class CliRenderer:
 
     def _render_frame(self, delta_time: float) -> None:
         """Render a single frame."""
+        # Run frame callbacks before render
+        for cb in self._frame_callbacks:
+            cb(delta_time)
+
+        # Run one-shot animation frame callbacks
+        if self._animation_frame_callbacks:
+            pending = dict(self._animation_frame_callbacks)
+            self._animation_frame_callbacks.clear()
+            for cb in pending.values():
+                cb(delta_time)
+
         if (
             self._component_fn is not None
             and self._signal_state is not None
@@ -323,6 +527,10 @@ class CliRenderer:
 
         if self._root:
             self._root.render(buffer, delta_time)
+
+        # Run post-processing functions after render
+        for fn in self._post_process_fns:
+            fn(buffer)
 
         self.render()
 
@@ -362,23 +570,107 @@ class CliRenderer:
             for child in renderable.get_children():
                 self._apply_yoga_layout_recursive(child)
 
+    def invalidate_handler_cache(self) -> None:
+        """Mark handler cache as dirty (call when tree structure changes)."""
+        self._handlers_dirty = True
+
     def _get_event_forwarding(self) -> dict:
-        """Get event handlers from all renderables."""
-        handlers = {"key": [], "mouse": [], "paste": []}
+        """Get event handlers from all renderables (cached)."""
+        if not self._handlers_dirty:
+            return self._cached_handlers
+
+        handlers: dict[str, list[Callable]] = {"key": [], "mouse": [], "paste": []}
 
         if self._root:
             self._collect_handlers(self._root, handlers)
 
+        self._cached_handlers = handlers
+        self._handlers_dirty = False
         return handlers
 
     def _collect_handlers(self, renderable, handlers: dict) -> None:
         """Recursively collect event handlers."""
-        if hasattr(renderable, "_key_handler"):
+        try:
             handlers["key"].append(renderable._key_handler)
+        except AttributeError:
+            pass
 
-        if hasattr(renderable, "get_children"):
+        try:
+            handler = renderable._on_key_down
+            if handler is not None:
+                handlers["key"].append(handler)
+        except AttributeError:
+            pass
+
+        try:
             for child in renderable.get_children():
                 self._collect_handlers(child, handlers)
+        except AttributeError:
+            pass
+
+    # Post-processing pipeline
+    def add_post_process_fn(self, fn: Callable) -> None:
+        """Add a post-processing function called after each render."""
+        self._post_process_fns.append(fn)
+
+    def remove_post_process_fn(self, fn: Callable) -> None:
+        """Remove a post-processing function."""
+        self._post_process_fns = [f for f in self._post_process_fns if f is not fn]
+
+    def set_frame_callback(self, callback: Callable) -> None:
+        """Add a callback called before each frame render."""
+        self._frame_callbacks.append(callback)
+
+    def remove_frame_callback(self, callback: Callable) -> None:
+        """Remove a frame callback."""
+        self._frame_callbacks = [f for f in self._frame_callbacks if f is not callback]
+
+    def request_animation_frame(self, callback: Callable) -> int:
+        """Request a callback on the next animation frame. Returns handle for cancellation."""
+        handle = self._next_animation_id
+        self._next_animation_id += 1
+        self._animation_frame_callbacks[handle] = callback
+        return handle
+
+    def cancel_animation_frame(self, handle: int) -> None:
+        """Cancel a previously requested animation frame callback."""
+        self._animation_frame_callbacks.pop(handle, None)
+
+    # Cursor and theme
+    def set_cursor_style(self, style: str) -> None:
+        """Set cursor style ('block', 'underline', 'bar')."""
+        style_map = {"block": 2, "underline": 4, "bar": 6}
+        code = style_map.get(style, 2)
+        try:
+            import sys
+            sys.stdout.write(f"\x1b[{code} q")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+    def set_cursor_color(self, color: str) -> None:
+        """Set cursor color (hex string)."""
+        try:
+            import sys
+            sys.stdout.write(f"\x1b]12;{color}\x07")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+    def get_theme_mode(self) -> str | None:
+        """Get terminal theme mode ('dark', 'light', or None if unknown)."""
+        # Most terminals default to dark mode
+        try:
+            import os
+            colorfgbg = os.environ.get("COLORFGBG", "")
+            if colorfgbg:
+                parts = colorfgbg.split(";")
+                if len(parts) >= 2:
+                    bg = int(parts[-1])
+                    return "light" if bg > 8 else "dark"
+        except (ValueError, IndexError):
+            pass
+        return None
 
     def stop(self) -> None:
         """Stop the renderer."""
