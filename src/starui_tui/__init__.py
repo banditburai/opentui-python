@@ -12,6 +12,7 @@ from .card import Card, CardContent, CardDescription, CardFooter, CardHeader, Ca
 from .input import Input
 from .textarea import Textarea
 from .theme import TUI_THEME, resolve_props
+from .typography import H1, H2, H3, H4, P, Label, Large, Lead, Muted, Small, InlineCode
 
 __all__ = [
     "TUI_THEME",
@@ -29,4 +30,15 @@ __all__ = [
     "CardTitle",
     "Input",
     "Textarea",
+    "Label",
+    "H1",
+    "H2",
+    "H3",
+    "H4",
+    "P",
+    "Lead",
+    "Large",
+    "Small",
+    "Muted",
+    "InlineCode",
 ]
