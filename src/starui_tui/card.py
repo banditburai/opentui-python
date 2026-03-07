@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from opentui.components import Box, Text
 
 from .props import split_props
 from .theme import resolve_props
 
+CardVariant = Literal["default"]
 
-def Card(*children: Any, variant: str = "default", **kwargs: Any) -> Box:
+
+def Card(*children: Any, variant: CardVariant = "default", **kwargs: Any) -> Box:
     """Card container with themed border and background."""
     props = {**resolve_props("card", variant=variant), **kwargs}
     _, box_props = split_props(props)
@@ -19,17 +21,20 @@ def Card(*children: Any, variant: str = "default", **kwargs: Any) -> Box:
 
 def CardHeader(*children: Any, **kwargs: Any) -> Box:
     """Card header section."""
-    return Box(*children, flex_direction="column", **kwargs)
+    props = {**resolve_props("card_header", variant="default"), **kwargs}
+    return Box(*children, **props)
 
 
 def CardTitle(content: str = "", **kwargs: Any) -> Text:
     """Card title text (bold)."""
-    return Text(content, bold=True, **kwargs)
+    props = {**resolve_props("card_title", variant="default"), **kwargs}
+    return Text(content, **props)
 
 
 def CardDescription(content: str = "", **kwargs: Any) -> Text:
     """Card description text (muted)."""
-    return Text(content, fg="#888888", **kwargs)
+    props = {**resolve_props("card_description", variant="default"), **kwargs}
+    return Text(content, **props)
 
 
 def CardContent(*children: Any, **kwargs: Any) -> Box:
@@ -39,4 +44,5 @@ def CardContent(*children: Any, **kwargs: Any) -> Box:
 
 def CardFooter(*children: Any, **kwargs: Any) -> Box:
     """Card footer section."""
-    return Box(*children, flex_direction="row", justify_content="flex-end", **kwargs)
+    props = {**resolve_props("card_footer", variant="default"), **kwargs}
+    return Box(*children, **props)
