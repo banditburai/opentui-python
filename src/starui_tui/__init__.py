@@ -5,6 +5,7 @@ with the starui web component library. The same variant names and props
 produce appropriate visual output in both web (HTML) and TUI (OpenTUI) modes.
 """
 
+from .accordion import Accordion, AccordionContent, AccordionItem, AccordionTrigger
 from .alert import Alert, AlertDescription, AlertTitle
 from .badge import Badge
 from .checkbox import Checkbox, RadioGroup, RadioGroupItem
@@ -24,6 +25,10 @@ from .typography import H1, H2, H3, H4, P, Label, Large, Lead, Muted, Small, Inl
 __all__ = [
     "TUI_THEME",
     "resolve_props",
+    "Accordion",
+    "AccordionContent",
+    "AccordionItem",
+    "AccordionTrigger",
     "Alert",
     "AlertDescription",
     "AlertTitle",
