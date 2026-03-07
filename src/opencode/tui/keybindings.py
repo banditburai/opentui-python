@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from opentui.events import KeyEvent
 
 
-@dataclass
+@dataclass(frozen=True)
 class Keybinding:
     """A single keybinding mapping a key combo to an action name."""
 
