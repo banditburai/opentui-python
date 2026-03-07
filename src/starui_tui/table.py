@@ -6,10 +6,15 @@ from typing import Any
 
 from opentui.components import Box, Text
 
+from .props import split_props
+from .theme import resolve_props
+
 
 def Table(*children: Any, **kwargs: Any) -> Box:
     """Table container with border."""
-    return Box(*children, flex_direction="column", border=True, border_style="single", **kwargs)
+    props = {**resolve_props("table", variant="default"), **kwargs}
+    _, box_props = split_props(props)
+    return Box(*children, **box_props)
 
 
 def TableHeader(*children: Any, **kwargs: Any) -> Box:
@@ -39,4 +44,5 @@ def TableCell(content: str = "", **kwargs: Any) -> Text:
 
 def TableCaption(content: str = "", **kwargs: Any) -> Text:
     """Table caption."""
-    return Text(content, fg="#888888", **kwargs)
+    props = {**resolve_props("table_caption", variant="default"), **kwargs}
+    return Text(content, **props)

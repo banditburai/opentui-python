@@ -60,6 +60,13 @@ TUI_THEME: dict[tuple[str, str, str], dict[str, Any]] = {
     # Typography
     ("muted", "variant", "default"): {"fg": "#888888"},
     ("inline_code", "variant", "default"): {"fg": "#d4af37", "bg": "#2d2d44"},
+    # Table
+    ("table", "variant", "default"): {
+        "border": True,
+        "border_style": "single",
+        "flex_direction": "column",
+    },
+    ("table_caption", "variant", "default"): {"fg": "#888888"},
     # Badge
     ("badge", "variant", "default"): {"bg": "#3498db", "fg": "#ffffff"},
     ("badge", "variant", "secondary"): {"bg": "#2d2d44", "fg": "#e0e0e0"},
