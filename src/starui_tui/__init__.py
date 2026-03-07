@@ -11,6 +11,7 @@ from .dialog import Dialog, DialogContent, DialogDescription, DialogFooter, Dial
 from .alert import Alert, AlertDescription, AlertTitle
 from .badge import Badge
 from .checkbox import Checkbox, RadioGroup, RadioGroupItem
+from .command import Command, CommandGroup, CommandInput, CommandItem, CommandList
 from .pagination import Pagination
 from .progress import Progress
 from .select import Select, SelectItem
@@ -41,6 +42,11 @@ __all__ = [
     "BreadcrumbItem",
     "Button",
     "Checkbox",
+    "Command",
+    "CommandGroup",
+    "CommandInput",
+    "CommandItem",
+    "CommandList",
     "Dialog",
     "DialogContent",
     "DialogDescription",

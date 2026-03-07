@@ -110,6 +110,12 @@ TUI_THEME: dict[tuple[str, str, str], dict[str, Any]] = {
         "active_bg": "#3498db",
         "inactive_fg": "#888888",
     },
+    # Command
+    ("command", "variant", "default"): {
+        "border": True,
+        "border_style": "round",
+        "padding": 1,
+    },
     # Dialog
     ("dialog_content", "variant", "default"): {
         "border": True,
