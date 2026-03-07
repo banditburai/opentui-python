@@ -1,9 +1,9 @@
 """TUI theme dict mapping (component, variant_axis, variant_value) to OpenTUI props."""
 
-from __future__ import annotations
+from typing import Any
 
 # Maps (component, variant_axis, variant_value) → OpenTUI Renderable props
-TUI_THEME: dict[tuple[str, str, str], dict] = {
+TUI_THEME: dict[tuple[str, str, str], dict[str, Any]] = {
     # Button variants
     ("button", "variant", "default"): {
         "border": True,
@@ -103,8 +103,17 @@ TUI_THEME: dict[tuple[str, str, str], dict] = {
 }
 
 
-def resolve_props(component: str, **variants: str) -> dict:
+# Axis application order: later axes override earlier ones on shared keys.
+# "size" intentionally overrides "variant" for geometry props (height, width, padding).
+AXIS_ORDER: list[str] = ["variant", "size"]
+
+
+def resolve_props(component: str, **variants: str) -> dict[str, Any]:
     """Merge theme props for a component across all variant axes.
+
+    Axes are applied in AXIS_ORDER (variant first, then size). If two axes
+    define the same prop key, the later axis wins. Any axes not in AXIS_ORDER
+    are applied last in arbitrary order.
 
     Args:
         component: Component name (e.g. "button", "card")
@@ -113,9 +122,17 @@ def resolve_props(component: str, **variants: str) -> dict:
     Returns:
         Merged dict of OpenTUI Renderable props.
     """
-    result: dict = {}
+    result: dict[str, Any] = {}
+    # Apply ordered axes first
+    for axis in AXIS_ORDER:
+        if axis in variants:
+            key = (component, axis, variants[axis])
+            if key in TUI_THEME:
+                result.update(TUI_THEME[key])
+    # Apply any remaining axes not in AXIS_ORDER
     for axis, value in variants.items():
-        key = (component, axis, value)
-        if key in TUI_THEME:
-            result.update(TUI_THEME[key])
+        if axis not in AXIS_ORDER:
+            key = (component, axis, value)
+            if key in TUI_THEME:
+                result.update(TUI_THEME[key])
     return result

@@ -36,6 +36,10 @@ class TestTUITheme:
         props = TUI_THEME[("button", "variant", "ghost")]
         assert props["border"] is False
 
+    def test_button_variant_secondary(self):
+        props = TUI_THEME[("button", "variant", "secondary")]
+        assert props["bg"] == "#2d2d44"
+
     def test_button_variant_link(self):
         props = TUI_THEME[("button", "variant", "link")]
         assert props["underline"] is True
@@ -55,7 +59,7 @@ class TestTUITheme:
         assert "padding" in props
 
     def test_badge_variants(self):
-        for variant in ("default", "destructive", "outline"):
+        for variant in ("default", "secondary", "destructive", "outline"):
             assert ("badge", "variant", variant) in TUI_THEME
 
     def test_alert_variants(self):
@@ -91,9 +95,16 @@ class TestResolveProps:
         assert "border" in props  # from variant
         assert "padding_x" in props  # from size
 
-    def test_size_overrides_variant(self):
+    def test_size_adds_geometry_props(self):
         props = resolve_props("button", variant="default", size="icon")
         assert props["width"] == 3  # icon size sets explicit width
+
+    def test_size_overrides_variant_on_shared_key(self):
+        """Size axis wins over variant axis when both define the same key."""
+        # Both "default" variant and all sizes define "height"
+        props = resolve_props("button", variant="default", size="sm")
+        # size "sm" sets height=1 — same value, but size axis applied last
+        assert props["height"] == 1
 
     def test_unknown_component(self):
         props = resolve_props("nonexistent", variant="nope")
