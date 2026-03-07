@@ -21,7 +21,7 @@ class AppConfig:
     """Application configuration with sensible defaults."""
 
     model: str = "gpt-4o"
-    api_key: str = ""
+    api_key: str = field(default="", repr=False)
     api_base_url: str = ""
     theme: dict[str, Any] = field(default_factory=dict)
     mcp_servers: dict[str, Any] = field(default_factory=dict)
@@ -46,18 +46,18 @@ def load_config(*, config_dir: Path | None = None) -> AppConfig:
             with open(config_file, "rb") as f:
                 data = tomllib.load(f)
             section = data.get("opencode", {})
-            if model := section.get("model"):
-                cfg.model = model
-            if api_key := section.get("api_key"):
-                cfg.api_key = api_key
-            if api_base_url := section.get("api_base_url"):
-                cfg.api_base_url = api_base_url
-            if theme := section.get("theme"):
-                cfg.theme = theme
-            if mcp_servers := section.get("mcp_servers"):
-                cfg.mcp_servers = mcp_servers
+            if "model" in section:
+                cfg.model = section["model"]
+            if "api_key" in section:
+                cfg.api_key = section["api_key"]
+            if "api_base_url" in section:
+                cfg.api_base_url = section["api_base_url"]
+            if "theme" in section:
+                cfg.theme = section["theme"]
+            if "mcp_servers" in section:
+                cfg.mcp_servers = section["mcp_servers"]
         except Exception:
-            log.warning("Failed to parse %s, using defaults", config_file)
+            log.warning("Failed to parse %s, using defaults", config_file, exc_info=True)
 
     # Environment variable overrides
     if env_model := os.environ.get("OPENCODE_MODEL"):
