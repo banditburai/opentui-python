@@ -1,5 +1,7 @@
 """Tests for the SQLite data layer."""
 
+from datetime import datetime
+
 import pytest
 from opencode.db.store import Store
 from opencode.db.models import Session, Message, FileChange
@@ -37,10 +39,22 @@ class TestSessions:
         result = store.get_session("s1")
         assert result.title == "New"
 
+    def test_update_session_rejects_bad_columns(self, store):
+        store.create_session(Session(id="s1"))
+        with pytest.raises(ValueError, match="Invalid column"):
+            store.update_session("s1", evil="DROP TABLE sessions")
+
     def test_delete_session(self, store):
         store.create_session(Session(id="s1"))
         store.delete_session("s1")
         assert store.get_session("s1") is None
+
+    def test_datetime_roundtrip(self, store):
+        ts = datetime(2025, 6, 15, 12, 30, 0)
+        store.create_session(Session(id="s1", created_at=ts, updated_at=ts))
+        result = store.get_session("s1")
+        assert isinstance(result.created_at, datetime)
+        assert result.created_at == ts
 
 
 class TestMessages:
@@ -65,6 +79,15 @@ class TestMessages:
         store.create_message(Message(id="m1", session_id="s1", role="user"))
         store.delete_message("m1")
         assert store.get_messages("s1") == []
+
+    def test_delete_message_cleans_file_changes(self, store):
+        store.create_session(Session(id="s1"))
+        store.create_message(Message(id="m1", session_id="s1", role="assistant"))
+        store.create_file_change(FileChange(
+            id="f1", session_id="s1", message_id="m1", path="x.py",
+        ))
+        store.delete_message("m1")
+        assert store.get_file_changes("s1") == []
 
     def test_empty_session_has_no_messages(self, store):
         store.create_session(Session(id="s1"))
@@ -102,3 +125,8 @@ class TestStoreLifecycle:
         store.create_session(Session(id="s1"))
         assert store.get_session("s1") is not None
         store.close()
+
+    def test_context_manager(self):
+        with Store(":memory:") as store:
+            store.create_session(Session(id="s1"))
+            assert store.get_session("s1") is not None

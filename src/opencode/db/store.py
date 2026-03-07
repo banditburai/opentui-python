@@ -16,6 +16,18 @@ def _dt(value: Any) -> str:
         return value.isoformat()
     return str(value)
 
+
+def _parse_dt(value: Any) -> datetime:
+    """Parse an ISO string back to datetime."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value)
+    return datetime.now()
+
+
+_SESSION_COLUMNS = frozenset({"title", "model", "working_dir", "updated_at"})
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
@@ -28,7 +40,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
-    session_id TEXT REFERENCES sessions(id),
+    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
     role TEXT NOT NULL,
     content TEXT,
     tool_calls TEXT,
@@ -41,8 +53,8 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE TABLE IF NOT EXISTS file_changes (
     id TEXT PRIMARY KEY,
-    session_id TEXT REFERENCES sessions(id),
-    message_id TEXT REFERENCES messages(id),
+    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+    message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     diff TEXT,
     action TEXT,
@@ -66,6 +78,12 @@ class Store:
 
     def close(self) -> None:
         self._conn.close()
+
+    def __enter__(self) -> Store:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
 
     # --- Sessions ---
 
@@ -96,16 +114,18 @@ class Store:
     def update_session(self, session_id: str, **fields: Any) -> None:
         if not fields:
             return
+        bad = set(fields) - _SESSION_COLUMNS
+        if bad:
+            raise ValueError(f"Invalid column(s): {bad}")
         set_clause = ", ".join(f"{k} = ?" for k in fields)
-        values = list(fields.values()) + [session_id]
+        values = [_dt(v) if isinstance(v, datetime) else v for v in fields.values()]
+        values.append(session_id)
         self._conn.execute(
             f"UPDATE sessions SET {set_clause} WHERE id = ?", values  # noqa: S608
         )
         self._conn.commit()
 
     def delete_session(self, session_id: str) -> None:
-        self._conn.execute("DELETE FROM file_changes WHERE session_id = ?", (session_id,))
-        self._conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         self._conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         self._conn.commit()
 
@@ -131,6 +151,7 @@ class Store:
         return [self._row_to_message(r) for r in rows]
 
     def delete_message(self, message_id: str) -> None:
+        self._conn.execute("DELETE FROM file_changes WHERE message_id = ?", (message_id,))
         self._conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
         self._conn.commit()
 
@@ -162,8 +183,8 @@ class Store:
             title=row["title"] or "",
             model=row["model"] or "",
             working_dir=row["working_dir"] or "",
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
+            created_at=_parse_dt(row["created_at"]),
+            updated_at=_parse_dt(row["updated_at"]),
         )
 
     @staticmethod
@@ -178,7 +199,7 @@ class Store:
             model=row["model"],
             tokens_in=row["tokens_in"],
             tokens_out=row["tokens_out"],
-            created_at=row["created_at"],
+            created_at=_parse_dt(row["created_at"]),
         )
 
     @staticmethod
@@ -190,5 +211,5 @@ class Store:
             path=row["path"],
             diff=row["diff"],
             action=row["action"] or "modify",
-            created_at=row["created_at"],
+            created_at=_parse_dt(row["created_at"]),
         )
