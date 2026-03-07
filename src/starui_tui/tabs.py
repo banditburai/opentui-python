@@ -49,18 +49,20 @@ def TabsTrigger(
 
         active_fg = theme.get("active_fg", "#ffffff")
         inactive_fg = theme.get("inactive_fg", "#888888")
-        active_bg = theme.get("active_bg", "#3498db")
+        active_bg = theme.get("active_bg")
+        use_underline = theme.get("underline", False)
 
         text_content = " ".join(str(c) for c in children if isinstance(c, str))
         text_node = Text(
             text_content,
             fg=active_fg if is_active else inactive_fg,
             bold=is_active,
+            underline=is_active and use_underline,
         )
 
         box = Box(
             text_node,
-            background_color=active_bg if is_active else None,
+            background_color=active_bg if is_active and active_bg else None,
             padding_left=1,
             padding_right=1,
             **kwargs,
