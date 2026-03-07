@@ -8,7 +8,9 @@ produce appropriate visual output in both web (HTML) and TUI (OpenTUI) modes.
 from .alert import Alert, AlertDescription, AlertTitle
 from .badge import Badge
 from .checkbox import Checkbox, RadioGroup, RadioGroupItem
+from .progress import Progress
 from .select import Select, SelectItem
+from .separator import Separator
 from .switch import Switch, Toggle
 from .button import Button
 from .card import Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle
@@ -47,8 +49,10 @@ __all__ = [
     "InlineCode",
     "RadioGroup",
     "RadioGroupItem",
+    "Progress",
     "Select",
     "SelectItem",
+    "Separator",
     "Switch",
     "Toggle",
 ]
