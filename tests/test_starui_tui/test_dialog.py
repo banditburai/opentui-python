@@ -20,43 +20,57 @@ class TestDialog:
             DialogTrigger("Open", signal=sig),
             DialogContent(
                 DialogHeader(DialogTitle("Title")),
+                is_open=sig(),
             ),
             signal=sig,
         )
         assert isinstance(d, Box)
 
-    def test_closed_hides_content(self):
-        sig = Signal("open", False)
-        d = Dialog(
-            DialogContent(Text("Content")),
-            signal=sig,
-        )
-        assert isinstance(d, Box)
-
-    def test_open_shows_content(self):
-        sig = Signal("open", True)
-        d = Dialog(
-            DialogContent(Text("Content")),
-            signal=sig,
-        )
+    def test_without_signal(self):
+        d = Dialog(DialogContent(Text("Content")))
         assert isinstance(d, Box)
 
 
-class TestDialogSubcomponents:
-    def test_dialog_trigger(self):
+class TestDialogTrigger:
+    def test_returns_box(self):
         sig = Signal("open", False)
         t = DialogTrigger("Open Dialog", signal=sig)
         assert isinstance(t, Box)
         assert t.on_mouse_down is not None
 
-    def test_dialog_content(self):
+    def test_toggles_signal(self):
+        sig = Signal("open", False)
+        t = DialogTrigger("Open", signal=sig)
+        t.on_mouse_down(None)
+        assert sig() is True
+        t.on_mouse_down(None)
+        assert sig() is False
+
+    def test_without_signal(self):
+        t = DialogTrigger("Open")
+        assert t.on_mouse_down is None
+
+
+class TestDialogContent:
+    def test_visible_when_open(self):
         c = DialogContent(Text("Body"), is_open=True)
         assert isinstance(c, Box)
+        assert c._visible is True
 
-    def test_dialog_content_hidden(self):
+    def test_hidden_when_closed(self):
         c = DialogContent(Text("Body"), is_open=False)
         assert c._visible is False
 
+    def test_has_border(self):
+        c = DialogContent(Text("Body"), is_open=True)
+        assert c._border is True
+
+    def test_kwargs_forwarded(self):
+        c = DialogContent(Text("Body"), is_open=True, width=40)
+        assert c._width == 40
+
+
+class TestDialogSubcomponents:
     def test_dialog_header(self):
         h = DialogHeader(DialogTitle("Title"))
         assert isinstance(h, Box)

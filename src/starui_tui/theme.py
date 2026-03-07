@@ -110,6 +110,21 @@ TUI_THEME: dict[tuple[str, str, str], dict[str, Any]] = {
         "active_bg": "#3498db",
         "inactive_fg": "#888888",
     },
+    # Dialog
+    ("dialog_content", "variant", "default"): {
+        "border": True,
+        "border_style": "round",
+        "padding": 1,
+    },
+    ("dialog_title", "variant", "default"): {"bold": True},
+    ("dialog_description", "variant", "default"): {"fg": "#888888"},
+    ("dialog_header", "variant", "default"): {"flex_direction": "column"},
+    ("dialog_footer", "variant", "default"): {"flex_direction": "row", "justify_content": "flex-end"},
+    # Toast
+    ("toast", "variant", "default"): {"fg": "#e0e0e0"},
+    ("toast", "variant", "success"): {"fg": "#2ecc71"},
+    ("toast", "variant", "error"): {"fg": "#e74c3c"},
+    ("toast", "variant", "warning"): {"fg": "#f39c12"},
     ("tabs", "variant", "line"): {
         "active_fg": "#ffffff",
         "underline": True,
