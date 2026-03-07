@@ -130,6 +130,8 @@ class TestSessionLifecycle:
             role="user",
             content="test",
         ))
+        assert len(store.get_messages(session_id)) == 1
+
         store.delete_session(session_id)
 
         assert store.list_sessions() == []
@@ -205,7 +207,7 @@ def _collect_text(node, depth=0):
         return []
     texts = []
     if isinstance(node, Text):
-        texts.append(getattr(node, "_content", ""))
+        texts.append(node.content)
     if hasattr(node, "get_children"):
         for child in node.get_children():
             texts.extend(_collect_text(child, depth + 1))
