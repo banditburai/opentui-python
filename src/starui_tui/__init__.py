@@ -13,6 +13,7 @@ from .select import Select, SelectItem
 from .separator import Separator
 from .switch import Switch, Toggle
 from .table import Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow
+from .tabs import Tabs, TabsContent, TabsTrigger
 from .button import Button
 from .card import Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle
 from .input import Input
@@ -62,5 +63,8 @@ __all__ = [
     "TableHead",
     "TableHeader",
     "TableRow",
+    "Tabs",
+    "TabsContent",
+    "TabsTrigger",
     "Toggle",
 ]
