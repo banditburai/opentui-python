@@ -46,6 +46,11 @@ class TestLLMProvider:
         assert kwargs["temperature"] == 0.7
         assert kwargs["messages"] == [{"role": "user", "content": "hi"}]
 
+    def test_build_kwargs_with_base_url(self):
+        p = LLMProvider(model="gpt-4", base_url="http://localhost:8080")
+        kwargs = p._build_kwargs()
+        assert kwargs["api_base"] == "http://localhost:8080"
+
     def test_build_kwargs_no_api_key(self):
         p = LLMProvider(model="gpt-4")
         kwargs = p._build_kwargs()
@@ -116,6 +121,13 @@ class TestStreamHandler:
         h.on_chunk(StreamChunk(content="a"))
         h.on_chunk(StreamChunk(content="b"))
         assert len(h.chunks) == 2
+
+    def test_empty_content_skips_callback(self):
+        received = []
+        h = StreamHandler(on_text=lambda t: received.append(t))
+        h.on_chunk(StreamChunk(content=""))
+        assert received == []
+        assert h.accumulated_content == ""
 
     def test_on_tool_call_callback(self):
         tools = []

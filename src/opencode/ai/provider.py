@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
@@ -71,6 +70,8 @@ class LLMProvider:
             call_kwargs["tools"] = tools
 
         response = await litellm.acompletion(**call_kwargs)
+        if not response.choices:
+            raise ValueError("LLM returned no choices in response")
         choice = response.choices[0]
         message = choice.message
 
@@ -120,14 +121,17 @@ class LLMProvider:
         response = await litellm.acompletion(**call_kwargs)
 
         async for chunk in response:
-            delta = chunk.choices[0].delta if chunk.choices else None
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = choice.delta
             if delta is None:
                 continue
 
             sc = StreamChunk(
                 content=delta.content or "",
                 tool_calls=delta.tool_calls,
-                finish_reason=chunk.choices[0].finish_reason,
+                finish_reason=choice.finish_reason,
             )
 
             if handler:
