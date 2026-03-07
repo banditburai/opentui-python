@@ -51,7 +51,7 @@ def sidebar(*, sessions: list[dict[str, Any]] | None = None, **kwargs: Any) -> B
     children: list[Any] = [Text("Sessions", bold=True, fg=t["fg"])]
     if sessions:
         for s in sessions:
-            children.append(Text(s.get("title", s["id"]), fg=t["fg"]))
+            children.append(Text(s.get("title", s.get("id", "Untitled")), fg=t["fg"]))
     return Box(
         *children,
         flex_direction="column",
@@ -73,7 +73,7 @@ def content_area(**kwargs: Any) -> Box:
     )
 
 
-def main_layout(*, title: str = "OpenCode", model: str = "", **kwargs: Any) -> Box:
+def main_layout(*, title: str = "OpenCode", model: str = "", branch: str = "", **kwargs: Any) -> Box:
     """Compose the full TUI layout: toolbar + body (sidebar + content) + status bar."""
     body = Box(
         sidebar(),
@@ -84,7 +84,7 @@ def main_layout(*, title: str = "OpenCode", model: str = "", **kwargs: Any) -> B
     return Box(
         toolbar(title=title),
         body,
-        status_bar(model=model),
+        status_bar(model=model, branch=branch),
         flex_direction="column",
         **kwargs,
     )

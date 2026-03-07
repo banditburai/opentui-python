@@ -73,6 +73,13 @@ class TestSidebar:
         s = sidebar(sessions=sessions)
         assert isinstance(s, Box)
 
+    def test_session_without_id_or_title(self):
+        sessions = [{}]
+        s = sidebar(sessions=sessions)
+        children = s.get_children()
+        texts = [getattr(c, "_content", "") for c in children if isinstance(c, Text)]
+        assert "Untitled" in texts
+
 
 class TestContentArea:
     def test_returns_box(self):
@@ -93,3 +100,12 @@ class TestMainLayout:
     def test_accepts_title(self):
         layout = main_layout(title="Test")
         assert isinstance(layout, Box)
+
+    def test_branch_forwarded_to_status_bar(self):
+        layout = main_layout(branch="main")
+        # status_bar is the last child of the outer Box
+        children = layout.get_children()
+        sb = children[-1]
+        sb_children = sb.get_children()
+        texts = [getattr(c, "_content", "") for c in sb_children if isinstance(c, Text)]
+        assert any("main" in t for t in texts)
