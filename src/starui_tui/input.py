@@ -36,9 +36,9 @@ def Input(
     return TUIInput(
         value=value,
         placeholder=placeholder,
-        on_change=on_change,
-        on_submit=on_submit,
-        on_input=on_input,
+        on_change=on_change if not disabled else None,
+        on_submit=on_submit if not disabled else None,
+        on_input=on_input if not disabled else None,
         **text_props,
         **box_props,
     )

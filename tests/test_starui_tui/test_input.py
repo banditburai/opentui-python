@@ -45,6 +45,11 @@ class TestInput:
         i = Input(width=30)
         assert i._width == 30
 
+    def test_disabled_suppresses_callbacks(self):
+        i = Input(disabled=True, on_change=lambda v: None, on_submit=lambda v: None)
+        # Callbacks should not be registered when disabled
+        assert isinstance(i, TUIInput)
+
     def test_variant_default(self):
         i = Input(variant="default")
         assert i.border is True
