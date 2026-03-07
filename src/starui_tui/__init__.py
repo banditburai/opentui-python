@@ -6,10 +6,12 @@ produce appropriate visual output in both web (HTML) and TUI (OpenTUI) modes.
 """
 
 from .accordion import Accordion, AccordionContent, AccordionItem, AccordionTrigger
+from .breadcrumb import Breadcrumb, BreadcrumbItem
 from .dialog import Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger
 from .alert import Alert, AlertDescription, AlertTitle
 from .badge import Badge
 from .checkbox import Checkbox, RadioGroup, RadioGroupItem
+from .pagination import Pagination
 from .progress import Progress
 from .select import Select, SelectItem
 from .separator import Separator
@@ -35,6 +37,8 @@ __all__ = [
     "AlertDescription",
     "AlertTitle",
     "Badge",
+    "Breadcrumb",
+    "BreadcrumbItem",
     "Button",
     "Checkbox",
     "Dialog",
@@ -63,6 +67,7 @@ __all__ = [
     "Small",
     "Muted",
     "InlineCode",
+    "Pagination",
     "RadioGroup",
     "RadioGroupItem",
     "Progress",
