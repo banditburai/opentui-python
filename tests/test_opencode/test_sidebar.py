@@ -64,6 +64,14 @@ class TestSessionList:
         all_text = _collect_text(sl)
         assert any("Untitled" in t for t in all_text)
 
+    def test_long_title_truncated(self):
+        long = "A" * 100
+        items = [SessionItem(id="s1", title=long, updated_at=datetime.now())]
+        sl = session_list(sessions=items)
+        all_text = _collect_text(sl)
+        # Default sidebar width is 30, minus 2 padding = 28 max chars
+        assert all(len(t) <= 28 for t in all_text if "A" in t)
+
 
 # --- sidebar_panel ---
 

@@ -36,9 +36,10 @@ def session_list(
             **kwargs,
         )
 
+    max_title_len = t.get("width", 30) - 2  # account for padding
     children: list[Box] = []
     for s in sessions:
-        display_title = s.title or "Untitled"
+        display_title = (s.title or "Untitled")[:max_title_len]
         is_active = s.id == active_id
 
         fg = t.get("fg", "#e0e0e0")
