@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -42,6 +45,8 @@ class MCPClient:
         self.command = command
         self.args = args or []
         self.env = env
+        self._transport_cm: Any = None
+        self._session_cm: Any = None
         self._session: Any = None
         self._tools: list[MCPTool] = []
 
@@ -51,6 +56,9 @@ class MCPClient:
 
     async def connect(self) -> None:
         """Connect to the MCP server process."""
+        if self._session is not None:
+            raise RuntimeError("Already connected; call disconnect() first")
+
         try:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
@@ -63,10 +71,11 @@ class MCPClient:
             env=self.env,
         )
 
-        transport = await stdio_client(params).__aenter__()
+        self._transport_cm = stdio_client(params)
+        transport = await self._transport_cm.__aenter__()
         read_stream, write_stream = transport
-        self._session = ClientSession(read_stream, write_stream)
-        await self._session.__aenter__()
+        self._session_cm = ClientSession(read_stream, write_stream)
+        self._session = await self._session_cm.__aenter__()
         await self._session.initialize()
 
         # Discover tools
@@ -83,10 +92,18 @@ class MCPClient:
     async def disconnect(self) -> None:
         """Disconnect from the MCP server."""
         if self._session is not None:
-            try:
-                await self._session.__aexit__(None, None, None)
-            except Exception:
-                pass
+            if self._session_cm is not None:
+                try:
+                    await self._session_cm.__aexit__(None, None, None)
+                except Exception:
+                    logger.debug("Error closing MCP session", exc_info=True)
+                self._session_cm = None
+            if self._transport_cm is not None:
+                try:
+                    await self._transport_cm.__aexit__(None, None, None)
+                except Exception:
+                    logger.debug("Error closing MCP transport", exc_info=True)
+                self._transport_cm = None
             self._session = None
             self._tools = []
 
@@ -98,6 +115,9 @@ class MCPClient:
         """Call a tool on the MCP server."""
         if self._session is None:
             raise RuntimeError("MCP client not connected")
+        known = {t.name for t in self._tools}
+        if name not in known:
+            raise ValueError(f"Unknown tool {name!r}; available: {sorted(known)}")
         result = await self._session.call_tool(name, arguments=kwargs)
         # MCP returns a list of content blocks
         parts = []

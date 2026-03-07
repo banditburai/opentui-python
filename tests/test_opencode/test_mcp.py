@@ -63,6 +63,18 @@ class TestMCPClient:
 
         asyncio.run(_run())
 
+    def test_call_tool_validates_name(self):
+        c = MCPClient(command="echo")
+        # Simulate connected state with a known tool list
+        c._session = object()  # non-None to pass connection check
+        c._tools = [MCPTool(name="read", description="d", input_schema={})]
+
+        async def _run():
+            with pytest.raises(ValueError, match="unknown_tool"):
+                await c.call_tool("unknown_tool")
+
+        asyncio.run(_run())
+
     def test_context_manager_requires_mcp(self):
         async def _run():
             with pytest.raises(ImportError, match="mcp"):
