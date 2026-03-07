@@ -38,7 +38,7 @@ def diff_viewer(
         parts.append(Text(filename, bold=True, fg=t.get("fg", "#e0e0e0")))
 
     for dl in lines:
-        prefix = dl.kind if dl.kind != " " else " "
+        prefix = dl.kind
         color = _COLORS.get(dl.kind, "#c0c0c0")
         parts.append(Text(f"{prefix}{dl.content}", fg=color))
 
@@ -65,6 +65,6 @@ def parse_unified_diff(text: str) -> list[DiffLine]:
             result.append(DiffLine(kind="+", content=line[1:]))
         elif line.startswith("-"):
             result.append(DiffLine(kind="-", content=line[1:]))
-        elif line.startswith(" "):
-            result.append(DiffLine(kind=" ", content=line[1:]))
+        else:
+            result.append(DiffLine(kind=" ", content=line[1:] if line.startswith(" ") else line))
     return result

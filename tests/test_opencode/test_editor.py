@@ -144,6 +144,21 @@ class TestDiffViewer:
         assert any(l.kind == "+" and "new line" in l.content for l in lines)
         assert any(l.kind == " " for l in lines)
 
+    def test_empty_context_lines_not_dropped(self):
+        from opencode.tui.components.diff import parse_unified_diff
+
+        raw = """\
+--- a/f.py
++++ b/f.py
+@@ -1,3 +1,3 @@
+ a
+
+ b
+"""
+        lines = parse_unified_diff(raw)
+        # The empty line between "a" and "b" should be kept as context
+        assert len(lines) == 3
+
 
 # --- Helpers ---
 
