@@ -15,7 +15,7 @@ _CURSOR = "\u2588"
 # Inline markdown regex: **bold**, *italic*, `code`
 _INLINE_RE = re.compile(
     r"(\*\*(.+?)\*\*"  # **bold**
-    r"|\*(.+?)\*"  # *italic*
+    r"|\*(?!\*)(.+?)(?<!\*)\*"  # *italic* but not **bold**
     r"|`([^`]+)`)"  # `code`
 )
 
@@ -31,10 +31,10 @@ def parse_markdown(text: str) -> list[Text | Box]:
     nodes: list[Text | Box] = []
 
     # Split on fenced code blocks first
-    parts = re.split(r"(```\w*\n.*?\n```)", text, flags=re.DOTALL)
+    parts = re.split(r"(```\w*\n.*?\n?```)", text, flags=re.DOTALL)
 
     for part in parts:
-        fence_match = re.match(r"```(\w*)\n(.*?)\n```", part, flags=re.DOTALL)
+        fence_match = re.match(r"```(\w*)\n(.*?)\n?```", part, flags=re.DOTALL)
         if fence_match:
             lang = fence_match.group(1) or ""
             code = fence_match.group(2)
@@ -156,7 +156,7 @@ def chat_panel(
         children.append(
             chat_message(
                 role=msg["role"],
-                content=msg.get("content", ""),
+                content=msg.get("content") or "",
                 streaming=is_streaming,
             )
         )

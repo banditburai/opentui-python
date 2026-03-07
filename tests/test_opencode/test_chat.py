@@ -44,6 +44,18 @@ class TestParseMarkdown:
         code_boxes = [n for n in nodes if isinstance(n, Box)]
         assert len(code_boxes) == 1
 
+    def test_bold_not_parsed_as_italic(self):
+        nodes = parse_markdown("**bold**")
+        assert len(nodes) == 1
+        assert nodes[0]._bold is True
+        assert nodes[0]._content == "bold"
+
+    def test_fence_without_trailing_newline(self):
+        md = "```py\ncode()```"
+        nodes = parse_markdown(md)
+        code_boxes = [n for n in nodes if isinstance(n, Box)]
+        assert len(code_boxes) == 1
+
     def test_empty_string(self):
         nodes = parse_markdown("")
         assert nodes == []
@@ -132,6 +144,11 @@ class TestChatPanel:
             {"role": "assistant", "content": "Hel"},
         ]
         panel = chat_panel(messages=msgs, streaming=True)
+        assert isinstance(panel, Box)
+
+    def test_none_content_handled(self):
+        msgs = [{"role": "assistant", "content": None}]
+        panel = chat_panel(messages=msgs)
         assert isinstance(panel, Box)
 
 
