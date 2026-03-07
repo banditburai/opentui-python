@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from pathlib import Path
 
 
@@ -13,13 +14,18 @@ class GitOps:
         self.root = Path(root)
 
     async def _run(self, *args: str) -> str:
-        """Run a git command and return stdout."""
+        """Run a git command and return stdout. Raises on failure."""
         proc = await asyncio.create_subprocess_exec(
             "git", "-C", str(self.root), *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(
+                proc.returncode or 1, ["git", *args],
+                output=stdout, stderr=stderr,
+            )
         return stdout.decode().strip()
 
     async def status(self) -> str:

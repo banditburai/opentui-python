@@ -2,6 +2,7 @@
 
 import asyncio
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -94,27 +95,41 @@ class TestFileWatcher:
         received = []
         w = FileWatcher(tmp_path, debounce=0.05)
         w.on_change = lambda paths: received.extend(paths)
-
-        async def _run():
-            w.start()
-            # Create a file to trigger the watcher
+        w.start()
+        try:
             (tmp_path / "trigger.txt").write_text("x")
-            await asyncio.sleep(0.3)
+            time.sleep(0.3)
+        finally:
             w.stop()
+        assert len(received) > 0
+        assert any("trigger.txt" in p for p in received)
 
-        asyncio.run(_run())
-        # Watchdog may or may not detect in time depending on OS;
-        # just verify the watcher starts and stops without error
-        assert isinstance(received, list)
+    def test_recursive_detection(self, tmp_path):
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        w = FileWatcher(tmp_path, debounce=0.05)
+        received = []
+        w.on_change = lambda paths: received.extend(paths)
+        w.start()
+        try:
+            (sub / "deep.txt").write_text("nested")
+            time.sleep(0.3)
+        finally:
+            w.stop()
+        assert any("deep.txt" in p for p in received)
 
     def test_start_stop(self, tmp_path):
         w = FileWatcher(tmp_path, debounce=0.05)
-        async def _run():
-            w.start()
-            assert w.is_running
-            w.stop()
-            assert not w.is_running
-        asyncio.run(_run())
+        w.start()
+        assert w.is_running
+        w.stop()
+        assert not w.is_running
+
+    def test_double_start_is_safe(self, tmp_path):
+        w = FileWatcher(tmp_path, debounce=0.05)
+        w.start()
+        w.start()  # should not raise or create second thread
+        w.stop()
 
     def test_ignore_patterns(self, tmp_path):
         w = FileWatcher(tmp_path, ignore_patterns=["*.pyc", "__pycache__"])

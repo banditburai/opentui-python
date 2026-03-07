@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import threading
-import time
 from pathlib import Path
 from typing import Callable
 
@@ -31,57 +31,59 @@ class FileWatcher:
         self.debounce = debounce
         self.ignore_patterns = ignore_patterns or []
         self.on_change: Callable[[list[str]], None] | None = None
-        self._running = False
+        self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._snapshot: dict[str, float] = {}
 
     @property
     def is_running(self) -> bool:
-        return self._running
+        return self._thread is not None and not self._stop_event.is_set()
 
     def start(self) -> None:
         """Start watching for changes."""
-        if self._running:
+        if self._thread is not None and self._thread.is_alive():
             return
-        self._running = True
+        self._stop_event.clear()
         self._snapshot = self._scan()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
         """Stop watching."""
-        self._running = False
+        self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=2)
             self._thread = None
 
     def _should_ignore(self, name: str) -> bool:
         """Check if a filename matches any ignore pattern."""
-        import fnmatch
         for pat in self.ignore_patterns:
             if fnmatch.fnmatch(name, pat):
                 return True
         return False
 
     def _scan(self) -> dict[str, float]:
-        """Scan directory and return {path: mtime} dict."""
+        """Recursively scan directory and return {path: mtime} dict."""
         result: dict[str, float] = {}
         try:
-            for entry in os.scandir(self.root):
-                if self._should_ignore(entry.name):
-                    continue
-                try:
-                    result[entry.path] = entry.stat().st_mtime
-                except OSError:
-                    pass
+            for dirpath, dirnames, filenames in os.walk(self.root):
+                # Filter ignored directories in-place to prevent descent
+                dirnames[:] = [d for d in dirnames if not self._should_ignore(d)]
+                for name in filenames:
+                    if self._should_ignore(name):
+                        continue
+                    full = os.path.join(dirpath, name)
+                    try:
+                        result[full] = os.stat(full).st_mtime
+                    except OSError:
+                        pass
         except OSError:
             pass
         return result
 
     def _poll_loop(self) -> None:
         """Background polling loop."""
-        while self._running:
-            time.sleep(self.debounce)
+        while not self._stop_event.wait(timeout=self.debounce):
             new_snapshot = self._scan()
             changed: list[str] = []
 
@@ -98,5 +100,6 @@ class FileWatcher:
 
             self._snapshot = new_snapshot
 
-            if changed and self.on_change is not None:
-                self.on_change(changed)
+            callback = self.on_change
+            if changed and callback is not None:
+                callback(changed)
