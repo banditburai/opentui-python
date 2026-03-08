@@ -414,8 +414,8 @@ class Slider(Renderable):
     Usage:
         slider = Slider(
             value=50,
-            min=0,
-            max=100
+            min_val=0,
+            max_val=100
         )
     """
 
@@ -424,8 +424,8 @@ class Slider(Renderable):
         *children: Any,
         # Value
         value: float = 0,
-        min: float = 0,
-        max: float = 100,
+        min_val: float = 0,
+        max_val: float = 100,
         step: float = 1,
         # Focus
         focused: bool = False,
@@ -437,8 +437,8 @@ class Slider(Renderable):
         super().__init__(focused=focused, **kwargs)
 
         self._value = value
-        self._min = min
-        self._max = max
+        self._min = min_val
+        self._max = max_val
         self._step = step
 
         if on_change:
@@ -452,7 +452,12 @@ class Slider(Renderable):
 
     @value.setter
     def value(self, v: float) -> None:
-        self._value = max(self._min, min(self._max, v))
+        clamped = v
+        if clamped < self._min:
+            clamped = self._min
+        if clamped > self._max:
+            clamped = self._max
+        self._value = clamped
 
     def increment(self, amount: float = 1) -> None:
         """Increment the value."""

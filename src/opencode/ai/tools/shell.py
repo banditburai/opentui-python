@@ -28,7 +28,10 @@ def shell_tool(*, timeout: int = 30) -> Tool:
                     output += f"\n{err}"
             return output.strip()
         except asyncio.TimeoutError:
-            proc.kill()
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass  # Process already exited
             await proc.communicate()
             return f"Error: command timed out after {timeout}s"
         except OSError as e:

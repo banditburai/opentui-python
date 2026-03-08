@@ -347,6 +347,7 @@ class CliRenderer:
         self._frame_callbacks: list[Callable] = []
         self._animation_frame_callbacks: dict[int, Callable] = {}
         self._next_animation_id: int = 0
+        self._event_loop: Any = None
 
         if config.testing:
             self._width = config.width
@@ -473,9 +474,22 @@ class CliRenderer:
         self._running = True
         self.setup()
 
+        # Drain terminal capability responses from stdin so they don't
+        # get misinterpreted as user input by the InputHandler.
+        import os as _os
+        import select as _sel
+        import sys as _sys
+        import time as _time
+
+        _time.sleep(0.05)  # Give terminal time to send responses
+        fd = _sys.stdin.fileno()
+        while _sel.select([fd], [], [], 0)[0]:
+            _os.read(fd, 4096)
+
         from .input import EventLoop
 
         event_loop = EventLoop(target_fps=self._config.target_fps)
+        self._event_loop = event_loop
         input_handler = event_loop.input_handler
 
         for event_type, handlers in self._get_event_forwarding().items():
@@ -522,7 +536,7 @@ class CliRenderer:
         if self._root:
             self._update_layout(self._root, delta_time)
 
-        buffer = self.get_current_buffer()
+        buffer = self.get_next_buffer()
         buffer.clear()
 
         if self._root:
@@ -561,14 +575,25 @@ class CliRenderer:
             for child in renderable.get_children():
                 pass
 
-    def _apply_yoga_layout_recursive(self, renderable) -> None:
-        """Apply yoga layout to renderable and all descendants."""
+    def _apply_yoga_layout_recursive(self, renderable, offset_x: int = 0, offset_y: int = 0) -> None:
+        """Apply yoga layout to renderable and all descendants.
+
+        Yoga computes positions relative to the parent. This method converts
+        them to absolute screen coordinates by accumulating parent offsets.
+        """
         if hasattr(renderable, "_apply_yoga_layout"):
             renderable._apply_yoga_layout()
+            # Convert relative yoga position to absolute screen coordinates
+            renderable._x += offset_x
+            renderable._y += offset_y
+
+        # Children's positions will be relative to this renderable's absolute position
+        abs_x = getattr(renderable, "_x", offset_x)
+        abs_y = getattr(renderable, "_y", offset_y)
 
         if hasattr(renderable, "get_children"):
             for child in renderable.get_children():
-                self._apply_yoga_layout_recursive(child)
+                self._apply_yoga_layout_recursive(child, abs_x, abs_y)
 
     def invalidate_handler_cache(self) -> None:
         """Mark handler cache as dirty (call when tree structure changes)."""
@@ -673,8 +698,10 @@ class CliRenderer:
         return None
 
     def stop(self) -> None:
-        """Stop the renderer."""
+        """Stop the renderer and event loop."""
         self._running = False
+        if self._event_loop is not None:
+            self._event_loop.stop()
 
     def destroy(self) -> None:
         """Destroy the renderer and free resources."""

@@ -8,12 +8,27 @@ from pathlib import Path
 from . import Tool
 
 
-def read_file_tool() -> Tool:
+def _validate_path(path: str, working_dir: Path | None) -> Path | None:
+    """Resolve *path* and ensure it lives under *working_dir*.
+
+    Returns the resolved ``Path`` on success, or ``None`` if the path
+    escapes the sandbox.
+    """
+    resolved = Path(path).resolve()
+    if working_dir is not None and not resolved.is_relative_to(working_dir.resolve()):
+        return None
+    return resolved
+
+
+def read_file_tool(working_dir: Path | None = None) -> Tool:
     """Create a read_file tool."""
 
     async def execute(*, path: str, **_: object) -> str:
+        resolved = _validate_path(path, working_dir)
+        if resolved is None:
+            return f"Error: path {path} is outside the allowed working directory"
         try:
-            return Path(path).read_text(encoding="utf-8")
+            return resolved.read_text(encoding="utf-8")
         except FileNotFoundError:
             return f"Error: file not found: {path}"
         except UnicodeDecodeError:
@@ -35,14 +50,16 @@ def read_file_tool() -> Tool:
     )
 
 
-def write_file_tool() -> Tool:
+def write_file_tool(working_dir: Path | None = None) -> Tool:
     """Create a write_file tool."""
 
     async def execute(*, path: str, content: str, **_: object) -> str:
+        resolved = _validate_path(path, working_dir)
+        if resolved is None:
+            return f"Error: path {path} is outside the allowed working directory"
         try:
-            p = Path(path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content)
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+            resolved.write_text(content, encoding="utf-8")
             return f"Wrote {len(content)} chars to {path}"
         except OSError as e:
             return f"Error: {e}"
@@ -65,11 +82,17 @@ def write_file_tool() -> Tool:
 def search_files_tool() -> Tool:
     """Create a search_files tool."""
 
+    _MAX_RESULTS = 10_000
+
     async def execute(*, pattern: str, directory: str = ".", **_: object) -> str:
         matches = sorted(_glob.glob(pattern, root_dir=directory, recursive=True))
         if not matches:
             return "No matches found."
-        return "\n".join(matches)
+        truncated = matches[:_MAX_RESULTS]
+        result = "\n".join(truncated)
+        if len(matches) > _MAX_RESULTS:
+            result += f"\n... ({len(matches) - _MAX_RESULTS} more matches truncated)"
+        return result
 
     return Tool(
         name="search_files",

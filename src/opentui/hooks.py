@@ -283,6 +283,7 @@ class Timeline:
 
     def restart(self) -> None:
         """Restart the timeline from the beginning."""
+        self._start_time = None
         self._running = True
 
     def stop(self) -> None:

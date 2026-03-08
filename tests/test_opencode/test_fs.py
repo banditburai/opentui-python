@@ -98,7 +98,11 @@ class TestFileWatcher:
         w.start()
         try:
             (tmp_path / "trigger.txt").write_text("x")
-            time.sleep(0.3)
+            # Poll until events arrive or timeout
+            for _ in range(60):
+                if received:
+                    break
+                time.sleep(0.01)
         finally:
             w.stop()
         assert len(received) > 0
@@ -113,7 +117,11 @@ class TestFileWatcher:
         w.start()
         try:
             (sub / "deep.txt").write_text("nested")
-            time.sleep(0.3)
+            # Poll until events arrive or timeout
+            for _ in range(60):
+                if received:
+                    break
+                time.sleep(0.01)
         finally:
             w.stop()
         assert any("deep.txt" in p for p in received)

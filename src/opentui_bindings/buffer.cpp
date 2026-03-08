@@ -1,4 +1,6 @@
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/array.h>
 #include <cstring>
 #include <cstdint>
 #include <string>
@@ -31,126 +33,68 @@ extern "C" {
     size_t bufferGetId(void* buffer, void* out, size_t maxLen);
 }
 
+// Helper: copy optional RGBA array into a float[4], using default if not provided
+static void resolve_fg(std::optional<std::array<float, 4>> const& opt, float out[4]) {
+    if (opt.has_value()) {
+        out[0] = (*opt)[0]; out[1] = (*opt)[1]; out[2] = (*opt)[2]; out[3] = (*opt)[3];
+    } else {
+        out[0] = 1.0f; out[1] = 1.0f; out[2] = 1.0f; out[3] = 1.0f;
+    }
+}
+
+static void resolve_bg(std::optional<std::array<float, 4>> const& opt, float out[4]) {
+    if (opt.has_value()) {
+        out[0] = (*opt)[0]; out[1] = (*opt)[1]; out[2] = (*opt)[2]; out[3] = (*opt)[3];
+    } else {
+        out[0] = 0.0f; out[1] = 0.0f; out[2] = 0.0f; out[3] = 1.0f;
+    }
+}
+
 void bind_buffer(nb::module_& m) {
-    // Buffer clear - with optional alpha
+    // Buffer clear - delegates to Zig bufferClear
     m.def("buffer_clear", [](void* buffer, float alpha) {
-        char* char_ptr = (char*)bufferGetCharPtr(buffer);
-        uint32_t width = getBufferWidth(buffer);
-        uint32_t height = getBufferHeight(buffer);
-        memset(char_ptr, ' ', width * height);
+        float color[4] = {0.0f, 0.0f, 0.0f, alpha};
+        bufferClear(buffer, color);
     }, nb::arg("buffer"), nb::arg("alpha") = 0.0f);
 
     m.def("buffer_resize", &bufferResize,
           nb::arg("buffer"), nb::arg("width"), nb::arg("height"));
 
-    // buffer_draw_text - with colors and attributes
-    m.def("buffer_draw_text", [](void* buffer, nb::bytes text, 
+    // buffer_draw_text - delegates to Zig bufferDrawText
+    m.def("buffer_draw_text", [](void* buffer, nb::bytes text,
                                   int32_t len, uint32_t x, uint32_t y,
                                   std::optional<std::array<float, 4>> fg,
                                   std::optional<std::array<float, 4>> bg,
                                   uint32_t attrs) {
+        float fg_color[4], bg_color[4];
+        resolve_fg(fg, fg_color);
+        resolve_bg(bg, bg_color);
+
         const char* chars = text.c_str();
-        char* char_ptr = (char*)bufferGetCharPtr(buffer);
-        uint32_t width = getBufferWidth(buffer);
-        uint32_t height = getBufferHeight(buffer);
-        
-        float fg_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-        float bg_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-        float* fg_ptr = nullptr;
-        float* bg_ptr = nullptr;
-        
-        if (fg.has_value()) {
-            fg_ptr = fg_color;
-            fg_color[0] = (*fg)[0];
-            fg_color[1] = (*fg)[1];
-            fg_color[2] = (*fg)[2];
-            fg_color[3] = (*fg)[3];
-        }
-        if (bg.has_value()) {
-            bg_ptr = bg_color;
-            bg_color[0] = (*bg)[0];
-            bg_color[1] = (*bg)[1];
-            bg_color[2] = (*bg)[2];
-            bg_color[3] = (*bg)[3];
-        }
-        
         int32_t actual_len = (len < (int32_t)text.size()) ? len : (int32_t)text.size();
-        for (int32_t i = 0; i < actual_len; i++) {
-            uint32_t px = x + i;
-            uint32_t py = y;
-            if (px >= width || py >= height) break;
-            char_ptr[py * width + px] = chars[i];
-        }
-        
-        bufferDrawText(buffer, chars, actual_len, x, y, fg_ptr, bg_ptr, attrs);
+        bufferDrawText(buffer, chars, actual_len, x, y, fg_color, bg_color, attrs);
     }, nb::arg("buffer"), nb::arg("text"), nb::arg("len"), nb::arg("x"), nb::arg("y"),
        nb::arg("fg") = std::nullopt, nb::arg("bg") = std::nullopt, nb::arg("attrs") = 0);
 
-    // buffer_set_cell - with colors and attributes
+    // buffer_set_cell - delegates to Zig bufferSetCell
     m.def("buffer_set_cell", [](void* buffer, uint32_t x, uint32_t y, uint32_t ch,
                                 std::optional<std::array<float, 4>> fg,
                                 std::optional<std::array<float, 4>> bg,
                                 uint32_t attrs) {
-        char* char_ptr = (char*)bufferGetCharPtr(buffer);
-        uint32_t width = getBufferWidth(buffer);
-        uint32_t height = getBufferHeight(buffer);
-        
-        if (x >= width || y >= height) return;
-        char_ptr[y * width + x] = (char)ch;
-        
-        float fg_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-        float bg_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-        float* fg_ptr = nullptr;
-        float* bg_ptr = nullptr;
-        
-        if (fg.has_value()) {
-            fg_ptr = fg_color;
-            fg_color[0] = (*fg)[0];
-            fg_color[1] = (*fg)[1];
-            fg_color[2] = (*fg)[2];
-            fg_color[3] = (*fg)[3];
-        }
-        if (bg.has_value()) {
-            bg_ptr = bg_color;
-            bg_color[0] = (*bg)[0];
-            bg_color[1] = (*bg)[1];
-            bg_color[2] = (*bg)[2];
-            bg_color[3] = (*bg)[3];
-        }
-        
-        bufferSetCell(buffer, x, y, ch, fg_ptr, bg_ptr, attrs);
+        float fg_color[4], bg_color[4];
+        resolve_fg(fg, fg_color);
+        resolve_bg(bg, bg_color);
+        bufferSetCell(buffer, x, y, ch, fg_color, bg_color, attrs);
     }, nb::arg("buffer"), nb::arg("x"), nb::arg("y"), nb::arg("ch"),
        nb::arg("fg") = std::nullopt, nb::arg("bg") = std::nullopt, nb::arg("attrs") = 0);
 
-    // buffer_fill_rect - with background color
-    m.def("buffer_fill_rect", [](void* buffer, uint32_t x, uint32_t y, 
+    // buffer_fill_rect - delegates to Zig bufferFillRect
+    m.def("buffer_fill_rect", [](void* buffer, uint32_t x, uint32_t y,
                                   uint32_t width, uint32_t height,
                                   std::optional<std::array<float, 4>> bg) {
-        char* char_ptr = (char*)bufferGetCharPtr(buffer);
-        uint32_t buf_width = getBufferWidth(buffer);
-        uint32_t buf_height = getBufferHeight(buffer);
-        
-        float bg_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-        float* bg_ptr = nullptr;
-        
-        if (bg.has_value()) {
-            bg_ptr = bg_color;
-            bg_color[0] = (*bg)[0];
-            bg_color[1] = (*bg)[1];
-            bg_color[2] = (*bg)[2];
-            bg_color[3] = (*bg)[3];
-        }
-        
-        for (uint32_t py = 0; py < height; py++) {
-            for (uint32_t px = 0; px < width; px++) {
-                uint32_t bx = x + px;
-                uint32_t by = y + py;
-                if (bx >= buf_width || by >= buf_height) continue;
-                char_ptr[by * buf_width + bx] = ' ';
-            }
-        }
-        
-        bufferFillRect(buffer, x, y, width, height, bg_ptr);
+        float bg_color[4];
+        resolve_bg(bg, bg_color);
+        bufferFillRect(buffer, x, y, width, height, bg_color);
     }, nb::arg("buffer"), nb::arg("x"), nb::arg("y"), nb::arg("width"), nb::arg("height"),
        nb::arg("bg") = std::nullopt);
 
@@ -158,15 +102,15 @@ void bind_buffer(nb::module_& m) {
     m.def("buffer_get_char_ptr", [](void* buffer) -> uint64_t {
         return (uint64_t)bufferGetCharPtr(buffer);
     }, nb::arg("buffer"));
-    
+
     m.def("buffer_get_fg_ptr", [](void* buffer) -> uint64_t {
         return (uint64_t)bufferGetFgPtr(buffer);
     }, nb::arg("buffer"));
-    
+
     m.def("buffer_get_bg_ptr", [](void* buffer) -> uint64_t {
         return (uint64_t)bufferGetBgPtr(buffer);
     }, nb::arg("buffer"));
-    
+
     m.def("buffer_get_attributes_ptr", [](void* buffer) -> uint64_t {
         return (uint64_t)bufferGetAttributesPtr(buffer);
     }, nb::arg("buffer"));
@@ -174,11 +118,13 @@ void bind_buffer(nb::module_& m) {
     m.def("get_buffer_width", &getBufferWidth, nb::arg("buffer"));
     m.def("get_buffer_height", &getBufferHeight, nb::arg("buffer"));
     m.def("buffer_get_real_char_size", &bufferGetRealCharSize, nb::arg("buffer"));
-    m.def("buffer_write_resolved_chars", &bufferWriteResolvedChars, 
+    m.def("buffer_write_resolved_chars", &bufferWriteResolvedChars,
           nb::arg("buffer"), nb::arg("chars"), nb::arg("show_cursor"));
 
     m.def("buffer_set_cell_with_alpha_blending", [](void* buffer, uint32_t x, uint32_t y, uint32_t ch) {
-        bufferSetCellWithAlphaBlending(buffer, x, y, ch, nullptr, nullptr, 0);
+        float fg_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+        float bg_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        bufferSetCellWithAlphaBlending(buffer, x, y, ch, fg_color, bg_color, 0);
     }, nb::arg("buffer"), nb::arg("x"), nb::arg("y"), nb::arg("ch"));
 
     m.def("buffer_get_respect_alpha", &bufferGetRespectAlpha, nb::arg("buffer"));
@@ -187,7 +133,7 @@ void bind_buffer(nb::module_& m) {
     m.def("get_arena_allocated_bytes", &getArenaAllocatedBytes);
 
     // OptimizedBuffer functions
-    m.def("create_optimized_buffer", [](uint32_t width, uint32_t height, bool respectAlpha, 
+    m.def("create_optimized_buffer", [](uint32_t width, uint32_t height, bool respectAlpha,
                                         uint8_t encoding, const char* id) -> void* {
         size_t idLen = id ? std::strlen(id) : 0;
         return createOptimizedBuffer(width, height, respectAlpha, encoding, id, idLen);

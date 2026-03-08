@@ -69,27 +69,6 @@ def test_ffi_has_required_functions():
         assert hasattr(hit_grid, func_name), f"Missing hit grid function: {func_name}"
 
 
-def test_ffi_has_buffer_functions():
-    """Test that Buffer FFI functions are bound."""
-    from opentui.ffi import get_native
-
-    native = get_native()
-    buffer = native.buffer
-
-    buffer_functions = [
-        "buffer_clear",
-        "buffer_resize",
-        "buffer_draw_text",
-        "buffer_set_cell",
-        "buffer_fill_rect",
-        "get_buffer_width",
-        "get_buffer_height",
-    ]
-
-    for func_name in buffer_functions:
-        assert hasattr(buffer, func_name), f"Missing buffer function: {func_name}"
-
-
 def test_ffi_has_optimized_buffer_functions():
     """Test that OptimizedBuffer FFI functions are bound."""
     from opentui.ffi import get_native

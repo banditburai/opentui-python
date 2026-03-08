@@ -23,7 +23,7 @@ def _parse_dt(value: Any) -> datetime:
         return value
     if isinstance(value, str):
         return datetime.fromisoformat(value)
-    return datetime.now()
+    raise TypeError(f"Expected datetime or ISO-format string, got {type(value).__name__}")
 
 
 _SESSION_COLUMNS = frozenset({"title", "model", "working_dir", "updated_at"})
@@ -151,7 +151,7 @@ class Store:
         return [self._row_to_message(r) for r in rows]
 
     def delete_message(self, message_id: str) -> None:
-        self._conn.execute("DELETE FROM file_changes WHERE message_id = ?", (message_id,))
+        # file_changes are removed automatically via ON DELETE CASCADE
         self._conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
         self._conn.commit()
 

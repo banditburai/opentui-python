@@ -98,6 +98,7 @@ from .filters import (
 from .hooks import (
     Animation,
     Timeline,
+    clear_keyboard_handlers,
     use_keyboard,
     use_on_resize,
     use_paste,
@@ -117,22 +118,26 @@ from .renderer import (
     create_cli_renderer,
 )
 
-# Signals (StarHTML-aligned)
+# Signals
 from .signals import (
+    ReadableSignal,
+    Signal,
+    computed,
+    effect,
+)
+
+# Expr system
+from .expr import (
     Assignment,
     BinaryOp,
     Conditional,
-    Effect,
     Expr,
     Literal,
     MethodCall,
     PropertyAccess,
-    Signal,
     UnaryOp,
     all_,
     any_,
-    computed,
-    effect,
     match,
 )
 
@@ -212,7 +217,10 @@ async def render(
         await render(App)
     """
     if config is None:
-        config = CliRendererConfig()
+        import shutil
+
+        term_size = shutil.get_terminal_size((80, 24))
+        config = CliRendererConfig(width=term_size.columns, height=term_size.lines)
     elif isinstance(config, dict):
         config = CliRendererConfig(**config)
 
@@ -272,6 +280,7 @@ async def test_render(
     from .hooks import set_renderer
 
     set_renderer(renderer)
+    clear_keyboard_handlers()
 
     from .signals import _SignalState
 
@@ -302,8 +311,8 @@ class TestSetup:
         return self._renderer.get_current_buffer()
 
     def render_frame(self) -> None:
-        """Render a single frame."""
-        self._renderer.render(force=True)
+        """Render a single frame (layout + draw + swap)."""
+        self._renderer._render_frame(1.0 / 60)
 
     def destroy(self) -> None:
         """Clean up the test."""
@@ -353,9 +362,9 @@ __all__ = [
     "VRenderable",
     # Signals
     "Signal",
+    "ReadableSignal",
     "computed",
     "effect",
-    "Effect",
     "Expr",
     "Literal",
     "BinaryOp",
@@ -404,4 +413,5 @@ __all__ = [
 ]
 
 # Alias for module access
+signals = signals_module
 Signals = signals_module

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -76,10 +77,10 @@ class MCPClient:
         read_stream, write_stream = transport
         self._session_cm = ClientSession(read_stream, write_stream)
         self._session = await self._session_cm.__aenter__()
-        await self._session.initialize()
+        await asyncio.wait_for(self._session.initialize(), timeout=30)
 
         # Discover tools
-        result = await self._session.list_tools()
+        result = await asyncio.wait_for(self._session.list_tools(), timeout=30)
         self._tools = [
             MCPTool(
                 name=t.name,
@@ -118,7 +119,9 @@ class MCPClient:
         known = {t.name for t in self._tools}
         if name not in known:
             raise ValueError(f"Unknown tool {name!r}; available: {sorted(known)}")
-        result = await self._session.call_tool(name, arguments=kwargs)
+        result = await asyncio.wait_for(
+            self._session.call_tool(name, arguments=kwargs), timeout=30
+        )
         # MCP returns a list of content blocks
         parts = []
         for block in result.content:

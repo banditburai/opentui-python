@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -14,13 +15,11 @@ if TYPE_CHECKING:
 
 
 # Unique ID counter for renderables
-_renderable_id = 0
+_renderable_id_counter = itertools.count(1)
 
 
 def _next_id() -> int:
-    global _renderable_id
-    _renderable_id += 1
-    return _renderable_id
+    return next(_renderable_id_counter)
 
 
 @dataclass
@@ -160,6 +159,7 @@ class BaseRenderable:
     def _build_yoga_tree(self) -> Any:
         """Build yoga tree from this renderable and children."""
         node = self._ensure_yoga_node()
+        node.remove_all_children()
         self._configure_yoga_node(node)
 
         for child in self._children:
@@ -941,6 +941,12 @@ class Renderable(BaseRenderable):
 
     def _configure_yoga_node(self, node: Any) -> None:
         """Configure yoga node with this renderable's layout properties."""
+        # Border adds to effective padding for yoga layout purposes
+        bt = 1 if self._border and self._border_top else 0
+        br = 1 if self._border and self._border_right else 0
+        bb = 1 if self._border and self._border_bottom else 0
+        bl = 1 if self._border and self._border_left else 0
+
         yoga_layout.configure_node(
             node,
             width=self._width,
@@ -960,16 +966,16 @@ class Renderable(BaseRenderable):
             gap=float(self._gap) if self._gap else None,
             overflow=self._overflow if self._overflow != "visible" else None,
             position_type=self._position if self._position != "relative" else None,
-            padding=float(self._padding) if self._padding else None,
-            padding_top=float(self._padding_top) if self._padding_top and not self._padding else None,
-            padding_right=float(self._padding_right) if self._padding_right and not self._padding else None,
-            padding_bottom=float(self._padding_bottom) if self._padding_bottom and not self._padding else None,
-            padding_left=float(self._padding_left) if self._padding_left and not self._padding else None,
+            # Use individual sides (with border offset) instead of shorthand
+            padding_top=float(self._padding_top + bt),
+            padding_right=float(self._padding_right + br),
+            padding_bottom=float(self._padding_bottom + bb),
+            padding_left=float(self._padding_left + bl),
             margin=float(self._margin) if self._margin else None,
-            margin_top=float(self._margin_top) if self._margin_top and not self._margin else None,
-            margin_right=float(self._margin_right) if self._margin_right and not self._margin else None,
-            margin_bottom=float(self._margin_bottom) if self._margin_bottom and not self._margin else None,
-            margin_left=float(self._margin_left) if self._margin_left and not self._margin else None,
+            margin_top=float(self._margin_top) if self._margin_top is not None else None,
+            margin_right=float(self._margin_right) if self._margin_right is not None else None,
+            margin_bottom=float(self._margin_bottom) if self._margin_bottom is not None else None,
+            margin_left=float(self._margin_left) if self._margin_left is not None else None,
             top=self._pos_top,
             right=self._pos_right,
             bottom=self._pos_bottom,

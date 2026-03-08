@@ -36,6 +36,10 @@ class LLMProvider:
         self.base_url = base_url
         self._default_kwargs = default_kwargs
 
+    def __repr__(self) -> str:
+        masked_key = f"{self.api_key[:4]}...{self.api_key[-4:]}" if self.api_key and len(self.api_key) > 8 else "***" if self.api_key else "None"
+        return f"LLMProvider(model={self.model!r}, api_key={masked_key!r}, base_url={self.base_url!r})"
+
     def _build_kwargs(self, **overrides: Any) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "model": self.model,

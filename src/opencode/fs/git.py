@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
+from subprocess import CalledProcessError
 from pathlib import Path
 
 
@@ -22,7 +22,7 @@ class GitOps:
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
-            raise subprocess.CalledProcessError(
+            raise CalledProcessError(
                 proc.returncode or 1, ["git", *args],
                 output=stdout, stderr=stderr,
             )
@@ -38,7 +38,7 @@ class GitOps:
 
     async def log(self, *, n: int = 10) -> str:
         """Return recent commit log."""
-        return await self._run("log", f"--oneline", f"-{n}")
+        return await self._run("log", "--oneline", f"-{n}")
 
     async def current_branch(self) -> str:
         """Return current branch name."""

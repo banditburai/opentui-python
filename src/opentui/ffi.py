@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import os
-import sys
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -37,15 +36,6 @@ def _try_load_nanobind() -> None:
                         return
                 except Exception:
                     pass
-
-    try:
-        sys.path.insert(0, os.path.join(package_dir, "opentui_bindings"))
-        import opentui_bindings
-
-        _native_module = opentui_bindings
-        _NATIVE_AVAILABLE = True
-    except ImportError:
-        pass
 
 
 _try_load_nanobind()

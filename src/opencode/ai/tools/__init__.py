@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 
@@ -14,6 +15,8 @@ class Tool:
     description: str
     parameters: dict[str, Any]
     execute: Callable[..., Awaitable[str]]
+    working_dir: Path | None = None
+    requires_confirmation: bool = False
 
     def to_openai_format(self) -> dict[str, Any]:
         """Convert to OpenAI function-calling tool format."""

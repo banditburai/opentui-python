@@ -100,8 +100,8 @@ class TestContrastFilter:
         result = filter_.apply(data, format="RGBA")
 
         # Values should move toward midpoint (128)
-        assert result[0] > 0  # Black becomes gray
-        assert result[4] < 255  # Green becomes gray
+        assert result[0] > 0  # Black R becomes gray
+        assert result[1] < 255  # Green channel moves toward midpoint
 
 
 class TestSepiaFilter:

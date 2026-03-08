@@ -34,10 +34,10 @@ class RGBA:
 
     def to_hex(self) -> str:
         """Convert to hex color string."""
-        r = int(self.r * 255)
-        g = int(self.g * 255)
-        b = int(self.b * 255)
-        a = int(self.a * 255)
+        r = round(self.r * 255)
+        g = round(self.g * 255)
+        b = round(self.b * 255)
+        a = round(self.a * 255)
         if a < 255:
             return f"#{r:02x}{g:02x}{b:02x}{a:02x}"
         return f"#{r:02x}{g:02x}{b:02x}"

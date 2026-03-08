@@ -369,9 +369,10 @@ def _convert_to_grayscale(data: bytes, width: int, height: int) -> bytes:
         b = data[idx + 2]
 
         gray = int(0.299 * r + 0.587 * g + 0.114 * b)
+        gray16 = gray * 257  # Scale 8-bit (0-255) to 16-bit (0-65535)
 
-        result[i * 2] = gray & 0xFF
-        result[i * 2 + 1] = (gray >> 8) & 0xFF
+        result[i * 2] = gray16 & 0xFF
+        result[i * 2 + 1] = (gray16 >> 8) & 0xFF
 
     return bytes(result)
 
@@ -1106,9 +1107,9 @@ class BrightnessFilter(Filter):
         factor = self._factor
 
         for i in range(0, len(data), bytes_per_pixel):
-            result[i] = min(255, int(data[i] * factor))
-            result[i + 1] = min(255, int(data[i + 1] * factor))
-            result[i + 2] = min(255, int(data[i + 2] * factor))
+            result[i] = max(0, min(255, int(data[i] * factor)))
+            result[i + 1] = max(0, min(255, int(data[i + 1] * factor)))
+            result[i + 2] = max(0, min(255, int(data[i + 2] * factor)))
             if is_rgba and i + 3 < len(data):
                 result[i + 3] = data[i + 3]
 

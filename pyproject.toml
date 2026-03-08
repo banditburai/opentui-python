@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "yoga-python>=0.1.1",
+    "yoga-python==0.1.2",
 ]
 
 [project.optional-dependencies]
@@ -41,7 +41,7 @@ numpy = [
 opentui = "opentui.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/opentui", "src/starui_tui"]
+packages = ["src/opentui", "src/startui"]
 
 [tool.ruff]
 line-length = 100

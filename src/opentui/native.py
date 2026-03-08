@@ -32,24 +32,14 @@ if _so_file:
             spec.loader.exec_module(_nb)
             _NANOBIND_AVAILABLE = True
     except Exception as e:
-        print(f"Failed to load nanobind bindings: {e}")
+        import warnings
+        warnings.warn(f"Failed to load nanobind bindings: {e}", stacklevel=1)
         _nb = None
 
 # Try relative import from src
 if not _NANOBIND_AVAILABLE:
     try:
         from src.opentui_bindings import opentui_bindings
-
-        _nb = opentui_bindings
-        _NANOBIND_AVAILABLE = True
-    except ImportError:
-        pass
-
-# Add the bindings path if available
-if not _NANOBIND_AVAILABLE:
-    try:
-        sys.path.insert(0, "src/opentui_bindings")
-        import opentui_bindings
 
         _nb = opentui_bindings
         _NANOBIND_AVAILABLE = True
@@ -66,8 +56,11 @@ class NativeRenderer:
         self._ptr = _nb.renderer.create_renderer(width, height, testing, remote)
 
     def __del__(self):
-        if hasattr(self, "_ptr") and self._ptr:
-            _nb.renderer.destroy_renderer(self._ptr)
+        try:
+            if hasattr(self, "_ptr") and self._ptr:
+                _nb.renderer.destroy_renderer(self._ptr)
+        except Exception:
+            pass
 
     def render(self, skip_diff: bool = False) -> None:
         _nb.renderer.render(self._ptr, skip_diff)
@@ -161,8 +154,11 @@ class NativeTextBuffer:
         self._ptr = _nb.text_buffer.create_text_buffer(encoding)
 
     def __del__(self):
-        if hasattr(self, "_ptr") and self._ptr:
-            _nb.text_buffer.destroy_text_buffer(self._ptr)
+        try:
+            if hasattr(self, "_ptr") and self._ptr:
+                _nb.text_buffer.destroy_text_buffer(self._ptr)
+        except Exception:
+            pass
 
     @property
     def ptr(self) -> int:
@@ -203,8 +199,11 @@ class NativeTextBufferView:
         self._ptr = _nb.text_buffer.create_text_buffer_view(buffer_ptr)
 
     def __del__(self):
-        if hasattr(self, "_ptr") and self._ptr:
-            _nb.text_buffer.destroy_text_buffer_view(self._ptr)
+        try:
+            if hasattr(self, "_ptr") and self._ptr:
+                _nb.text_buffer.destroy_text_buffer_view(self._ptr)
+        except Exception:
+            pass
 
     @property
     def ptr(self) -> int:
@@ -236,8 +235,11 @@ class NativeEditBuffer:
         self._ptr = _nb.edit_buffer.create_edit_buffer(encoding)
 
     def __del__(self):
-        if hasattr(self, "_ptr") and self._ptr:
-            _nb.edit_buffer.destroy_edit_buffer(self._ptr)
+        try:
+            if hasattr(self, "_ptr") and self._ptr:
+                _nb.edit_buffer.destroy_edit_buffer(self._ptr)
+        except Exception:
+            pass
 
     @property
     def ptr(self) -> int:
@@ -296,8 +298,11 @@ class NativeEditorView:
         self._ptr = _nb.editor_view.create_editor_view(buffer_ptr, width, height)
 
     def __del__(self):
-        if hasattr(self, "_ptr") and self._ptr:
-            _nb.editor_view.destroy_editor_view(self._ptr)
+        try:
+            if hasattr(self, "_ptr") and self._ptr:
+                _nb.editor_view.destroy_editor_view(self._ptr)
+        except Exception:
+            pass
 
     @property
     def ptr(self) -> int:

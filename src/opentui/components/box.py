@@ -190,11 +190,6 @@ class Box(Renderable):
         if self._focused and width > 0 and height > 0:
             self._draw_focus_ring(buffer, width, height)
 
-        # Calculate content area
-        content_x = self._x + self._padding_left
-        content_y = self._y + self._padding_top
-        # content_width/content_height available for child layout calculations
-
         # Draw background for the box
         if self._background_color:
             bg_x = self._x if not self._border else self._x + 1
@@ -204,12 +199,9 @@ class Box(Renderable):
             if bg_w > 0 and bg_h > 0:
                 buffer.fill_rect(bg_x, bg_y, bg_w, bg_h, self._background_color)
 
-        # Render children in content area
+        # Render children at their yoga-computed absolute positions
         for child in self._children:
             if isinstance(child, Renderable):
-                # Update child position
-                child._x = content_x
-                child._y = content_y
                 child.render(buffer, delta_time)
 
     def _get_border_chars(self) -> dict:
