@@ -88,6 +88,7 @@ class BaseRenderable:
         "_parent",
         "_children",
         "_event_handlers",
+        "_cleanups",
         "_yoga_node",
         "_x",
         "_y",
@@ -98,13 +99,16 @@ class BaseRenderable:
         "_layout_width",
         "_layout_height",
         "_dirty",
+        "key",
     )
 
-    def __init__(self):
+    def __init__(self, *, key: str | int | None = None):
         self._id = _next_id()
+        self.key = key
         self._parent: BaseRenderable | None = None
         self._children: list[BaseRenderable] = []
         self._event_handlers: dict[str, list[Callable]] = {}
+        self._cleanups: list[Callable] = []
         self._yoga_node: Any = None
         self._x: int = 0
         self._y: int = 0
@@ -271,8 +275,19 @@ class BaseRenderable:
         for handler in handlers:
             handler(*args, **kwargs)
 
+    def on_cleanup(self, fn: Callable) -> None:
+        """Register a cleanup function to run when this renderable is destroyed."""
+        self._cleanups.append(fn)
+
     def destroy(self) -> None:
-        """Destroy this renderable."""
+        """Destroy this renderable, running cleanups first."""
+        # Run cleanup functions
+        for fn in self._cleanups:
+            try:
+                fn()
+            except Exception:
+                pass
+        self._cleanups.clear()
         if self._parent is not None:
             self._parent.remove(self)
         for child in self._children[:]:
@@ -373,6 +388,7 @@ class Renderable(BaseRenderable):
     def __init__(
         self,
         *,
+        key: str | int | None = None,
         # Layout
         width: int | str | None = None,
         height: int | str | None = None,
@@ -436,7 +452,7 @@ class Renderable(BaseRenderable):
         translate_x: float = 0,
         translate_y: float = 0,
     ):
-        super().__init__()
+        super().__init__(key=key)
 
         # Layout
         self._x = 0

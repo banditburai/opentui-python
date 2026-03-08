@@ -16,9 +16,14 @@ build/
 *.swo
 
 # Build artifacts
+src/opentui/opentui-libs/
 src/opentui_bindings/build/
 *.so
 *.dylib
+*.pyd
+_skbuild/
+CMakeCache.txt
+CMakeFiles/
 
 # Cache
 .ruff_cache/

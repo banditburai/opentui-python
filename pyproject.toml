@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["scikit-build-core>=0.5", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "opentui"
@@ -18,12 +18,13 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
 
 dependencies = [
+    "httpx>=0.28.1",
+    "starhtml>=0.5.19",
     "yoga-python==0.1.2",
 ]
 
@@ -36,23 +37,33 @@ dev = [
 numpy = [
     "numpy>=1.24.0",
 ]
+opencode = [
+    "litellm>=1.0.0",
+]
+serve = [
+    "starlette>=0.27.0",
+    "sse-starlette>=1.6.0",
+    "uvicorn>=0.23.0",
+]
 
 [project.scripts]
 opentui = "opentui.__main__:main"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/opentui", "src/startui"]
+[tool.scikit-build]
+wheel.packages = ["src/opentui", "src/startui"]
+cmake.source-dir = "src/opentui_bindings"
+cmake.args = ["-DCMAKE_BUILD_TYPE=Release"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501"]
 
 [tool.pyright]
-pythonVersion = "3.11"
+pythonVersion = "3.12"
 typeCheckingMode = "basic"
 reportMissingImports = true
 reportMissingTypeStubs = false

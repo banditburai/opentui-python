@@ -249,6 +249,53 @@ class TestComputed:
         c = computed(lambda: 42)
         assert c() == 42  # Computed once, never updates
 
+    def test_auto_track_single_dep(self):
+        """Auto-tracking discovers single dependency."""
+        a = Signal("a", 5)
+        c = computed(lambda: a() * 2)  # No explicit deps
+        assert c() == 10
+        a.set(7)
+        assert c() == 14
+
+    def test_auto_track_multiple_deps(self):
+        """Auto-tracking discovers multiple dependencies."""
+        a = Signal("a", 2)
+        b = Signal("b", 3)
+        c = computed(lambda: a() + b())  # No explicit deps
+        assert c() == 5
+        a.set(10)
+        assert c() == 13
+        b.set(20)
+        assert c() == 30
+
+    def test_auto_track_chain(self):
+        """Auto-tracked computed can chain."""
+        a = Signal("a", 1)
+        b = computed(lambda: a() * 2)
+        c = computed(lambda: b() + 10)
+        assert c() == 12
+        a.set(5)
+        assert b() == 10
+        assert c() == 20
+
+    def test_auto_track_dispose(self):
+        """Dispose works for auto-tracked computed."""
+        a = Signal("a", 1)
+        c = computed(lambda: a() * 10)
+        assert c() == 10
+        c.dispose()
+        a.set(5)
+        assert c() == 10  # No longer updates
+
+    def test_auto_track_unread_signal_not_tracked(self):
+        """Signals not read during initial call are not tracked."""
+        a = Signal("a", 1)
+        Signal("b", 2)  # never read
+        c = computed(lambda: a() + 100)
+        assert c() == 101
+        a.set(5)
+        assert c() == 105
+
 
 class TestEffect:
     def setup_method(self):
@@ -293,6 +340,33 @@ class TestEffect:
         cleanup = effect(lambda: calls.append("ran"))
         assert calls == ["ran"]
         cleanup()  # No-op but should not raise
+
+    def test_auto_track_effect(self):
+        """Effect with no explicit deps auto-discovers dependencies."""
+        s = Signal("x", 0)
+        calls = []
+        cleanup = effect(lambda: calls.append(s()))  # No explicit deps
+        assert calls == [0]
+        s.set(1)
+        assert calls == [0, 1]
+        s.set(2)
+        assert calls == [0, 1, 2]
+        cleanup()
+        s.set(3)
+        assert calls == [0, 1, 2]  # No more after cleanup
+
+    def test_auto_track_effect_multiple_deps(self):
+        """Auto-tracked effect discovers multiple dependencies."""
+        a = Signal("a", 1)
+        b = Signal("b", 2)
+        calls = []
+        cleanup = effect(lambda: calls.append(a() + b()))  # No explicit deps
+        assert calls == [3]
+        a.set(10)
+        assert calls == [3, 12]
+        b.set(20)
+        assert calls == [3, 12, 30]
+        cleanup()
 
 
 class TestSignalState:

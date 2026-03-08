@@ -1,216 +1,181 @@
-"""Download OpenTUI core binaries for the current platform."""
+"""Download OpenTUI core binaries from npm registry (pure Python, no node required)."""
 
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import io
 import json
-import os
 import platform
 import shutil
-import subprocess
 import sys
 import tarfile
-import tempfile
-import zipfile
+import urllib.request
 from pathlib import Path
 
+OPENTUI_VERSION = "0.1.86"
+
+NPM_REGISTRY = "https://registry.npmjs.org"
 
 PLATFORM_MAP = {
     ("darwin", "x86_64"): "darwin-x64",
     ("darwin", "arm64"): "darwin-arm64",
     ("linux", "x86_64"): "linux-x64",
     ("linux", "aarch64"): "linux-arm64",
-    ("win32", "x86"): "win32-x64",  # Python doesn't distinguish x86 on Windows
-    ("win32", "AMD64"): "win32-x64",
+    ("windows", "x86_64"): "win32-x64",
+    ("windows", "amd64"): "win32-x64",
 }
 
+LIB_NAMES = {
+    "darwin": ["libopentui.dylib"],
+    "linux": ["libopentui.so"],
+    "windows": ["opentui.dll", "libopentui.dll"],
+}
 
-def get_platform() -> str:
-    """Get the platform identifier for OpenTUI core."""
+DEFAULT_DEST = Path(__file__).resolve().parent.parent / "src" / "opentui" / "opentui-libs"
+
+
+def get_platform_id() -> str:
+    """Map current OS/arch to npm platform package suffix."""
     system = platform.system().lower()
     machine = platform.machine().lower()
-
-    if system == "darwin":
-        machine = "arm64" if machine == "arm64" else "x86_64"
-    elif system == "linux":
-        machine = "aarch64" if machine == "aarch64" else "x86_64"
-
     key = (system, machine)
     if key not in PLATFORM_MAP:
         raise RuntimeError(f"Unsupported platform: {system}-{machine}")
-
     return PLATFORM_MAP[key]
 
 
-def get_package_name(platform_id: str) -> str:
-    """Get the npm package name for the platform."""
-    return f"@opentui/core-{platform_id}"
+def get_lib_names() -> list[str]:
+    """Return candidate library filenames for the current OS."""
+    system = platform.system().lower()
+    return LIB_NAMES.get(system, ["libopentui.so"])
 
 
-def download_and_extract_lib(package_name: str, dest_dir: Path) -> Path:
-    """Download npm package and extract the shared library."""
-    print(f"Downloading {package_name}...")
+def fetch_json(url: str) -> dict:
+    """Fetch JSON from a URL."""
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read())
 
-    # Create temp directory
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmppath = Path(tmpdir)
 
-        # Download package using npm
-        result = subprocess.run(
-            ["npm", "pack", package_name, "--pack-destination", str(tmppath)],
-            capture_output=True,
-            text=True,
-        )
-
-        if result.returncode != 0:
-            print(f"Warning: npm pack failed: {result.stderr}")
-            # Fallback: try using npx
-            result = subprocess.run(
-                ["npx", "-y", "@aspect/extract", package_name, str(tmppath)],
-                capture_output=True,
-                text=True,
+def verify_integrity(data: bytes, integrity: str | None, shasum: str | None) -> None:
+    """Verify tarball integrity using SRI hash or SHA-1 fallback."""
+    if integrity:
+        # SRI format: "sha512-<base64>"
+        algo, expected_b64 = integrity.split("-", 1)
+        digest = hashlib.new(algo, data).digest()
+        actual_b64 = base64.b64encode(digest).decode()
+        if actual_b64 != expected_b64:
+            raise RuntimeError(
+                f"Integrity check failed ({algo}):\n"
+                f"  expected: {expected_b64}\n"
+                f"  got:      {actual_b64}"
             )
-            if result.returncode != 0:
-                raise RuntimeError(f"Failed to download {package_name}: {result.stderr}")
-
-        # Find the downloaded package
-        package_files = list(tmppath.glob("*.tgz"))
-        if not package_files:
-            # Try to find any downloaded file
-            package_files = list(tmppath.glob("@opentui/*/*.tgz"))
-
-        if package_files:
-            package_file = package_files[0]
-            print(f"Extracting {package_file.name}...")
-
-            # Extract tarball
-            with tarfile.open(package_file, "r:gz") as tar:
-                # Extract to temp
-                extract_dir = tmppath / "extracted"
-                extract_dir.mkdir()
-                tar.extractall(extract_dir)
-
-                # Find the shared library
-                # Package structure: package/package/files/...
-                package_dir = extract_dir / "package"
-
-                if platform.system().lower() == "darwin":
-                    lib_name = "libopentui.dylib"
-                elif platform.system().lower() == "linux":
-                    lib_name = "libopentui.so"
-                else:
-                    lib_name = "libopentui.dll"
-
-                # Search for the library
-                lib_path = None
-                for root, dirs, files in os.walk(package_dir):
-                    if lib_name in files:
-                        lib_path = Path(root) / lib_name
-                        break
-
-                if lib_path and lib_path.exists():
-                    dest_path = dest_dir / lib_name
-                    shutil.copy2(lib_path, dest_path)
-                    print(f"Copied to {dest_path}")
-                    return dest_path
-
-                # Try .node files (native Node modules)
-                for root, dirs, files in os.walk(package_dir):
-                    for f in files:
-                        if f.endswith(".node") or f.startswith("libopentui"):
-                            src = Path(root) / f
-                            dest_path = dest_dir / f
-                            shutil.copy2(src, dest_path)
-                            print(f"Copied to {dest_path}")
-                            return dest_path
-
-        raise RuntimeError(f"Could not find shared library in {package_name}")
+        print(f"  Integrity verified ({algo})")
+    elif shasum:
+        actual = hashlib.sha1(data).hexdigest()
+        if actual != shasum:
+            raise RuntimeError(
+                f"SHA-1 check failed:\n  expected: {shasum}\n  got:      {actual}"
+            )
+        print("  Integrity verified (sha1)")
+    else:
+        print("  Warning: no integrity data available, skipping verification")
 
 
-def ensure_library(dest_dir: Path | None = None) -> Path:
-    """Ensure the OpenTUI library is available."""
-    if dest_dir is None:
-        # Default to package directory
-        dest_dir = Path(__file__).parent.parent / "src" / "opentui" / "opentui-libs"
+def download_library(version: str, dest_dir: Path) -> Path:
+    """Download and extract the OpenTUI shared library from npm."""
+    platform_id = get_platform_id()
+    package = f"@opentui/core-{platform_id}"
+    lib_names = get_lib_names()
 
-    dest_dir = Path(dest_dir)
+    # 1. Fetch package metadata for the pinned version
+    meta_url = f"{NPM_REGISTRY}/{package}/{version}"
+    print(f"Fetching metadata: {meta_url}")
+    meta = fetch_json(meta_url)
+
+    dist = meta.get("dist", {})
+    tarball_url = dist.get("tarball")
+    integrity = dist.get("integrity")
+    shasum = dist.get("shasum")
+
+    if not tarball_url:
+        raise RuntimeError(f"No tarball URL in metadata for {package}@{version}")
+
+    # 2. Download tarball
+    print(f"Downloading: {tarball_url}")
+    with urllib.request.urlopen(tarball_url, timeout=60) as resp:
+        tarball_data = resp.read()
+    print(f"  Downloaded {len(tarball_data)} bytes")
+
+    # 3. Verify integrity
+    verify_integrity(tarball_data, integrity, shasum)
+
+    # 4. Extract library from tarball (safe: read individual members, no extractall)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check if already exists
-    system = platform.system().lower()
-    if system == "darwin":
-        lib_name = "libopentui.dylib"
-    elif system == "linux":
-        lib_name = "libopentui.so"
-    else:
-        lib_name = "libopentui.dll"
+    with tarfile.open(fileobj=io.BytesIO(tarball_data), mode="r:gz") as tar:
+        for member in tar.getmembers():
+            basename = Path(member.name).name
+            if basename in lib_names and member.isfile():
+                fileobj = tar.extractfile(member)
+                if fileobj is None:
+                    continue
+                dest_path = dest_dir / basename
+                with open(dest_path, "wb") as out:
+                    shutil.copyfileobj(fileobj, out)
+                print(f"  Extracted: {dest_path}")
+                return dest_path
 
-    lib_path = dest_dir / lib_name
-    if lib_path.exists():
-        print(f"Library already exists at {lib_path}")
-        return lib_path
-
-    # Download
-    platform_id = get_platform()
-    package_name = get_package_name(platform_id)
-
-    try:
-        return download_and_extract_lib(package_name, dest_dir)
-    except Exception as e:
-        print(f"Error downloading library: {e}")
-        print("Trying alternative approach...")
-
-        # Fallback: try direct download
-        try:
-            import urllib.request
-            import io
-
-            # Try direct CDN download
-            cdn_url = f"https://registry.npmjs.org/{package_name}/latest"
-            response = urllib.request.urlopen(cdn_url)
-            data = json.loads(response.read().decode())
-
-            tarball_url = data.get("dist", {}).get("tarball")
-            if tarball_url:
-                print(f"Downloading from {tarball_url}")
-                response = urllib.request.urlopen(tarball_url)
-                tarball_data = io.BytesIO(response.read())
-
-                extract_dir = dest_dir / "extracted"
-                extract_dir.mkdir(parents=True, exist_ok=True)
-
-                with tarfile.open(fileobj=tarball_data, mode="r:gz") as tar:
-                    tar.extractall(extract_dir)
-
-                # Find and copy library
-                package_dir = extract_dir / "package"
-                for root, dirs, files in os.walk(package_dir):
-                    for f in files:
-                        if "opentui" in f.lower() and (
-                            f.endswith(".so") or f.endswith(".dylib") or f.endswith(".dll")
-                        ):
-                            src = Path(root) / f
-                            dest_path = dest_dir / f
-                            shutil.copy2(src, dest_path)
-                            return dest_path
-        except Exception as e2:
-            print(f"Alternative download also failed: {e2}")
-
-        raise RuntimeError("Could not download OpenTUI library. Please install manually.")
+    raise RuntimeError(
+        f"Shared library not found in {package}@{version}.\n"
+        f"  Searched for: {lib_names}"
+    )
 
 
-def main():
-    """Main entry point."""
-    print("OpenTUI Python - Library Downloader")
-    print("=" * 40)
+def ensure_library(version: str, dest_dir: Path, *, force: bool = False) -> Path:
+    """Download library if not already present (or if --force)."""
+    if not force:
+        for name in get_lib_names():
+            path = dest_dir / name
+            if path.exists():
+                print(f"Library already exists: {path}")
+                return path
+
+    return download_library(version, dest_dir)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Download OpenTUI core binaries")
+    parser.add_argument(
+        "--version",
+        default=OPENTUI_VERSION,
+        help=f"npm package version (default: {OPENTUI_VERSION})",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download even if library already exists",
+    )
+    parser.add_argument(
+        "--dest",
+        type=Path,
+        default=DEFAULT_DEST,
+        help=f"Destination directory (default: {DEFAULT_DEST})",
+    )
+    args = parser.parse_args()
+
+    print(f"OpenTUI Python - Library Downloader v{args.version}")
+    print("=" * 50)
 
     try:
-        platform_id = get_platform()
-        print(f"Detected platform: {platform_id}")
-
-        lib_path = ensure_library()
+        platform_id = get_platform_id()
+        print(f"Platform: {platform_id}")
+        lib_path = ensure_library(args.version, args.dest, force=args.force)
         print(f"\nLibrary ready: {lib_path}")
-        print("\nYou can now use opentui-python!")
-
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

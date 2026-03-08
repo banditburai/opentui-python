@@ -112,6 +112,30 @@ class MCPClient:
         """Return discovered tools (empty if not connected)."""
         return list(self._tools)
 
+    def to_registry_tools(self) -> list[Any]:
+        """Convert discovered MCP tools to Tool objects for the ToolRegistry.
+
+        Returns a list of Tool instances compatible with opencode.ai.tools.ToolRegistry.
+        """
+        from opencode.ai.tools import Tool
+
+        result = []
+        for mcp_tool in self._tools:
+            client = self  # capture reference
+
+            async def _execute(_name: str = mcp_tool.name, **kwargs: Any) -> str:
+                return await client.call_tool(_name, **kwargs)
+
+            result.append(
+                Tool(
+                    name=mcp_tool.name,
+                    description=mcp_tool.description,
+                    parameters=mcp_tool.input_schema,
+                    execute=_execute,
+                )
+            )
+        return result
+
     async def call_tool(self, name: str, **kwargs: Any) -> str:
         """Call a tool on the MCP server."""
         if self._session is None:

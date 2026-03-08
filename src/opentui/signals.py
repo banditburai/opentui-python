@@ -7,6 +7,7 @@ signal changes trigger re-renders.
 
 from __future__ import annotations
 
+import contextvars
 import itertools
 import threading
 from typing import Any, Callable, Protocol, runtime_checkable
@@ -28,6 +29,11 @@ from .expr import (
 )
 
 _counter = itertools.count()
+
+# Context variable for auto-tracking signal reads inside computed/effect
+_tracking_context: contextvars.ContextVar[set[Signal] | None] = contextvars.ContextVar(
+    "_tracking_context", default=None
+)
 
 
 @runtime_checkable
@@ -104,7 +110,10 @@ class Signal:
         return self._name
 
     def __call__(self) -> Any:
-        """Get current value."""
+        """Get current value. Registers with tracking context if active."""
+        tracking = _tracking_context.get()
+        if tracking is not None:
+            tracking.add(self)
         return self._value
 
     def get(self) -> Any:
@@ -165,20 +174,34 @@ class Signal:
 class _ComputedSignal:
     """Read-only derived signal that updates when dependencies change.
 
-    Use ``computed(fn, *deps)`` to create. Dependencies must be listed
-    explicitly — any signal read inside ``fn`` but not in ``deps`` will
-    NOT trigger recomputation.
+    Use ``computed(fn, *deps)`` to create. If no deps are provided, deps
+    are auto-discovered by running ``fn`` inside a tracking context.
     """
 
     __slots__ = ("_fn", "_signal", "_cleanups")
 
     def __init__(self, fn: Callable[[], Any], *deps: ReadableSignal) -> None:
         self._fn = fn
-        self._signal = Signal(f"computed_{next(_counter)}", fn())
         self._cleanups: list[Callable[[], None]] = []
-        for dep in deps:
-            unsub = dep.subscribe(lambda _: self._recompute())
-            self._cleanups.append(unsub)
+
+        if deps:
+            # Explicit deps — evaluate normally
+            self._signal = Signal(f"computed_{next(_counter)}", fn())
+            for dep in deps:
+                unsub = dep.subscribe(lambda _: self._recompute())
+                self._cleanups.append(unsub)
+        else:
+            # Auto-track: run fn in tracking context to discover deps
+            tracked: set[Signal] = set()
+            token = _tracking_context.set(tracked)
+            try:
+                initial = fn()
+            finally:
+                _tracking_context.reset(token)
+            self._signal = Signal(f"computed_{next(_counter)}", initial)
+            for dep in tracked:
+                unsub = dep.subscribe(lambda _: self._recompute())
+                self._cleanups.append(unsub)
 
     def __call__(self) -> Any:
         return self._signal()
@@ -206,8 +229,9 @@ class _ComputedSignal:
 def computed(fn: Callable[[], Any], *deps: ReadableSignal) -> _ComputedSignal:
     """Create a derived signal that updates when dependencies change.
 
-    Dependencies must be listed explicitly. Any signal read inside ``fn``
-    but not passed as a ``dep`` will NOT trigger recomputation.
+    If deps are provided, only those trigger recomputation. If no deps
+    are provided, dependencies are auto-discovered by running ``fn``
+    in a tracking context.
 
     Call ``.dispose()`` when the computed signal is no longer needed to
     prevent memory leaks from lingering subscriptions.
@@ -221,14 +245,28 @@ def effect(fn: Callable[[], Any], *deps: ReadableSignal) -> Callable[[], None]:
     Runs immediately, then re-runs whenever any dep changes.
     Returns a cleanup function that unsubscribes from all deps.
 
-    If no deps are provided, runs once and the cleanup is a no-op.
+    If no deps are provided, auto-discovers deps by running ``fn``
+    in a tracking context.
     """
     cleanups: list[Callable[[], None]] = []
-    # Run immediately BEFORE subscribing to avoid reentrant triggers
-    fn()
-    for dep in deps:
-        unsub = dep.subscribe(lambda _: fn())
-        cleanups.append(unsub)
+
+    if deps:
+        # Explicit deps — run immediately then subscribe
+        fn()
+        for dep in deps:
+            unsub = dep.subscribe(lambda _: fn())
+            cleanups.append(unsub)
+    else:
+        # Auto-track: run fn in tracking context to discover deps
+        tracked: set[Signal] = set()
+        token = _tracking_context.set(tracked)
+        try:
+            fn()
+        finally:
+            _tracking_context.reset(token)
+        for dep in tracked:
+            unsub = dep.subscribe(lambda _: fn())
+            cleanups.append(unsub)
 
     def cleanup() -> None:
         for unsub in cleanups:

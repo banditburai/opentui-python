@@ -31,6 +31,21 @@ class Message:
 
 
 @dataclass
+class MessagePart:
+    """A typed part within a message (text, tool_call, tool_result, reasoning, error)."""
+
+    id: str
+    message_id: str
+    type: str  # 'text', 'tool_call', 'tool_result', 'reasoning', 'error'
+    content: str = ""
+    tool_name: str | None = None
+    tool_call_id: str | None = None
+    metadata: str | None = None  # JSON
+    status: str = "completed"  # 'pending', 'running', 'completed', 'error'
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
 class FileChange:
     id: str
     session_id: str

@@ -24,6 +24,19 @@ class LLMProvider:
     Wraps litellm.acompletion for both streaming and non-streaming calls.
     """
 
+    @classmethod
+    def from_config(cls, config: Any, *, model_override: str = "") -> LLMProvider:
+        """Create provider from resolved AppConfig."""
+        from .providers import resolve_model
+
+        model_id = model_override or config.model
+        resolved = resolve_model(model_id, config)
+        return cls(
+            model=resolved.litellm_model,
+            api_key=resolved.api_key,
+            base_url=resolved.api_base,
+        )
+
     def __init__(
         self,
         model: str = "gpt-4",

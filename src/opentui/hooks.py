@@ -13,6 +13,9 @@ if TYPE_CHECKING:
 # Global renderer context
 _current_renderer: CliRenderer | None = None
 _keyboard_handlers: list[Callable[[KeyEvent], None]] = []
+_paste_handlers: list[Callable[[str], None]] = []
+_resize_handlers: list[Callable[[int, int], None]] = []
+_selection_handlers: list[Callable[[Any], None]] = []
 
 
 def set_renderer(renderer: CliRenderer) -> None:
@@ -34,6 +37,36 @@ def get_keyboard_handlers() -> list[Callable[[KeyEvent], None]]:
 def clear_keyboard_handlers() -> None:
     """Clear all keyboard handlers."""
     _keyboard_handlers.clear()
+
+
+def get_paste_handlers() -> list[Callable[[str], None]]:
+    """Get all registered paste handlers."""
+    return _paste_handlers.copy()
+
+
+def clear_paste_handlers() -> None:
+    """Clear all paste handlers."""
+    _paste_handlers.clear()
+
+
+def get_resize_handlers() -> list[Callable[[int, int], None]]:
+    """Get all registered resize handlers."""
+    return _resize_handlers.copy()
+
+
+def clear_resize_handlers() -> None:
+    """Clear all resize handlers."""
+    _resize_handlers.clear()
+
+
+def get_selection_handlers() -> list[Callable[[Any], None]]:
+    """Get all registered selection handlers."""
+    return _selection_handlers.copy()
+
+
+def clear_selection_handlers() -> None:
+    """Clear all selection handlers."""
+    _selection_handlers.clear()
 
 
 def use_renderer() -> CliRenderer:
@@ -81,7 +114,7 @@ def use_on_resize(callback: Callable[[int, int], None]) -> CliRenderer:
         use_on_resize(on_resize)
     """
     renderer = use_renderer()
-    # In full implementation, this would register with the event system
+    _resize_handlers.append(callback)
     return renderer
 
 
@@ -136,7 +169,7 @@ def use_paste(callback: Callable[[str], None]) -> None:
 
         use_paste(on_paste)
     """
-    # In full implementation: use_renderer() to register paste handler
+    _paste_handlers.append(callback)
 
 
 def use_selection_handler(callback: Callable[[Any], None]) -> None:
@@ -151,7 +184,7 @@ def use_selection_handler(callback: Callable[[Any], None]) -> None:
 
         use_selection_handler(on_select)
     """
-    # In full implementation: use_renderer() to register selection handler
+    _selection_handlers.append(callback)
 
 
 def use_timeline(options: dict | None = None) -> Timeline:
@@ -305,4 +338,12 @@ __all__ = [
     "use_timeline",
     "Timeline",
     "Animation",
+    "get_keyboard_handlers",
+    "clear_keyboard_handlers",
+    "get_paste_handlers",
+    "clear_paste_handlers",
+    "get_resize_handlers",
+    "clear_resize_handlers",
+    "get_selection_handlers",
+    "clear_selection_handlers",
 ]

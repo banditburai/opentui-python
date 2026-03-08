@@ -7,10 +7,8 @@ from typing import Any
 
 from opentui.components import Box, Text
 
-from ..theme import APP_THEME
-
-# Streaming cursor character
-_CURSOR = "\u2588"
+from ..themes import get_theme
+from . import CURSOR
 
 # Inline markdown regex: **bold**, *italic*, `code`
 _INLINE_RE = re.compile(
@@ -107,8 +105,8 @@ def chat_message(
     **kwargs: Any,
 ) -> Box:
     """Render a single chat message with role label and parsed content."""
-    t = APP_THEME.get("content", {})
-    role_color = _ROLE_COLORS.get(role, t.get("fg", "#e0e0e0"))
+    t = get_theme()
+    role_color = _ROLE_COLORS.get(role, t.text)
 
     # Role label
     label = Text(role.capitalize(), bold=True, fg=role_color)
@@ -118,7 +116,7 @@ def chat_message(
 
     # Append streaming cursor
     if streaming:
-        body_nodes.append(Text(_CURSOR, fg=role_color))
+        body_nodes.append(Text(CURSOR, fg=role_color))
 
     body = Box(
         *body_nodes,
@@ -147,7 +145,7 @@ def chat_panel(
     Each message dict should have 'role' and 'content' keys.
     When streaming=True, the last assistant message shows a cursor.
     """
-    t = APP_THEME.get("content", {})
+    t = get_theme()
     children: list[Box] = []
 
     for i, msg in enumerate(messages):
@@ -166,6 +164,6 @@ def chat_panel(
         flex_direction="column",
         gap=1,
         flex_grow=1,
-        background_color=t.get("bg", "#1a1a2e"),
+        background_color=t.background,
         **kwargs,
     )

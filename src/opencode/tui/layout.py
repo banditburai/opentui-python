@@ -6,39 +6,43 @@ from typing import Any
 
 from opentui.components import Box, Text
 
-from .theme import APP_THEME
+from .themes import get_theme
+
+SIDEBAR_WIDTH = 30
 
 
 def toolbar(*, title: str = "OpenCode", **kwargs: Any) -> Box:
     """Top toolbar with application title."""
-    t = APP_THEME["toolbar"]
+    t = get_theme()
     return Box(
-        Text(title, bold=True, fg=t["accent"]),
+        Text(title, bold=True, fg=t.accent),
         flex_direction="row",
         justify_content="space-between",
-        background_color=t["bg"],
-        fg=t["fg"],
+        background_color=t.background_panel,
+        fg=t.text,
         padding_left=1,
         padding_right=1,
         **kwargs,
     )
 
 
-def status_bar(*, model: str = "", branch: str = "", **kwargs: Any) -> Box:
-    """Bottom status bar with model and git info."""
-    t = APP_THEME["status_bar"]
+def status_bar(*, model: str = "", branch: str = "", status: str = "", **kwargs: Any) -> Box:
+    """Bottom status bar with model, git, and status info."""
+    t = get_theme()
     children: list[Any] = []
     if model:
-        children.append(Text(model, fg=t["fg"]))
+        children.append(Text(model, fg=t.text_muted))
+    if status:
+        children.append(Text(status, fg=t.text_muted))
     if branch:
-        children.append(Text(branch, fg=t["fg"]))
+        children.append(Text(branch, fg=t.text_muted))
     if not children:
-        children.append(Text("Ready", fg=t["fg"]))
+        children.append(Text("Ready", fg=t.text_muted))
     return Box(
         *children,
         flex_direction="row",
         justify_content="space-between",
-        background_color=t["bg"],
+        background_color=t.background_panel,
         padding_left=1,
         padding_right=1,
         **kwargs,
@@ -47,28 +51,28 @@ def status_bar(*, model: str = "", branch: str = "", **kwargs: Any) -> Box:
 
 def sidebar(*, sessions: list[dict[str, Any]] | None = None, **kwargs: Any) -> Box:
     """Left sidebar with session list."""
-    t = APP_THEME["sidebar"]
-    children: list[Any] = [Text("Sessions", bold=True, fg=t["fg"])]
+    t = get_theme()
+    children: list[Any] = [Text("Sessions", bold=True, fg=t.text)]
     if sessions:
         for s in sessions:
-            children.append(Text(s.get("title", s.get("id", "Untitled")), fg=t["fg"]))
+            children.append(Text(s.get("title", s.get("id", "Untitled")), fg=t.text))
     return Box(
         *children,
         flex_direction="column",
-        background_color=t["bg"],
-        width=t["width"],
+        background_color=t.background_panel,
+        width=SIDEBAR_WIDTH,
         **kwargs,
     )
 
 
 def content_area(**kwargs: Any) -> Box:
     """Main content area (placeholder for chat/editor tabs)."""
-    t = APP_THEME["content"]
+    t = get_theme()
     return Box(
-        Text("Chat", fg=t["fg"]),
+        Text("Chat", fg=t.text),
         flex_direction="column",
         flex_grow=1,
-        background_color=t["bg"],
+        background_color=t.background,
         **kwargs,
     )
 

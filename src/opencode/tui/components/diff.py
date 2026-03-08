@@ -7,14 +7,7 @@ from typing import Any
 
 from opentui.components import Box, Text
 
-from ..theme import APP_THEME
-
-_COLORS = {
-    "+": "#81c784",  # green for additions
-    "-": "#e57373",  # red for deletions
-    " ": "#c0c0c0",  # gray for context
-}
-
+from ..themes import get_theme
 
 @dataclass
 class DiffLine:
@@ -31,21 +24,21 @@ def diff_viewer(
     **kwargs: Any,
 ) -> Box:
     """Render a diff as colored lines in a Box."""
+    t = get_theme()
+    colors = {"+": t.diff_added, "-": t.diff_removed, " ": t.diff_context}
     parts: list[Box | Text] = []
 
     if filename:
-        t = APP_THEME.get("content", {})
-        parts.append(Text(filename, bold=True, fg=t.get("fg", "#e0e0e0")))
+        parts.append(Text(filename, bold=True, fg=t.text))
 
     for dl in lines:
-        prefix = dl.kind
-        color = _COLORS.get(dl.kind, "#c0c0c0")
-        parts.append(Text(f"{prefix}{dl.content}", fg=color))
+        color = colors.get(dl.kind, t.diff_context)
+        parts.append(Text(f"{dl.kind}{dl.content}", fg=color))
 
     return Box(
         *parts,
         flex_direction="column",
-        background_color="#2a2a3e",
+        background_color=t.background_element,
         padding_left=1,
         padding_right=1,
         **kwargs,

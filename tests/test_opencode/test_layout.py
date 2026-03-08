@@ -9,26 +9,29 @@ from opencode.tui.layout import (
     sidebar,
     content_area,
 )
-from opencode.tui.theme import APP_THEME
+from opencode.tui.themes import get_theme, init_theme, list_themes, ThemeColors
 
 
 # --- Theme ---
 
-class TestAppTheme:
-    def test_has_required_keys(self):
-        assert "bg" in APP_THEME
-        assert "fg" in APP_THEME
-        assert "toolbar" in APP_THEME
-        assert "status_bar" in APP_THEME
-        assert "sidebar" in APP_THEME
+class TestThemeSystem:
+    def test_get_theme_returns_theme_colors(self):
+        init_theme("opencode", "dark")
+        t = get_theme()
+        assert isinstance(t, ThemeColors)
 
-    def test_toolbar_has_colors(self):
-        assert "bg" in APP_THEME["toolbar"]
-        assert "fg" in APP_THEME["toolbar"]
+    def test_has_required_color_tokens(self):
+        t = get_theme()
+        assert t.primary.startswith("#")
+        assert t.background.startswith("#")
+        assert t.text.startswith("#")
+        assert t.border.startswith("#")
 
-    def test_status_bar_has_colors(self):
-        assert "bg" in APP_THEME["status_bar"]
-        assert "fg" in APP_THEME["status_bar"]
+    def test_list_themes_returns_builtin(self):
+        names = list_themes()
+        assert "opencode" in names
+        assert "dracula" in names
+        assert len(names) >= 30
 
 
 # --- Layout components ---

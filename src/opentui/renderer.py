@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+_log = logging.getLogger(__name__)
 
 from . import hooks
 from . import structs as s
@@ -167,6 +170,14 @@ class Buffer:
 
         bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
         self._native.buffer_fill_rect(self._ptr, x, y, width, height, bg_tuple)
+
+    def get_plain_text(self) -> str:
+        """Get buffer contents as plain text string."""
+        try:
+            resolved = self._native.buffer_write_resolved_chars(self._ptr, True)
+            return resolved if resolved else ""
+        except Exception:
+            return ""
 
     def get_span_lines(self) -> list[dict]:
         """Get span lines for diff testing."""
@@ -418,6 +429,54 @@ class CliRenderer:
         """Disable kitty keyboard protocol."""
         self._native.renderer.disable_kitty_keyboard(self._ptr)
 
+    def set_cursor_position(self, x: int, y: int, visible: bool = True) -> None:
+        """Set the cursor position and visibility."""
+        self._native.renderer.set_cursor_position(self._ptr, x, y, visible)
+
+    def get_cursor_state(self) -> dict:
+        """Get the current cursor state (position, visibility)."""
+        return self._native.renderer.get_cursor_state(self._ptr)
+
+    def copy_to_clipboard(self, clipboard_type: int, text: str) -> bool:
+        """Copy text to clipboard via OSC 52."""
+        return self._native.renderer.copy_to_clipboard_osc52(self._ptr, clipboard_type, text)
+
+    def clear_clipboard(self, clipboard_type: int) -> bool:
+        """Clear clipboard via OSC 52."""
+        return self._native.renderer.clear_clipboard_osc52(self._ptr, clipboard_type)
+
+    def set_debug_overlay(self, enable: bool, flags: int = 0) -> None:
+        """Enable or disable the debug overlay."""
+        self._native.renderer.set_debug_overlay(self._ptr, enable, flags)
+
+    def update_stats(self, fps: float, frame_count: int, avg_frame_time: float) -> None:
+        """Update renderer statistics."""
+        self._native.renderer.update_stats(self._ptr, fps, frame_count, avg_frame_time)
+
+    def write_out(self, data: bytes) -> None:
+        """Write raw bytes to the output."""
+        self._native.renderer.write_out(self._ptr, data)
+
+    def set_kitty_keyboard_flags(self, flags: int) -> None:
+        """Set kitty keyboard protocol flags."""
+        self._native.renderer.set_kitty_keyboard_flags(self._ptr, flags)
+
+    def get_kitty_keyboard_flags(self) -> int:
+        """Get current kitty keyboard protocol flags."""
+        return self._native.renderer.get_kitty_keyboard_flags(self._ptr)
+
+    def set_background_color(self) -> None:
+        """Set the terminal background color from detected theme."""
+        self._native.renderer.set_background_color(self._ptr)
+
+    def set_render_offset(self, offset: int) -> None:
+        """Set the render offset for scrolling."""
+        self._native.renderer.set_render_offset(self._ptr, offset)
+
+    def query_pixel_resolution(self) -> None:
+        """Query the terminal's pixel resolution."""
+        self._native.renderer.query_pixel_resolution(self._ptr)
+
     def get_capabilities(self) -> TerminalCapabilities:
         """Get terminal capabilities."""
         caps_dict = self._native.renderer.get_terminal_capabilities(self._ptr)
@@ -534,13 +593,19 @@ class CliRenderer:
             self._rebuild_component_tree()
 
         if self._root:
-            self._update_layout(self._root, delta_time)
+            try:
+                self._update_layout(self._root, delta_time)
+            except Exception:
+                _log.exception("Error updating layout")
 
         buffer = self.get_next_buffer()
         buffer.clear()
 
         if self._root:
-            self._root.render(buffer, delta_time)
+            try:
+                self._root.render(buffer, delta_time)
+            except Exception:
+                _log.exception("Error rendering root")
 
         # Run post-processing functions after render
         for fn in self._post_process_fns:
@@ -553,9 +618,19 @@ class CliRenderer:
         if self._root is None or self._component_fn is None:
             return
 
-        self._root._children.clear()
-        component = self._component_fn()
-        self._root.add(component)
+        from .reconciler import reconcile
+
+        old_children = list(self._root._children)
+        try:
+            component = self._component_fn()
+            new_children = [component]
+            self._root._children.clear()
+            reconcile(self._root, old_children, new_children)
+        except Exception:
+            _log.exception("Error rebuilding component tree, restoring previous")
+            self._root._children = old_children
+            for child in old_children:
+                child._parent = self._root
 
     def _update_layout(self, renderable, delta_time: float) -> None:
         """Update layout for a renderable and its children using yoga."""

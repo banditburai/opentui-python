@@ -82,3 +82,40 @@ class TestMCPClient:
                     pass
 
         asyncio.run(_run())
+
+    def test_to_registry_tools(self):
+        """to_registry_tools() converts MCPTools to Tool objects."""
+        c = MCPClient(command="echo")
+        c._session = object()  # fake connected
+        c._tools = [
+            MCPTool(name="read_file", description="Read a file", input_schema={"type": "object"}),
+            MCPTool(name="write_file", description="Write a file", input_schema={"type": "object"}),
+        ]
+        tools = c.to_registry_tools()
+        assert len(tools) == 2
+        assert tools[0].name == "read_file"
+        assert tools[0].description == "Read a file"
+        assert tools[1].name == "write_file"
+
+    def test_to_registry_tools_empty_when_disconnected(self):
+        """to_registry_tools() returns empty list when no tools discovered."""
+        c = MCPClient(command="echo")
+        tools = c.to_registry_tools()
+        assert tools == []
+
+    def test_to_registry_tools_openai_format(self):
+        """Registry tools have correct openai format."""
+        c = MCPClient(command="echo")
+        c._session = object()
+        c._tools = [
+            MCPTool(
+                name="search",
+                description="Search",
+                input_schema={"type": "object", "properties": {"q": {"type": "string"}}},
+            ),
+        ]
+        tools = c.to_registry_tools()
+        fmt = tools[0].to_openai_format()
+        assert fmt["type"] == "function"
+        assert fmt["function"]["name"] == "search"
+        assert fmt["function"]["parameters"]["properties"]["q"]["type"] == "string"

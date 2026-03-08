@@ -99,6 +99,9 @@ from .hooks import (
     Animation,
     Timeline,
     clear_keyboard_handlers,
+    clear_paste_handlers,
+    clear_resize_handlers,
+    clear_selection_handlers,
     use_keyboard,
     use_on_resize,
     use_paste,
@@ -117,6 +120,9 @@ from .renderer import (
     TerminalCapabilities,
     create_cli_renderer,
 )
+
+# Testing utilities
+from .testing import MockInput, MockMouse
 
 # Signals
 from .signals import (
@@ -281,6 +287,9 @@ async def test_render(
 
     set_renderer(renderer)
     clear_keyboard_handlers()
+    clear_paste_handlers()
+    clear_resize_handlers()
+    clear_selection_handlers()
 
     from .signals import _SignalState
 
@@ -301,18 +310,52 @@ class TestSetup:
 
     def __init__(self, renderer: CliRenderer):
         self._renderer = renderer
+        self._mock_input: MockInput | None = None
+        self._mock_mouse: MockMouse | None = None
 
     @property
     def renderer(self) -> CliRenderer:
         return self._renderer
 
+    @property
+    def mock_input(self) -> MockInput:
+        """Lazy-created MockInput instance."""
+        if self._mock_input is None:
+            from .testing import MockInput as _MI
+            self._mock_input = _MI(self)
+        return self._mock_input
+
+    @property
+    def mock_mouse(self) -> MockMouse:
+        """Lazy-created MockMouse instance."""
+        if self._mock_mouse is None:
+            from .testing import MockMouse as _MM
+            self._mock_mouse = _MM(self)
+        return self._mock_mouse
+
     def get_buffer(self) -> Buffer:
         """Get the current buffer for inspection."""
         return self._renderer.get_current_buffer()
 
+    def capture_char_frame(self) -> str:
+        """Capture current frame as plain text (newline-separated lines)."""
+        self.render_frame()
+        buf = self.get_buffer()
+        return buf.get_plain_text()
+
     def render_frame(self) -> None:
         """Render a single frame (layout + draw + swap)."""
         self._renderer._render_frame(1.0 / 60)
+
+    def resize(self, width: int, height: int) -> None:
+        """Resize test renderer and notify resize handlers."""
+        self._renderer.resize(width, height)
+        if self._renderer._root is not None:
+            self._renderer._root._width = width
+            self._renderer._root._height = height
+        from . import hooks
+        for handler in hooks.get_resize_handlers():
+            handler(width, height)
 
     def destroy(self) -> None:
         """Clean up the test."""
@@ -396,6 +439,10 @@ __all__ = [
     "use_timeline",
     "Timeline",
     "Animation",
+    "clear_keyboard_handlers",
+    "clear_paste_handlers",
+    "clear_resize_handlers",
+    "clear_selection_handlers",
     # Filters
     "ImageRenderer",
     "ClipboardHandler",
@@ -407,6 +454,9 @@ __all__ = [
     "SepiaFilter",
     "InvertFilter",
     "FilterChain",
+    # Testing
+    "MockInput",
+    "MockMouse",
     # Extension
     "extend",
     "get_component_catalogue",

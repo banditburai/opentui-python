@@ -1,0 +1,5 @@
+"""OpenCode web frontend — StarHTML/Datastar-powered web UI."""
+
+from .app import create_web_app
+
+__all__ = ["create_web_app"]

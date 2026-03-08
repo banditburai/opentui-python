@@ -1,0 +1,69 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      run: uv python install ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: uv sync --all-extras
+
+    - name: Lint with ruff
+      run: |
+        uv run ruff check
+        uv run ruff format --check
+
+    - name: Type check with pyright
+      run: uv run pyright
+
+    - name: Run tests
+      run: uv run pytest tests/ -v --tb=short
+
+  quality-check:
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - name: All quality checks passed
+        run: echo "All quality checks passed!"
+
+  release-build-smoke:
+    name: Release build (sdist + Linux wheel)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Build sdist
+        run: pip install -q build validate-pyproject && validate-pyproject pyproject.toml && python -m build --sdist
+      - name: Build one Linux wheel (cibuildwheel smoke)
+        uses: pypa/cibuildwheel@v2.22.0
+        env:
+          CIBW_BUILD: "cp312-*"
+          CIBW_SKIP: "*-win* *-macos* *-manylinux_i686 *-musllinux_*"
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_BEFORE_ALL_LINUX: "dnf install -y git"
+          CIBW_BEFORE_BUILD: "python {project}/scripts/download_opentui.py"
+          CIBW_BUILD_FRONTEND: "build[uv]"
+          CIBW_BUILD_VERBOSITY: "3"
+          CIBW_ENVIRONMENT_PASS_LINUX: "GIT_TERMINAL_PROMPT"
+          GIT_TERMINAL_PROMPT: "0"
+      - name: List artifacts
+        run: ls -la wheelhouse/ dist/

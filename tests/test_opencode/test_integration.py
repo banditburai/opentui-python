@@ -39,11 +39,15 @@ class TestSmoke:
         layout = main_layout(title="OpenCode", model="gpt-4o", branch="main")
         assert isinstance(layout, Box)
 
-    def test_config_defaults(self, tmp_path):
+    def test_config_defaults(self, tmp_path, monkeypatch):
         """Config loads with defaults when no file exists."""
-        cfg = load_config(config_dir=tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("OPENCODE_CONFIG", raising=False)
+        monkeypatch.delenv("OPENCODE_CONFIG_CONTENT", raising=False)
+        monkeypatch.delenv("OPENCODE_MODEL", raising=False)
+        cfg = load_config()
         assert isinstance(cfg, AppConfig)
-        assert cfg.model == "gpt-4o"
+        assert cfg.model == ""
 
     def test_keybindings_loaded(self):
         """Default keybindings are registered."""

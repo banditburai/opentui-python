@@ -8,7 +8,7 @@ from typing import Any
 from opentui.components import Box, Text
 from opentui.events import KeyEvent
 
-from ..theme import APP_THEME
+from ..themes import get_theme
 
 
 class InputState:
@@ -105,21 +105,21 @@ def input_area(
     **kwargs: Any,
 ) -> Box:
     """Render the input area as a Box with the current text or placeholder."""
-    t = APP_THEME.get("content", {})
+    t = get_theme()
 
     if state.text:
         lines = state.text.split("\n")
-        children: list[Text] = [Text(line, fg=t.get("fg", "#e0e0e0")) for line in lines]
+        children: list[Text] = [Text(line, fg=t.text) for line in lines]
     elif placeholder:
-        children = [Text(placeholder, fg="#666666", italic=True)]
+        children = [Text(placeholder, fg=t.text_muted, italic=True)]
     else:
-        children = [Text("", fg=t.get("fg", "#e0e0e0"))]
+        children = [Text("", fg=t.text)]
 
     defaults = dict(
         flex_direction="column",
         border=True,
         border_style="round",
-        border_color="#444444",
+        border_color=t.border,
         padding_left=1,
         padding_right=1,
     )

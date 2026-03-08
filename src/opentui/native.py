@@ -11,17 +11,25 @@ _NANOBIND_AVAILABLE = False
 
 # Get the directory where this file is located
 _current_dir = os.path.dirname(os.path.abspath(__file__))
-# Go up one level from opentui to the package root
 _package_dir = os.path.dirname(_current_dir)
-_bindings_dir = os.path.join(_package_dir, "opentui_bindings")
 
-# Find the .so file
+# Search paths for the .so file (in priority order):
+# 1. Same directory as native.py (scikit-build installs here)
+# 2. Sibling opentui_bindings/ directory (dev mode)
+_search_dirs = [
+    _current_dir,
+    os.path.join(_package_dir, "opentui_bindings"),
+]
+
 _so_file = None
-if os.path.isdir(_bindings_dir):
-    for f in os.listdir(_bindings_dir):
-        if f.endswith(".so"):
-            _so_file = os.path.join(_bindings_dir, f)
-            break
+for _dir in _search_dirs:
+    if os.path.isdir(_dir):
+        for f in os.listdir(_dir):
+            if f.startswith("opentui_bindings") and (f.endswith(".so") or f.endswith(".pyd")):
+                _so_file = os.path.join(_dir, f)
+                break
+    if _so_file:
+        break
 
 if _so_file:
     try:
@@ -36,16 +44,6 @@ if _so_file:
         warnings.warn(f"Failed to load nanobind bindings: {e}", stacklevel=1)
         _nb = None
 
-# Try relative import from src
-if not _NANOBIND_AVAILABLE:
-    try:
-        from src.opentui_bindings import opentui_bindings
-
-        _nb = opentui_bindings
-        _NANOBIND_AVAILABLE = True
-    except ImportError:
-        pass
-
 
 class NativeRenderer:
     """Wrapper for native renderer using nanobind bindings."""
@@ -59,6 +57,7 @@ class NativeRenderer:
         try:
             if hasattr(self, "_ptr") and self._ptr:
                 _nb.renderer.destroy_renderer(self._ptr)
+                self._ptr = None
         except Exception:
             pass
 
@@ -123,7 +122,8 @@ class NativeBuffer:
         _nb.buffer.buffer_resize(self._ptr, width, height)
 
     def draw_text(self, text: str, x: int, y: int) -> None:
-        _nb.buffer.buffer_draw_text(self._ptr, text, x, y)
+        text_bytes = text.encode("utf-8") if isinstance(text, str) else text
+        _nb.buffer.buffer_draw_text(self._ptr, text_bytes, len(text_bytes), x, y)
 
     def set_cell(self, x: int, y: int, ch: int) -> None:
         _nb.buffer.buffer_set_cell(self._ptr, x, y, ch)
@@ -157,6 +157,7 @@ class NativeTextBuffer:
         try:
             if hasattr(self, "_ptr") and self._ptr:
                 _nb.text_buffer.destroy_text_buffer(self._ptr)
+                self._ptr = None
         except Exception:
             pass
 
@@ -202,6 +203,7 @@ class NativeTextBufferView:
         try:
             if hasattr(self, "_ptr") and self._ptr:
                 _nb.text_buffer.destroy_text_buffer_view(self._ptr)
+                self._ptr = None
         except Exception:
             pass
 
@@ -238,6 +240,7 @@ class NativeEditBuffer:
         try:
             if hasattr(self, "_ptr") and self._ptr:
                 _nb.edit_buffer.destroy_edit_buffer(self._ptr)
+                self._ptr = None
         except Exception:
             pass
 
@@ -301,6 +304,7 @@ class NativeEditorView:
         try:
             if hasattr(self, "_ptr") and self._ptr:
                 _nb.editor_view.destroy_editor_view(self._ptr)
+                self._ptr = None
         except Exception:
             pass
 
