@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 _log = logging.getLogger(__name__)
-_TRACE_SCROLL = os.getenv("OPENTUI_TRACE_SCROLL", "").strip().lower() not in ("", "0", "false", "no")
 
 from . import hooks
 from . import structs as s
@@ -931,24 +929,10 @@ class CliRenderer:
         """Route wheel input to the deepest scroll target under the pointer."""
         if self._root is None:
             return
-        if _TRACE_SCROLL:
-            _log.debug(
-                "dispatch scroll start x=%s y=%s delta=%s direction=%s",
-                getattr(event, "x", None),
-                getattr(event, "y", None),
-                getattr(event, "scroll_delta", None),
-                getattr(event, "scroll_direction", None),
-            )
 
         target = self._find_scroll_target(self._root, event.x, event.y)
         if target is not None:
             event.target = target
-            if _TRACE_SCROLL:
-                _log.debug(
-                    "dispatch scroll target node=%s key=%s",
-                    type(target).__name__,
-                    getattr(target, "key", None),
-                )
             handler = getattr(target, "handle_scroll_event", None)
             if handler is not None:
                 handler(event)
@@ -956,13 +940,6 @@ class CliRenderer:
                 fallback = getattr(target, "_on_mouse_scroll", None)
                 if fallback is not None:
                     fallback(event)
-
-        if _TRACE_SCROLL:
-            _log.debug(
-                "dispatch scroll done stopped=%s target=%s",
-                event.propagation_stopped,
-                getattr(getattr(event, "target", None), "key", None) or type(getattr(event, "target", None)).__name__,
-            )
 
     def _find_scroll_target(self, renderable, x: int, y: int):
         """Return the deepest registered scroll target under *(x, y)*."""
@@ -978,18 +955,6 @@ class CliRenderer:
 
         contains_point = getattr(renderable, "contains_point", None)
         inside = True if contains_point is None else contains_point(x, y)
-
-        if _TRACE_SCROLL:
-            _log.debug(
-                "dispatch scroll visit node=%s key=%s inside=%s children=%s x=%s y=%s scroll_target=%s",
-                type(renderable).__name__,
-                getattr(renderable, "key", None),
-                inside,
-                len(children),
-                getattr(renderable, "_x", None),
-                getattr(renderable, "_y", None),
-                getattr(renderable, "_is_scroll_target", False),
-            )
 
         if inside and getattr(renderable, "_is_scroll_target", False):
             return renderable

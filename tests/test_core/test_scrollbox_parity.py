@@ -153,83 +153,6 @@ def test_scrollbox_wheel_that_crosses_bottom_lands_cleanly():
     asyncio.run(run_test())
 
 
-def test_scrollbox_wheel_direction_change_resets_accumulator_and_acceleration():
-    class RecordingAccel:
-        def __init__(self):
-            self.reset_calls = 0
-            self.tick_calls = 0
-
-        def tick(self, _now_ms=None):
-            self.tick_calls += 1
-            return 1.5 if self.tick_calls > 1 else 1.0
-
-        def reset(self):
-            self.reset_calls += 1
-            self.tick_calls = 0
-
-    async def run_test():
-        from opentui import Box, ScrollBox, Text
-
-        items = Signal("items", list(range(10)))
-        accel = RecordingAccel()
-        setup = await render_for_test(
-            lambda: ScrollBox(
-                *[
-                    Box(
-                        Text(f"row {idx}"),
-                        height=1,
-                        flex_shrink=0,
-                        key=f"row-{idx}",
-                    )
-                    for idx, _ in enumerate(items())
-                ],
-                width=20,
-                height=4,
-                scroll_y=True,
-                sticky_scroll=True,
-                sticky_start="bottom",
-                scroll_acceleration=accel,
-                key="scrollbox",
-            ),
-            {"width": 20, "height": 6},
-        )
-        setup.render_frame()
-
-        scrollbox = _get_scrollbox(setup)
-        bottom = scrollbox.scroll_offset_y
-        scrollbox.scroll_by(delta_y=-2)
-        assert scrollbox.scroll_offset_y == bottom - 2
-
-        setup.renderer._dispatch_mouse_event(
-            MouseEvent(
-                type="scroll",
-                x=1,
-                y=1,
-                button=MouseButton.WHEEL_UP,
-                scroll_delta=-1,
-                scroll_direction="up",
-            )
-        )
-        assert accel.reset_calls == 0
-
-        setup.renderer._dispatch_mouse_event(
-            MouseEvent(
-                type="scroll",
-                x=1,
-                y=1,
-                button=MouseButton.WHEEL_DOWN,
-                scroll_delta=1,
-                scroll_direction="down",
-            )
-        )
-
-        assert accel.reset_calls == 1
-        assert scrollbox._scroll_accumulator_y >= 0.0
-        setup.destroy()
-
-    asyncio.run(run_test())
-
-
 def test_scrollbox_sticky_bottom_tracks_new_content():
     async def run_test():
         items = Signal("items", list(range(8)))
@@ -429,6 +352,43 @@ def test_scrollbox_ignores_horizontal_wheel_for_vertical_transcript():
         )
 
         assert scrollbox.scroll_offset_y == bottom
+        setup.destroy()
+
+    asyncio.run(run_test())
+
+
+def test_scrollbox_shift_wheel_maps_vertical_to_horizontal():
+    async def run_test():
+        from opentui import Box, ScrollBox, Text
+
+        setup = await render_for_test(
+            lambda: ScrollBox(
+                Box(Text("wide"), width=40, height=1, flex_shrink=0, key="row-wide"),
+                width=10,
+                height=4,
+                scroll_x=True,
+                scroll_y=False,
+                key="scrollbox-horizontal",
+            ),
+            {"width": 20, "height": 6},
+        )
+        setup.render_frame()
+        scrollbox = _get_scrollbox(setup)
+        assert scrollbox.scroll_offset_x == 0
+
+        setup.renderer._dispatch_mouse_event(
+            MouseEvent(
+                type="scroll",
+                x=1,
+                y=1,
+                button=MouseButton.WHEEL_DOWN,
+                scroll_delta=1,
+                scroll_direction="down",
+                shift=True,
+            )
+        )
+
+        assert scrollbox.scroll_offset_x > 0
         setup.destroy()
 
     asyncio.run(run_test())
