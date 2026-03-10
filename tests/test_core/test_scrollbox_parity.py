@@ -318,6 +318,45 @@ def test_scrollbox_measures_nested_content_height():
     asyncio.run(run_test())
 
 
+def test_scrollbox_uses_direct_child_layout_for_nested_content_extent():
+    async def run_test():
+        from opentui import Box, ScrollBox, Text
+        from opentui.components.control_flow import For
+
+        items = Signal("items", list(range(12)))
+
+        def component():
+            return ScrollBox(
+                For(
+                    each=items,
+                    render=lambda item: Box(Text(f"row {item}"), height=1, flex_shrink=0, key=f"row-{item}"),
+                    key_fn=lambda item: item,
+                    key="rows",
+                    flex_direction="column",
+                    flex_shrink=0,
+                ),
+                width=20,
+                height=4,
+                scroll_y=True,
+                sticky_scroll=True,
+                sticky_start="bottom",
+                key="scrollbox-nested",
+            )
+
+        setup = await render_for_test(component, {"width": 20, "height": 6})
+        setup.render_frame()
+
+        scrollbox = _get_scrollbox(setup)
+        rows = _find_by_key(scrollbox, "rows")
+        assert rows is not None
+
+        expected_height = int(rows._y + rows._layout_height - scrollbox._y)
+        assert scrollbox.scroll_height == max(scrollbox.viewport_height, expected_height)
+        setup.destroy()
+
+    asyncio.run(run_test())
+
+
 def test_scrollbox_nested_content_scrolls_up_from_bottom_on_wheel():
     async def run_test():
         from opentui import Box, MouseButton, MouseEvent, Text

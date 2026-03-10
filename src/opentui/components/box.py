@@ -526,19 +526,12 @@ class ScrollBox(Box):
         origin_x = self._x
         origin_y = self._y
 
-        def visit(node: Renderable) -> None:
-            nonlocal width, height
-            node_w = int(node._layout_width or 0)
-            node_h = int(node._layout_height or 0)
-            width = max(width, node._x + node_w - origin_x)
-            height = max(height, node._y + node_h - origin_y)
-            for child in node.get_children():
-                if isinstance(child, Renderable):
-                    visit(child)
-
         for child in self._children:
             if isinstance(child, Renderable):
-                visit(child)
+                node_w = int(child._layout_width or 0)
+                node_h = int(child._layout_height or 0)
+                width = max(width, child._x + node_w - origin_x)
+                height = max(height, child._y + node_h - origin_y)
         return width, height
 
     def _max_scroll_x(self) -> int:
