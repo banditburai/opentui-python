@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 _log = logging.getLogger(__name__)
+_TRACE_SCROLL = os.getenv("OPENTUI_TRACE_SCROLL", "").strip().lower() not in ("", "0", "false", "no")
 
 from . import hooks
 from . import structs as s
@@ -402,6 +404,7 @@ class CliRenderer:
         self._event_loop: Any = None
         self._force_next_render: bool = True  # Force first frame to be a full repaint
         self._clear_color: s.RGBA | None = self._parse_clear_color(config.clear_color)
+        self._mouse_enabled: bool = False
 
         if config.testing:
             self._width = config.width
@@ -476,11 +479,19 @@ class CliRenderer:
 
     def enable_mouse(self, enable_movement: bool = False) -> None:
         """Enable mouse tracking."""
+        if self._config.testing or self._ptr is None:
+            self._mouse_enabled = True
+            return
         self._native.renderer.enable_mouse(self._ptr, enable_movement)
+        self._mouse_enabled = True
 
     def disable_mouse(self) -> None:
         """Disable mouse tracking."""
+        if self._config.testing or self._ptr is None:
+            self._mouse_enabled = False
+            return
         self._native.renderer.disable_mouse(self._ptr)
+        self._mouse_enabled = False
 
     def enable_keyboard(self, flags: int = 0) -> None:
         """Enable kitty keyboard protocol."""
@@ -661,12 +672,13 @@ class CliRenderer:
         for handler in hooks.get_keyboard_handlers():
             input_handler.on_key(handler)
 
+        input_handler.on_mouse(self._dispatch_mouse_event)
+
         # Forward mouse handlers and enable mouse tracking
         for handler in hooks.get_mouse_handlers():
             input_handler.on_mouse(handler)
 
-        if hooks.get_mouse_handlers():
-            self.enable_mouse()
+        self._refresh_mouse_tracking()
 
         event_loop.on_frame(lambda dt: self._render_frame(dt))
 
@@ -720,6 +732,8 @@ class CliRenderer:
         ):
             self._signal_state.reset()
             self._rebuild_component_tree()
+
+        self._refresh_mouse_tracking()
 
         if self._root:
             try:
@@ -784,6 +798,14 @@ class CliRenderer:
                 self._root._yoga_node.insert_child(
                     child._yoga_node, self._root._yoga_node.child_count
                 )
+
+    def _refresh_mouse_tracking(self) -> None:
+        """Enable or disable mouse tracking based on the current tree."""
+        should_enable = bool(hooks.get_mouse_handlers()) or self._tree_has_mouse_handlers(self._root)
+        if should_enable and not self._mouse_enabled:
+            self.enable_mouse()
+        elif not should_enable and self._mouse_enabled:
+            self.disable_mouse()
 
     def _update_layout(self, renderable, delta_time: float) -> None:
         """Update layout for a renderable and its children using yoga."""
@@ -857,6 +879,107 @@ class CliRenderer:
                 self._collect_handlers(child, handlers)
         except AttributeError:
             pass
+
+    def _tree_has_mouse_handlers(self, renderable) -> bool:
+        """Return True when any renderable in the tree handles mouse events."""
+        if renderable is None:
+            return False
+
+        try:
+            for attr in (
+                "_on_mouse_down",
+                "_on_mouse_up",
+                "_on_mouse_move",
+                "_on_mouse_drag",
+                "_on_mouse_scroll",
+            ):
+                if getattr(renderable, attr, None) is not None:
+                    return True
+        except AttributeError:
+            pass
+
+        try:
+            return any(self._tree_has_mouse_handlers(child) for child in renderable.get_children())
+        except AttributeError:
+            return False
+
+    def _dispatch_mouse_event(self, event) -> None:
+        """Dispatch a mouse event through the render tree before global hooks."""
+        if self._root is None:
+            return
+        if _TRACE_SCROLL and event.type == "scroll":
+            _log.debug(
+                "dispatch scroll start x=%s y=%s delta=%s direction=%s",
+                getattr(event, "x", None),
+                getattr(event, "y", None),
+                getattr(event, "scroll_delta", None),
+                getattr(event, "scroll_direction", None),
+            )
+        self._dispatch_mouse_to_tree(self._root, event)
+        if _TRACE_SCROLL and event.type == "scroll":
+            _log.debug(
+                "dispatch scroll done stopped=%s target=%s",
+                event.propagation_stopped,
+                getattr(getattr(event, "target", None), "key", None) or type(getattr(event, "target", None)).__name__,
+            )
+
+    def _dispatch_mouse_to_tree(self, renderable, event) -> None:
+        """Walk children front-to-back and dispatch to the deepest hit target."""
+        if event.propagation_stopped:
+            return
+
+        contains_point = getattr(renderable, "contains_point", None)
+        inside = True if contains_point is None else contains_point(event.x, event.y)
+        is_scroll_event = event.type == "scroll"
+
+        try:
+            children = list(renderable.get_children())
+        except AttributeError:
+            children = []
+
+        if _TRACE_SCROLL and event.type == "scroll":
+            _log.debug(
+                "dispatch scroll visit node=%s key=%s inside=%s children=%s x=%s y=%s",
+                type(renderable).__name__,
+                getattr(renderable, "key", None),
+                inside,
+                len(children),
+                getattr(renderable, "_x", None),
+                getattr(renderable, "_y", None),
+            )
+
+        for child in reversed(children):
+            child_contains = getattr(child, "contains_point", None)
+            if not is_scroll_event and child_contains is not None and not child_contains(event.x, event.y):
+                continue
+            self._dispatch_mouse_to_tree(child, event)
+            if event.propagation_stopped:
+                return
+
+        if not inside:
+            return
+
+        handler_map = {
+            "down": "_on_mouse_down",
+            "up": "_on_mouse_up",
+            "move": "_on_mouse_move",
+            "drag": "_on_mouse_drag",
+            "scroll": "_on_mouse_scroll",
+        }
+        attr = handler_map.get(event.type)
+        if not attr:
+            return
+
+        handler = getattr(renderable, attr, None)
+        if handler is not None:
+            event.target = renderable
+            if _TRACE_SCROLL and event.type == "scroll":
+                _log.debug(
+                    "dispatch scroll handler node=%s key=%s",
+                    type(renderable).__name__,
+                    getattr(renderable, "key", None),
+                )
+            handler(event)
 
     # Post-processing pipeline
     def add_post_process_fn(self, fn: Callable) -> None:

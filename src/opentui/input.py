@@ -11,10 +11,13 @@ import select
 import sys
 import termios
 import tty
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from .events import KeyEvent, MouseButton, MouseEvent, PasteEvent
+
+_log = logging.getLogger(__name__)
 
 
 class InputHandler:
@@ -166,7 +169,15 @@ class InputHandler:
 
         # SGR mouse protocol: \x1b[<button;x;y;M (press) or m (release)
         if seq.startswith("<") and (seq.endswith("M") or seq.endswith("m")):
+            _log.debug("input csi sgr mouse seq=%r", seq)
             return self._handle_sgr_mouse(seq)
+
+        # rxvt/1015-style extended mouse protocol: \x1b[button;x;yM
+        # Some terminals emit wheel/trackpad events in this format rather
+        # than SGR, so treat it as mouse before falling back to unknown CSI.
+        if ";" in seq and (seq.endswith("M") or seq.endswith("m")):
+            _log.debug("input csi rxvt mouse seq=%r", seq)
+            return self._handle_rxvt_mouse(seq)
 
         # Parse CSI sequence
         if seq == "A":
@@ -201,6 +212,7 @@ class InputHandler:
         elif seq.startswith("6") and seq.endswith("~"):
             self._emit_key("pagedown", f"\x1b[{seq}")
         else:
+            _log.debug("input unknown csi seq=%r", seq)
             self._emit_key(f"unknown-{seq}", f"\x1b[{seq}")
 
         return True
@@ -234,16 +246,74 @@ class InputHandler:
         if button_code & 64:
             direction = button_code & 1  # 0 = up, 1 = down
             scroll_delta = 1 if direction else -1
+            _log.debug(
+                "input sgr scroll button=%s x=%s y=%s delta=%s direction=%s ctrl=%s alt=%s shift=%s",
+                button_code, x, y, scroll_delta, "down" if direction else "up", ctrl, alt, shift
+            )
             self._emit_mouse(MouseEvent(
                 type="scroll",
                 x=x, y=y,
                 button=MouseButton.WHEEL_UP if direction == 0 else MouseButton.WHEEL_DOWN,
                 scroll_delta=scroll_delta,
+                scroll_direction="down" if direction else "up",
                 shift=shift, ctrl=ctrl, alt=alt,
             ))
         else:
             # Regular button
             button = button_code & 3  # 0=left, 1=middle, 2=right
+            if button_code & 32:
+                event_type = "drag"
+            elif is_release:
+                event_type = "up"
+            else:
+                event_type = "down"
+            self._emit_mouse(MouseEvent(
+                type=event_type,
+                x=x, y=y,
+                button=button,
+                shift=shift, ctrl=ctrl, alt=alt,
+            ))
+
+        return True
+
+    def _handle_rxvt_mouse(self, seq: str) -> bool:
+        """Handle rxvt/1015 mouse protocol: \x1b[button;x;yM/m.
+
+        This matches the same button/modifier encoding as SGR mouse but
+        omits the leading "<". Modern terminals may emit wheel/trackpad
+        events in this format when 1015 mode is enabled.
+        """
+        is_release = seq.endswith("m")
+        params = seq[:-1]
+        try:
+            parts = params.split(";")
+            button_code = int(parts[0])
+            x = int(parts[1]) - 1  # 1-based coordinates
+            y = int(parts[2]) - 1
+        except (ValueError, IndexError):
+            return True
+
+        shift = bool(button_code & 4)
+        alt = bool(button_code & 8)
+        ctrl = bool(button_code & 16)
+
+        if button_code & 64:
+            direction = button_code & 1  # 0 = up, 1 = down
+            scroll_delta = 1 if direction else -1
+            _log.debug(
+                "input rxvt scroll button=%s x=%s y=%s delta=%s direction=%s ctrl=%s alt=%s shift=%s",
+                button_code, x, y, scroll_delta, "down" if direction else "up", ctrl, alt, shift
+            )
+            self._emit_mouse(MouseEvent(
+                type="scroll",
+                x=x, y=y,
+                button=MouseButton.WHEEL_UP if direction == 0 else MouseButton.WHEEL_DOWN,
+                scroll_delta=scroll_delta,
+                scroll_direction="down" if direction else "up",
+                shift=shift, ctrl=ctrl, alt=alt,
+            ))
+        else:
+            button = button_code & 3
             if button_code & 32:
                 event_type = "drag"
             elif is_release:
