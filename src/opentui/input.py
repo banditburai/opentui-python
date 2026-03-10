@@ -20,6 +20,20 @@ from .events import KeyEvent, MouseButton, MouseEvent, PasteEvent
 _log = logging.getLogger(__name__)
 
 
+def _decode_wheel(button_code: int) -> tuple[int, int, str] | None:
+    """Decode xterm/rxvt wheel button codes into button, delta, direction."""
+    wheel_code = button_code & 0b11
+    if wheel_code == 0:
+        return MouseButton.WHEEL_UP, -1, "up"
+    if wheel_code == 1:
+        return MouseButton.WHEEL_DOWN, 1, "down"
+    if wheel_code == 2:
+        return MouseButton.WHEEL_LEFT, -1, "left"
+    if wheel_code == 3:
+        return MouseButton.WHEEL_RIGHT, 1, "right"
+    return None
+
+
 class InputHandler:
     """Handles terminal input events."""
 
@@ -244,18 +258,20 @@ class InputHandler:
 
         # Check for scroll wheel (bit 6 set = 64)
         if button_code & 64:
-            direction = button_code & 1  # 0 = up, 1 = down
-            scroll_delta = 1 if direction else -1
+            decoded = _decode_wheel(button_code)
+            if decoded is None:
+                return True
+            button, scroll_delta, scroll_direction = decoded
             _log.debug(
                 "input sgr scroll button=%s x=%s y=%s delta=%s direction=%s ctrl=%s alt=%s shift=%s",
-                button_code, x, y, scroll_delta, "down" if direction else "up", ctrl, alt, shift
+                button_code, x, y, scroll_delta, scroll_direction, ctrl, alt, shift
             )
             self._emit_mouse(MouseEvent(
                 type="scroll",
                 x=x, y=y,
-                button=MouseButton.WHEEL_UP if direction == 0 else MouseButton.WHEEL_DOWN,
+                button=button,
                 scroll_delta=scroll_delta,
-                scroll_direction="down" if direction else "up",
+                scroll_direction=scroll_direction,
                 shift=shift, ctrl=ctrl, alt=alt,
             ))
         else:
@@ -298,18 +314,20 @@ class InputHandler:
         ctrl = bool(button_code & 16)
 
         if button_code & 64:
-            direction = button_code & 1  # 0 = up, 1 = down
-            scroll_delta = 1 if direction else -1
+            decoded = _decode_wheel(button_code)
+            if decoded is None:
+                return True
+            button, scroll_delta, scroll_direction = decoded
             _log.debug(
                 "input rxvt scroll button=%s x=%s y=%s delta=%s direction=%s ctrl=%s alt=%s shift=%s",
-                button_code, x, y, scroll_delta, "down" if direction else "up", ctrl, alt, shift
+                button_code, x, y, scroll_delta, scroll_direction, ctrl, alt, shift
             )
             self._emit_mouse(MouseEvent(
                 type="scroll",
                 x=x, y=y,
-                button=MouseButton.WHEEL_UP if direction == 0 else MouseButton.WHEEL_DOWN,
+                button=button,
                 scroll_delta=scroll_delta,
-                scroll_direction="down" if direction else "up",
+                scroll_direction=scroll_direction,
                 shift=shift, ctrl=ctrl, alt=alt,
             ))
         else:

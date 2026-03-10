@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import math
+import os
 import time
+import logging
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..events import MouseButton
 from .base import Renderable
+
+_TRACE_SCROLL = os.getenv("OPENTUI_TRACE_SCROLL", "").strip().lower() not in ("", "0", "false", "no")
+_log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -449,6 +455,7 @@ class ScrollBox(Box):
         self._viewport_width = 0
         self._viewport_height = 0
         self._has_manual_scroll = False
+        self._last_scroll_direction_y: str | None = None
         self._is_applying_sticky_scroll = False
         self._sticky_scroll_top = False
         self._sticky_scroll_bottom = False
@@ -682,24 +689,24 @@ class ScrollBox(Box):
 
         direction = getattr(event, "scroll_direction", None)
         if direction is None:
-            direction = "down" if getattr(event, "scroll_delta", 0) > 0 else "up"
+            button = getattr(event, "button", None)
+            if button == MouseButton.WHEEL_LEFT:
+                direction = "left"
+            elif button == MouseButton.WHEEL_RIGHT:
+                direction = "right"
+            else:
+                direction = "down" if getattr(event, "scroll_delta", 0) > 0 else "up"
 
         scroll_amount = abs(getattr(event, "scroll_delta", 0) or 1)
+        if direction in ("up", "down") and self._last_scroll_direction_y not in (None, direction):
+            self._scroll_accumulator_y = 0.0
+            self._scroll_acceleration.reset()
+        if direction in ("up", "down"):
+            self._last_scroll_direction_y = direction
         multiplier = self._scroll_acceleration.tick(time.monotonic() * 1000.0)
         total_amount = scroll_amount * multiplier
-
-        # Snap cleanly to the sticky edge near the boundary to avoid the
-        # small residual-accumulator bobble when the user returns to bottom.
-        if direction == "up" and self._scroll_y and self._scroll_offset_y <= 1:
-            self._set_scroll_offsets(y=0, mark_manual=True)
-            self._scroll_accumulator_y = 0.0
-            event.stop_propagation()
-            return
-        if direction == "down" and self._scroll_y and self._max_scroll_y() - self._scroll_offset_y <= 1:
-            self._set_scroll_offsets(y=self._max_scroll_y(), mark_manual=True)
-            self._scroll_accumulator_y = 0.0
-            event.stop_propagation()
-            return
+        before = self._scroll_offset_y
+        before_acc = self._scroll_accumulator_y
 
         if direction == "up" and self._scroll_y:
             self._scroll_accumulator_y -= total_amount
@@ -723,11 +730,56 @@ class ScrollBox(Box):
                 self._scroll_accumulator_y -= integer_scroll
                 if not moved:
                     self._scroll_accumulator_y = 0.0
+        elif direction == "left" and self._scroll_x:
+            self._scroll_accumulator_x -= total_amount
+            integer_scroll = math.trunc(self._scroll_accumulator_x)
+            if integer_scroll != 0:
+                moved = self._set_scroll_offsets(
+                    x=self._scroll_offset_x + integer_scroll,
+                    mark_manual=True,
+                )
+                self._scroll_accumulator_x -= integer_scroll
+                if not moved:
+                    self._scroll_accumulator_x = 0.0
+        elif direction == "right" and self._scroll_x:
+            self._scroll_accumulator_x += total_amount
+            integer_scroll = math.trunc(self._scroll_accumulator_x)
+            if integer_scroll != 0:
+                moved = self._set_scroll_offsets(
+                    x=self._scroll_offset_x + integer_scroll,
+                    mark_manual=True,
+                )
+                self._scroll_accumulator_x -= integer_scroll
+                if not moved:
+                    self._scroll_accumulator_x = 0.0
 
         if direction == "up" and self._scroll_offset_y <= 0:
             self._scroll_accumulator_y = 0.0
+            self._scroll_acceleration.reset()
         if direction == "down" and self._scroll_offset_y >= self._max_scroll_y():
             self._scroll_accumulator_y = 0.0
+            self._scroll_acceleration.reset()
+        if direction == "left" and self._scroll_offset_x <= 0:
+            self._scroll_accumulator_x = 0.0
+            self._scroll_acceleration.reset()
+        if direction == "right" and self._scroll_offset_x >= self._max_scroll_x():
+            self._scroll_accumulator_x = 0.0
+            self._scroll_acceleration.reset()
+
+        if _TRACE_SCROLL:
+            _log.debug(
+                "scrollbox wheel key=%s dir=%s delta=%s mult=%.3f before=%s after=%s acc_before=%.3f acc_after=%.3f max=%s manual=%s",
+                getattr(self, "key", None),
+                direction,
+                getattr(event, "scroll_delta", None),
+                multiplier,
+                before,
+                self._scroll_offset_y,
+                before_acc,
+                self._scroll_accumulator_y,
+                self._max_scroll_y(),
+                self._has_manual_scroll,
+            )
 
         event.stop_propagation()
 

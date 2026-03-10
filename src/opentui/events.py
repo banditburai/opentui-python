@@ -11,6 +11,8 @@ class MouseButton:
     RIGHT = 2
     WHEEL_UP = 4
     WHEEL_DOWN = 5
+    WHEEL_LEFT = 6
+    WHEEL_RIGHT = 7
 
 
 @dataclass
@@ -97,6 +99,7 @@ class MouseEvent:
     y: int
     button: int = 0
     scroll_delta: int = 0
+    scroll_direction: str | None = None
     shift: bool = False
     ctrl: bool = False
     alt: bool = False
