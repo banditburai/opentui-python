@@ -13,6 +13,8 @@ class FakeNative:
     """
 
     class renderer:
+        setup_terminal_calls = []
+
         @staticmethod
         def create_renderer(w, h, testing, remote):
             return 1
@@ -33,6 +35,14 @@ class FakeNative:
         def resize_renderer(ptr, w, h):
             pass
 
+        @classmethod
+        def setup_terminal(cls, ptr, use_alternate_screen):
+            cls.setup_terminal_calls.append((ptr, use_alternate_screen))
+
+        @staticmethod
+        def restore_terminal_modes(ptr):
+            pass
+
     class buffer:
         @staticmethod
         def buffer_clear(ptr, alpha):
@@ -50,6 +60,7 @@ class FakeNative:
 @pytest.fixture
 def fake_native():
     """Return a FakeNative instance."""
+    FakeNative.renderer.setup_terminal_calls = []
     return FakeNative()
 
 

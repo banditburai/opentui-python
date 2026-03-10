@@ -5,23 +5,28 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from .signals import Signal
+
 if TYPE_CHECKING:
-    from .events import KeyEvent
+    from .events import KeyEvent, MouseEvent
     from .renderer import CliRenderer
 
 
 # Global renderer context
 _current_renderer: CliRenderer | None = None
 _keyboard_handlers: list[Callable[[KeyEvent], None]] = []
+_mouse_handlers: list[Callable[[MouseEvent], None]] = []
 _paste_handlers: list[Callable[[str], None]] = []
 _resize_handlers: list[Callable[[int, int], None]] = []
 _selection_handlers: list[Callable[[Any], None]] = []
+_terminal_dimensions = Signal("terminal_dimensions", (80, 24))
 
 
 def set_renderer(renderer: CliRenderer) -> None:
     """Set the current renderer (internal use)."""
     global _current_renderer
     _current_renderer = renderer
+    _set_terminal_dimensions(renderer.width, renderer.height)
 
 
 def get_renderer() -> CliRenderer | None:
@@ -59,6 +64,11 @@ def clear_resize_handlers() -> None:
     _resize_handlers.clear()
 
 
+def _set_terminal_dimensions(width: int, height: int) -> None:
+    """Update the shared terminal dimensions signal."""
+    _terminal_dimensions.set((width, height))
+
+
 def get_selection_handlers() -> list[Callable[[Any], None]]:
     """Get all registered selection handlers."""
     return _selection_handlers.copy()
@@ -94,8 +104,12 @@ def use_terminal_dimensions() -> tuple[int, int]:
     Usage:
         width, height = use_terminal_dimensions()
     """
-    renderer = use_renderer()
-    return renderer.width, renderer.height
+    renderer = get_renderer()
+    if renderer is not None:
+        current = (renderer.width, renderer.height)
+        if _terminal_dimensions() != current:
+            _set_terminal_dimensions(*current)
+    return _terminal_dimensions()
 
 
 def use_on_resize(callback: Callable[[int, int], None]) -> CliRenderer:
@@ -114,7 +128,8 @@ def use_on_resize(callback: Callable[[int, int], None]) -> CliRenderer:
         use_on_resize(on_resize)
     """
     renderer = use_renderer()
-    _resize_handlers.append(callback)
+    if not any(handler is callback for handler in _resize_handlers):
+        _resize_handlers.append(callback)
     return renderer
 
 
@@ -155,6 +170,32 @@ def use_keyboard(
         press_only_wrapper._original_handler = handler  # type: ignore[attr-defined]
         press_only_wrapper._receive_release = False  # type: ignore[attr-defined]
         _keyboard_handlers.append(press_only_wrapper)
+
+
+def use_mouse(handler: Callable[[MouseEvent], None]) -> None:
+    """Subscribe to mouse events (scroll, click, drag).
+
+    Args:
+        handler: Called with MouseEvent for mouse actions
+
+    Usage:
+        def on_mouse(event):
+            if event.type == "scroll":
+                print(f"Scroll: {event.scroll_delta}")
+
+        use_mouse(on_mouse)
+    """
+    _mouse_handlers.append(handler)
+
+
+def get_mouse_handlers() -> list[Callable[[MouseEvent], None]]:
+    """Get all registered mouse handlers."""
+    return _mouse_handlers.copy()
+
+
+def clear_mouse_handlers() -> None:
+    """Clear all mouse handlers."""
+    _mouse_handlers.clear()
 
 
 def use_paste(callback: Callable[[str], None]) -> None:
@@ -333,6 +374,7 @@ __all__ = [
     "use_terminal_dimensions",
     "use_on_resize",
     "use_keyboard",
+    "use_mouse",
     "use_paste",
     "use_selection_handler",
     "use_timeline",
@@ -340,6 +382,8 @@ __all__ = [
     "Animation",
     "get_keyboard_handlers",
     "clear_keyboard_handlers",
+    "get_mouse_handlers",
+    "clear_mouse_handlers",
     "get_paste_handlers",
     "clear_paste_handlers",
     "get_resize_handlers",

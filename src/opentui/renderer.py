@@ -27,9 +27,11 @@ class CliRendererConfig:
     height: int = 24
     testing: bool = False
     remote: bool = False
+    use_alternate_screen: bool = True
     exit_on_ctrl_c: bool = True
     target_fps: int = 60
     console_options: dict | None = None
+    clear_color: s.RGBA | str | None = None
 
 
 @dataclass
@@ -65,6 +67,7 @@ class Buffer:
         self._height: int | None = None
         self._scissor_stack: list[tuple[int, int, int, int]] = []
         self._opacity_stack: list[float] = []
+        self._offset_stack: list[tuple[int, int]] = []
 
     @property
     def width(self) -> int:
@@ -97,6 +100,25 @@ class Buffer:
             return color
         return s.RGBA(color.r, color.g, color.b, color.a * opacity)
 
+    # Drawing offset stack (equivalent to OpenCode's translateX/translateY)
+    def push_offset(self, dx: int, dy: int) -> None:
+        """Push a drawing offset. All draw/scissor operations shift by (dx, dy).
+
+        Offsets are cumulative — pushing (0, -5) then (0, -3) results in
+        an effective offset of (0, -8).  This mirrors OpenCode's translateY
+        which is a pure render-time transform that never triggers layout.
+        """
+        if self._offset_stack:
+            cur_dx, cur_dy = self._offset_stack[-1]
+            self._offset_stack.append((cur_dx + dx, cur_dy + dy))
+        else:
+            self._offset_stack.append((dx, dy))
+
+    def pop_offset(self) -> None:
+        """Pop the most recent drawing offset."""
+        if self._offset_stack:
+            self._offset_stack.pop()
+
     def draw_text(
         self,
         text: str,
@@ -106,6 +128,12 @@ class Buffer:
         bg: s.RGBA | None = None,
         attributes: int = 0,
     ) -> None:
+        # Apply drawing offset (render-time translation, like OpenCode translateY)
+        if self._offset_stack:
+            dx, dy = self._offset_stack[-1]
+            x += dx
+            y += dy
+
         # Scissor clipping: skip if entirely outside clip rect
         if self._scissor_stack:
             sx, sy, sw, sh = self._scissor_stack[-1]
@@ -152,6 +180,12 @@ class Buffer:
         height: int,
         bg: s.RGBA | None = None,
     ) -> None:
+        # Apply drawing offset
+        if self._offset_stack:
+            dx, dy = self._offset_stack[-1]
+            x += dx
+            y += dy
+
         # Scissor clipping: intersect fill rect with scissor rect
         if self._scissor_stack:
             sx, sy, sw, sh = self._scissor_stack[-1]
@@ -205,6 +239,13 @@ class Buffer:
     # Scissor rect stack
     def push_scissor_rect(self, x: int, y: int, width: int, height: int) -> None:
         """Push a scissor rectangle. Drawing is clipped to the intersection of all active rects."""
+        # Apply drawing offset so nested scissor rects within a scrolled
+        # container use the same coordinate space as draw operations.
+        if self._offset_stack:
+            dx, dy = self._offset_stack[-1]
+            x += dx
+            y += dy
+
         if self._scissor_stack:
             # Intersect with current scissor
             cx, cy, cw, ch = self._scissor_stack[-1]
@@ -359,6 +400,8 @@ class CliRenderer:
         self._animation_frame_callbacks: dict[int, Callable] = {}
         self._next_animation_id: int = 0
         self._event_loop: Any = None
+        self._force_next_render: bool = True  # Force first frame to be a full repaint
+        self._clear_color: s.RGBA | None = self._parse_clear_color(config.clear_color)
 
         if config.testing:
             self._width = config.width
@@ -375,6 +418,24 @@ class CliRenderer:
             except (AttributeError, OSError):
                 self._width = config.width
                 self._height = config.height
+
+    @staticmethod
+    def _parse_clear_color(color: s.RGBA | str | None) -> s.RGBA | None:
+        if color is None:
+            return None
+        if isinstance(color, s.RGBA):
+            return color
+        if isinstance(color, str):
+            return s.RGBA.from_hex(color)
+        return None
+
+    def set_clear_color(self, color: s.RGBA | str | None) -> None:
+        """Set the background color used to fill the buffer before each frame.
+
+        This ensures every cell has an explicit background, preventing the
+        terminal's native background from showing through.
+        """
+        self._clear_color = self._parse_clear_color(color)
 
     @property
     def width(self) -> int:
@@ -395,7 +456,7 @@ class CliRenderer:
         """Set up the terminal."""
         if self._config.testing:
             return
-        self._native.renderer.setup_terminal(self._ptr, False)
+        self._native.renderer.setup_terminal(self._ptr, self._config.use_alternate_screen)
 
     def suspend(self) -> None:
         """Suspend the renderer (for Ctrl+Z)."""
@@ -515,10 +576,15 @@ class CliRenderer:
         self._native.renderer.render(self._ptr, force)
 
     def resize(self, width: int, height: int) -> None:
-        """Resize the renderer."""
+        """Resize the renderer and force a full repaint on the next frame."""
         self._native.renderer.resize_renderer(self._ptr, width, height)
         self._width = width
         self._height = height
+        self._force_next_render = True
+
+    def clear_terminal(self) -> None:
+        """Clear the terminal screen (wipe reflow artifacts after resize)."""
+        self._native.renderer.clear_terminal(self._ptr)
 
     def request_render(self) -> None:
         """Request a render on the next frame."""
@@ -530,20 +596,56 @@ class CliRenderer:
 
     def run(self) -> None:
         """Run the renderer main loop with event handling."""
-        self._running = True
-        self.setup()
-
-        # Drain terminal capability responses from stdin so they don't
-        # get misinterpreted as user input by the InputHandler.
         import os as _os
         import select as _sel
         import sys as _sys
+        import termios as _termios
         import time as _time
 
-        _time.sleep(0.05)  # Give terminal time to send responses
+        self._running = True
+
+        # Disable echo BEFORE setup_terminal() so capability responses
+        # (e.g. Ghostty's DCS "P>|ghostty 1.3.0...") aren't echoed to
+        # the screen.  setup_terminal()'s native code sends queries
+        # (xtversion, DECRQM, etc.) before entering raw mode — responses
+        # arriving in that window would be visible without this.
         fd = _sys.stdin.fileno()
-        while _sel.select([fd], [], [], 0)[0]:
-            _os.read(fd, 4096)
+        try:
+            _pre_attrs = _termios.tcgetattr(fd)
+            _noecho = _termios.tcgetattr(fd)
+            _noecho[3] &= ~_termios.ECHO  # lflags: disable echo
+            _termios.tcsetattr(fd, _termios.TCSANOW, _noecho)
+        except (OSError, _termios.error):
+            _pre_attrs = None
+
+        self.setup()
+
+        # Drain capability responses from stdin so they don't get
+        # misinterpreted as user input by the InputHandler.
+        # Poll with a deadline; stop early after idle silence.
+        _DRAIN_DEADLINE = 0.4  # max seconds to wait for responses
+        _DRAIN_IDLE = 0.08     # seconds of silence before declaring done
+
+        deadline = _time.perf_counter() + _DRAIN_DEADLINE
+        last_data = _time.perf_counter()
+        while _time.perf_counter() < deadline:
+            remaining = min(deadline - _time.perf_counter(), _DRAIN_IDLE)
+            if remaining <= 0:
+                break
+            if _sel.select([fd], [], [], remaining)[0]:
+                _os.read(fd, 4096)
+                last_data = _time.perf_counter()
+            else:
+                if _time.perf_counter() - last_data >= _DRAIN_IDLE:
+                    break
+
+        # Restore original terminal attrs (InputHandler.start() will
+        # set its own cbreak mode shortly).
+        if _pre_attrs is not None:
+            try:
+                _termios.tcsetattr(fd, _termios.TCSANOW, _pre_attrs)
+            except (OSError, _termios.error):
+                pass
 
         from .input import EventLoop
 
@@ -559,6 +661,13 @@ class CliRenderer:
         for handler in hooks.get_keyboard_handlers():
             input_handler.on_key(handler)
 
+        # Forward mouse handlers and enable mouse tracking
+        for handler in hooks.get_mouse_handlers():
+            input_handler.on_mouse(handler)
+
+        if hooks.get_mouse_handlers():
+            self.enable_mouse()
+
         event_loop.on_frame(lambda dt: self._render_frame(dt))
 
         try:
@@ -569,7 +678,27 @@ class CliRenderer:
             else:
                 raise
         finally:
-            self._native.renderer.restore_terminal_modes(self._ptr)
+            # Native destroy_renderer() performs the real renderer shutdown
+            # sequence, including alt-screen exit and terminal state reset.
+            # This Python-side cleanup should only drain in-flight stdin data
+            # so terminal responses do not leak into the shell.
+            import os as _os2
+            import select as _sel2
+            import sys as _sys2
+            import time as _time2
+
+            # Drain stdin aggressively: catch mouse events, capability
+            # responses, and other escape sequences that were in-flight.
+            # Without this, leftover bytes leak into the shell after exit.
+            # Multiple rounds ensure late-arriving bytes are caught.
+            try:
+                fd2 = _sys2.stdin.fileno()
+                for _ in range(3):
+                    _time2.sleep(0.03)
+                    while _sel2.select([fd2], [], [], 0.02)[0]:
+                        _os2.read(fd2, 4096)
+            except (OSError, ValueError):
+                pass
 
     def _render_frame(self, delta_time: float) -> None:
         """Render a single frame."""
@@ -601,6 +730,12 @@ class CliRenderer:
         buffer = self.get_next_buffer()
         buffer.clear()
 
+        # Fill entire buffer with clear color so every cell has an explicit
+        # background.  Without this, transparent cells show the terminal's
+        # native background color (e.g. Ghostty's gray).
+        if self._clear_color:
+            buffer.fill_rect(0, 0, self._width, self._height, self._clear_color)
+
         if self._root:
             try:
                 self._root.render(buffer, delta_time)
@@ -611,44 +746,59 @@ class CliRenderer:
         for fn in self._post_process_fns:
             fn(buffer)
 
-        self.render()
+        # Force a full repaint (bypass diff) after resize or on first frame.
+        force = self._force_next_render
+        if force:
+            self._force_next_render = False
+        self.render(force=force)
 
     def _rebuild_component_tree(self) -> None:
         """Rebuild the component tree from the component function."""
         if self._root is None or self._component_fn is None:
             return
 
+        import time as _time
         from .reconciler import reconcile
 
+        t0 = _time.perf_counter_ns()
         old_children = list(self._root._children)
         try:
             component = self._component_fn()
+            t1 = _time.perf_counter_ns()
             new_children = [component]
             self._root._children.clear()
             reconcile(self._root, old_children, new_children)
+            t2 = _time.perf_counter_ns()
+            _log.debug(
+                "rebuild: component_fn=%.2fms reconcile=%.2fms total=%.2fms",
+                (t1 - t0) / 1e6, (t2 - t1) / 1e6, (t2 - t0) / 1e6,
+            )
         except Exception:
             _log.exception("Error rebuilding component tree, restoring previous")
             self._root._children = old_children
             for child in old_children:
                 child._parent = self._root
+            # Restore yoga children to match restored _children
+            self._root._yoga_node.remove_all_children()
+            for child in old_children:
+                self._root._yoga_node.insert_child(
+                    child._yoga_node, self._root._yoga_node.child_count
+                )
 
     def _update_layout(self, renderable, delta_time: float) -> None:
         """Update layout for a renderable and its children using yoga."""
-        if renderable is self._root and self._root and hasattr(self._root, "_build_yoga_tree"):
-            root_node = self._root._build_yoga_tree()
+        if renderable is self._root and self._root:
+            # Configure yoga properties (children already synced by add/remove/reconciler)
+            self._root._configure_yoga_properties()
 
             from . import layout as yoga_layout
 
-            yoga_layout.compute_layout(root_node, float(self._width), float(self._height))
+            yoga_layout.compute_layout(self._root._yoga_node, float(self._width), float(self._height))
 
             self._apply_yoga_layout_recursive(self._root)
 
         if hasattr(renderable, "update_layout"):
             renderable.update_layout(delta_time)
-
-        if hasattr(renderable, "get_children"):
-            for child in renderable.get_children():
-                pass
 
     def _apply_yoga_layout_recursive(self, renderable, offset_x: int = 0, offset_y: int = 0) -> None:
         """Apply yoga layout to renderable and all descendants.

@@ -99,10 +99,12 @@ from .hooks import (
     Animation,
     Timeline,
     clear_keyboard_handlers,
+    clear_mouse_handlers,
     clear_paste_handlers,
     clear_resize_handlers,
     clear_selection_handlers,
     use_keyboard,
+    use_mouse,
     use_on_resize,
     use_paste,
     use_renderer,
@@ -222,13 +224,28 @@ async def render(
 
         await render(App)
     """
+    if isinstance(config, dict):
+        config = CliRendererConfig(**config)
     if config is None:
+        config = CliRendererConfig()
+
+    # Auto-detect terminal size unless testing or explicit dimensions given
+    if not config.testing:
         import shutil
 
         term_size = shutil.get_terminal_size((80, 24))
-        config = CliRendererConfig(width=term_size.columns, height=term_size.lines)
-    elif isinstance(config, dict):
-        config = CliRendererConfig(**config)
+        if term_size.columns > 0 and term_size.lines > 0:
+            config = CliRendererConfig(
+                width=term_size.columns,
+                height=term_size.lines,
+                testing=config.testing,
+                remote=config.remote,
+                use_alternate_screen=config.use_alternate_screen,
+                exit_on_ctrl_c=config.exit_on_ctrl_c,
+                target_fps=config.target_fps,
+                console_options=config.console_options,
+                clear_color=config.clear_color,
+            )
 
     renderer = await create_cli_renderer(config)
 
@@ -354,6 +371,7 @@ class TestSetup:
             self._renderer._root._width = width
             self._renderer._root._height = height
         from . import hooks
+        hooks._set_terminal_dimensions(width, height)
         for handler in hooks.get_resize_handlers():
             handler(width, height)
 
@@ -434,12 +452,14 @@ __all__ = [
     "use_terminal_dimensions",
     "use_on_resize",
     "use_keyboard",
+    "use_mouse",
     "use_paste",
     "use_selection_handler",
     "use_timeline",
     "Timeline",
     "Animation",
     "clear_keyboard_handlers",
+    "clear_mouse_handlers",
     "clear_paste_handlers",
     "clear_resize_handlers",
     "clear_selection_handlers",

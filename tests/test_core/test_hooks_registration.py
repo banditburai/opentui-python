@@ -10,6 +10,7 @@ from opentui.hooks import (
     get_resize_handlers,
     get_selection_handlers,
     set_renderer,
+    use_terminal_dimensions,
     use_keyboard,
     use_on_resize,
     use_paste,
@@ -101,6 +102,13 @@ class TestResizeHandlers:
         h1 = get_resize_handlers()
         h2 = get_resize_handlers()
         assert h1 is not h2
+
+    def test_use_terminal_dimensions_tracks_renderer_size(self):
+        renderer = _setup_renderer()
+        assert use_terminal_dimensions() == (80, 24)
+
+        renderer.resize(120, 33)
+        assert use_terminal_dimensions() == (120, 33)
 
 
 class TestSelectionHandlers:

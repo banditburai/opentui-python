@@ -67,8 +67,8 @@ class NativeRenderer:
     def resize(self, width: int, height: int) -> None:
         _nb.renderer.resize_renderer(self._ptr, width, height)
 
-    def setup_terminal(self, testing: bool) -> None:
-        _nb.renderer.setup_terminal(self._ptr, testing)
+    def setup_terminal(self, use_alternate_screen: bool) -> None:
+        _nb.renderer.setup_terminal(self._ptr, use_alternate_screen)
 
     def suspend(self) -> None:
         _nb.renderer.suspend_renderer(self._ptr)
