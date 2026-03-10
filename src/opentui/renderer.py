@@ -801,7 +801,11 @@ class CliRenderer:
 
     def _refresh_mouse_tracking(self) -> None:
         """Enable or disable mouse tracking based on the current tree."""
-        should_enable = bool(hooks.get_mouse_handlers()) or self._tree_has_mouse_handlers(self._root)
+        should_enable = (
+            bool(hooks.get_mouse_handlers())
+            or self._tree_has_mouse_handlers(self._root)
+            or self._tree_has_scroll_targets(self._root)
+        )
         if should_enable and not self._mouse_enabled:
             self.enable_mouse()
         elif not should_enable and self._mouse_enabled:
@@ -903,11 +907,31 @@ class CliRenderer:
         except AttributeError:
             return False
 
+    def _tree_has_scroll_targets(self, renderable) -> bool:
+        """Return True when any renderable in the tree owns wheel scrolling."""
+        if renderable is None:
+            return False
+        if getattr(renderable, "_is_scroll_target", False):
+            return True
+        try:
+            return any(self._tree_has_scroll_targets(child) for child in renderable.get_children())
+        except AttributeError:
+            return False
+
     def _dispatch_mouse_event(self, event) -> None:
         """Dispatch a mouse event through the render tree before global hooks."""
         if self._root is None:
             return
-        if _TRACE_SCROLL and event.type == "scroll":
+        if event.type == "scroll":
+            self._dispatch_scroll_event(event)
+            return
+        self._dispatch_mouse_to_tree(self._root, event)
+
+    def _dispatch_scroll_event(self, event) -> None:
+        """Route wheel input to the deepest scroll target under the pointer."""
+        if self._root is None:
+            return
+        if _TRACE_SCROLL:
             _log.debug(
                 "dispatch scroll start x=%s y=%s delta=%s direction=%s",
                 getattr(event, "x", None),
@@ -915,13 +939,61 @@ class CliRenderer:
                 getattr(event, "scroll_delta", None),
                 getattr(event, "scroll_direction", None),
             )
-        self._dispatch_mouse_to_tree(self._root, event)
-        if _TRACE_SCROLL and event.type == "scroll":
+
+        target = self._find_scroll_target(self._root, event.x, event.y)
+        if target is not None:
+            event.target = target
+            if _TRACE_SCROLL:
+                _log.debug(
+                    "dispatch scroll target node=%s key=%s",
+                    type(target).__name__,
+                    getattr(target, "key", None),
+                )
+            handler = getattr(target, "handle_scroll_event", None)
+            if handler is not None:
+                handler(event)
+            else:
+                fallback = getattr(target, "_on_mouse_scroll", None)
+                if fallback is not None:
+                    fallback(event)
+
+        if _TRACE_SCROLL:
             _log.debug(
                 "dispatch scroll done stopped=%s target=%s",
                 event.propagation_stopped,
                 getattr(getattr(event, "target", None), "key", None) or type(getattr(event, "target", None)).__name__,
             )
+
+    def _find_scroll_target(self, renderable, x: int, y: int):
+        """Return the deepest registered scroll target under *(x, y)*."""
+        try:
+            children = list(renderable.get_children())
+        except AttributeError:
+            children = []
+
+        for child in reversed(children):
+            found = self._find_scroll_target(child, x, y)
+            if found is not None:
+                return found
+
+        contains_point = getattr(renderable, "contains_point", None)
+        inside = True if contains_point is None else contains_point(x, y)
+
+        if _TRACE_SCROLL:
+            _log.debug(
+                "dispatch scroll visit node=%s key=%s inside=%s children=%s x=%s y=%s scroll_target=%s",
+                type(renderable).__name__,
+                getattr(renderable, "key", None),
+                inside,
+                len(children),
+                getattr(renderable, "_x", None),
+                getattr(renderable, "_y", None),
+                getattr(renderable, "_is_scroll_target", False),
+            )
+
+        if inside and getattr(renderable, "_is_scroll_target", False):
+            return renderable
+        return None
 
     def _dispatch_mouse_to_tree(self, renderable, event) -> None:
         """Walk children front-to-back and dispatch to the deepest hit target."""
@@ -930,27 +1002,15 @@ class CliRenderer:
 
         contains_point = getattr(renderable, "contains_point", None)
         inside = True if contains_point is None else contains_point(event.x, event.y)
-        is_scroll_event = event.type == "scroll"
 
         try:
             children = list(renderable.get_children())
         except AttributeError:
             children = []
 
-        if _TRACE_SCROLL and event.type == "scroll":
-            _log.debug(
-                "dispatch scroll visit node=%s key=%s inside=%s children=%s x=%s y=%s",
-                type(renderable).__name__,
-                getattr(renderable, "key", None),
-                inside,
-                len(children),
-                getattr(renderable, "_x", None),
-                getattr(renderable, "_y", None),
-            )
-
         for child in reversed(children):
             child_contains = getattr(child, "contains_point", None)
-            if not is_scroll_event and child_contains is not None and not child_contains(event.x, event.y):
+            if child_contains is not None and not child_contains(event.x, event.y):
                 continue
             self._dispatch_mouse_to_tree(child, event)
             if event.propagation_stopped:
@@ -973,12 +1033,6 @@ class CliRenderer:
         handler = getattr(renderable, attr, None)
         if handler is not None:
             event.target = renderable
-            if _TRACE_SCROLL and event.type == "scroll":
-                _log.debug(
-                    "dispatch scroll handler node=%s key=%s",
-                    type(renderable).__name__,
-                    getattr(renderable, "key", None),
-                )
             handler(event)
 
     # Post-processing pipeline

@@ -5,13 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 import math
 import time
-import logging
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
 from .base import Renderable
-
-_log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -457,7 +454,7 @@ class ScrollBox(Box):
         self._sticky_scroll_bottom = False
         self._sticky_scroll_left = False
         self._sticky_scroll_right = False
-        self.on_mouse_scroll = self._handle_mouse_scroll
+        self._is_scroll_target = True
 
     @property
     def scroll_x(self) -> bool:
@@ -679,25 +676,8 @@ class ScrollBox(Box):
 
     def _handle_mouse_scroll(self, event: Any) -> None:
         if self._scroll_offset_y_fn is not None:
-            _log.debug(
-                "scrollbox handler skipped key=%s reason=external-offset x=%s y=%s offset=%s",
-                getattr(self, "key", None),
-                getattr(event, "x", None),
-                getattr(event, "y", None),
-                self._scroll_offset_y,
-            )
             return
         if not self.contains_point(event.x, event.y):
-            _log.debug(
-                "scrollbox handler skipped key=%s reason=outside x=%s y=%s box=(%s,%s %sx%s)",
-                getattr(self, "key", None),
-                getattr(event, "x", None),
-                getattr(event, "y", None),
-                self._x,
-                self._y,
-                self._layout_width,
-                self._layout_height,
-            )
             return
 
         direction = getattr(event, "scroll_direction", None)
@@ -707,7 +687,19 @@ class ScrollBox(Box):
         scroll_amount = abs(getattr(event, "scroll_delta", 0) or 1)
         multiplier = self._scroll_acceleration.tick(time.monotonic() * 1000.0)
         total_amount = scroll_amount * multiplier
-        before = self._scroll_offset_y
+
+        # Snap cleanly to the sticky edge near the boundary to avoid the
+        # small residual-accumulator bobble when the user returns to bottom.
+        if direction == "up" and self._scroll_y and self._scroll_offset_y <= 1:
+            self._set_scroll_offsets(y=0, mark_manual=True)
+            self._scroll_accumulator_y = 0.0
+            event.stop_propagation()
+            return
+        if direction == "down" and self._scroll_y and self._max_scroll_y() - self._scroll_offset_y <= 1:
+            self._set_scroll_offsets(y=self._max_scroll_y(), mark_manual=True)
+            self._scroll_accumulator_y = 0.0
+            event.stop_propagation()
+            return
 
         if direction == "up" and self._scroll_y:
             self._scroll_accumulator_y -= total_amount
@@ -732,19 +724,16 @@ class ScrollBox(Box):
                 if not moved:
                     self._scroll_accumulator_y = 0.0
 
-        _log.debug(
-            "scrollbox handler key=%s direction=%s delta=%s before=%s after=%s max=%s viewport=%s content=%s",
-            getattr(self, "key", None),
-            direction,
-            getattr(event, "scroll_delta", None),
-            before,
-            self._scroll_offset_y,
-            self._max_scroll_y(),
-            self._viewport_height,
-            self._scroll_height,
-        )
+        if direction == "up" and self._scroll_offset_y <= 0:
+            self._scroll_accumulator_y = 0.0
+        if direction == "down" and self._scroll_offset_y >= self._max_scroll_y():
+            self._scroll_accumulator_y = 0.0
 
         event.stop_propagation()
+
+    def handle_scroll_event(self, event: Any) -> None:
+        """Handle a wheel/trackpad scroll event as an owned scroll target."""
+        self._handle_mouse_scroll(event)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         """Render with buffer-offset scrolling (like OpenCode's translateY).

@@ -84,6 +84,42 @@ def test_scrollbox_wheel_at_top_does_not_leave_stale_accumulator():
     asyncio.run(run_test())
 
 
+def test_scrollbox_wheel_at_bottom_snaps_and_clears_accumulator():
+    async def run_test():
+        items = Signal("items", list(range(10)))
+        setup = await render_for_test(
+            lambda: _items_component(items, sticky_scroll=True, sticky_start="bottom"),
+            {"width": 20, "height": 6},
+        )
+        setup.render_frame()
+
+        scrollbox = _get_scrollbox(setup)
+        bottom = scrollbox.scroll_offset_y
+        assert bottom > 0
+
+        scrollbox.scroll_by(delta_y=-2)
+        assert scrollbox.scroll_offset_y == bottom - 2
+
+        for _ in range(4):
+            setup.renderer._dispatch_mouse_event(
+                MouseEvent(
+                    type="scroll",
+                    x=1,
+                    y=1,
+                    button=MouseButton.WHEEL_DOWN,
+                    scroll_delta=1,
+                    scroll_direction="down",
+                )
+            )
+
+        assert scrollbox.scroll_offset_y == bottom
+        assert scrollbox.has_manual_scroll is False
+        assert scrollbox._scroll_accumulator_y == 0.0
+        setup.destroy()
+
+    asyncio.run(run_test())
+
+
 def test_scrollbox_sticky_bottom_tracks_new_content():
     async def run_test():
         items = Signal("items", list(range(8)))
@@ -333,56 +369,59 @@ def test_scrollbox_wheel_dispatch_ignores_stale_ancestor_hit_test():
     asyncio.run(run_test())
 
 
-def test_scrollbox_handler_remains_bound_to_mounted_instance_after_reconcile():
+def test_scrollbox_nested_target_owns_wheel_over_parent():
     async def run_test():
-        from opentui import Box, ScrollBox, Signal, Text
-
-        label = Signal("label", "first")
+        from opentui import Box, ScrollBox, Text
 
         def component():
             return Box(
                 ScrollBox(
+                    Box(
+                        ScrollBox(
+                            *[
+                                Box(Text(f"inner {idx}"), height=1, flex_shrink=0, key=f"inner-{idx}")
+                                for idx in range(8)
+                            ],
+                            width=10,
+                            height=3,
+                            scroll_y=True,
+                            sticky_scroll=True,
+                            sticky_start="bottom",
+                            key="inner-scrollbox",
+                        ),
+                        width=10,
+                        height=3,
+                        key="inner-wrapper",
+                    ),
                     *[
-                        Box(
-                            Text(f"{label()} {idx}"),
-                            height=1,
-                            flex_shrink=0,
-                            key=f"row-{idx}",
-                        )
+                        Box(Text(f"outer {idx}"), height=1, flex_shrink=0, key=f"outer-{idx}")
                         for idx in range(8)
                     ],
                     width=20,
-                    height=4,
+                    height=6,
                     scroll_y=True,
                     sticky_scroll=True,
                     sticky_start="bottom",
-                    key="scrollbox-rebind",
+                    key="outer-scrollbox",
                 ),
                 width=20,
-                height=4,
+                height=6,
             )
 
         setup = await render_for_test(component, {"width": 20, "height": 6})
         setup.render_frame()
 
-        scrollbox = _find_by_key(setup.renderer.root, "scrollbox-rebind")
-        assert scrollbox is not None
-        original_instance = scrollbox
-        assert getattr(scrollbox._on_mouse_scroll, "__self__", None) is scrollbox
+        outer = _find_by_key(setup.renderer.root, "outer-scrollbox")
+        inner = _find_by_key(setup.renderer.root, "inner-scrollbox")
+        assert outer is not None
+        assert inner is not None
+        outer_before = outer.scroll_offset_y
+        inner_before = inner.scroll_offset_y
 
-        label.set("second")
-        setup.render_frame()
-
-        scrollbox = _find_by_key(setup.renderer.root, "scrollbox-rebind")
-        assert scrollbox is original_instance
-        assert getattr(scrollbox._on_mouse_scroll, "__self__", None) is scrollbox
-
-        scrollbox.scroll_by(delta_y=2)
-        before = scrollbox.scroll_offset_y
         event = MouseEvent(
             type="scroll",
-            x=1,
-            y=1,
+            x=inner._x + 1,
+            y=inner._y + 1,
             button=MouseButton.WHEEL_UP,
             scroll_delta=-1,
             scroll_direction="up",
@@ -390,8 +429,9 @@ def test_scrollbox_handler_remains_bound_to_mounted_instance_after_reconcile():
         setup.renderer._dispatch_mouse_event(event)
 
         assert event.propagation_stopped is True
-        assert event.target is scrollbox
-        assert scrollbox.scroll_offset_y < before
+        assert event.target is inner
+        assert inner.scroll_offset_y < inner_before
+        assert outer.scroll_offset_y == outer_before
         setup.destroy()
 
     asyncio.run(run_test())
