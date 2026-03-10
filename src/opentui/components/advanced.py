@@ -57,8 +57,8 @@ class Code(Renderable):
 
         x = self._x + self._padding_left
         y = self._y + self._padding_top
-        width = self._width or (buffer.width - x)
-        height = self._height or (buffer.height - y)
+        width = self._layout_width or (buffer.width - x)
+        height = self._layout_height or (buffer.height - y)
 
         # Draw background
         if self._background_color:
@@ -280,7 +280,7 @@ class LineNumber(Renderable):
 
         x = self._x + self._padding_left
         y = self._y + self._padding_top
-        width = self._width or (buffer.width - x)
+        width = self._layout_width or (buffer.width - x)
 
         lines = self._content.split("\n")
         for i, line in enumerate(lines):
@@ -476,7 +476,7 @@ class Slider(Renderable):
 
         x = self._x + self._padding_left
         y = self._y + self._padding_top
-        width = self._width or 20
+        width = self._layout_width or 20
 
         # Calculate position
         range_size = self._max - self._min

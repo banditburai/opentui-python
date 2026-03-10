@@ -109,7 +109,7 @@ class BaseRenderable:
         self._children: list[BaseRenderable] = []
         self._event_handlers: dict[str, list[Callable]] = {}
         self._cleanups: list[Callable] = []
-        self._yoga_node: Any = None
+        self._yoga_node: Any = yoga_layout.create_node()
         self._x: int = 0
         self._y: int = 0
         self._width: int | None = None
@@ -154,50 +154,37 @@ class BaseRenderable:
         if self._parent is not None:
             self._parent.request_render()
 
-    def _ensure_yoga_node(self) -> Any:
-        """Ensure this renderable has a yoga node."""
-        if self._yoga_node is None:
-            self._yoga_node = yoga_layout.create_node()
-        return self._yoga_node
+    def _configure_yoga_properties(self) -> None:
+        """Configure yoga properties on this node and all descendants.
 
-    def _build_yoga_tree(self) -> Any:
-        """Build yoga tree from this renderable and children."""
-        node = self._ensure_yoga_node()
-        node.remove_all_children()
-        self._configure_yoga_node(node)
-
+        Unlike the old _build_yoga_tree, this does NOT rebuild yoga children —
+        children are managed incrementally by add/remove and the reconciler.
+        """
+        self._configure_yoga_node(self._yoga_node)
         for child in self._children:
-            if hasattr(child, "_build_yoga_tree"):
-                child_node = child._build_yoga_tree()
-                if child_node is not None:
-                    node.insert_child(child_node, node.child_count)
-
-        return node
+            child._configure_yoga_properties()
 
     def _configure_yoga_node(self, node: Any) -> None:
         """Configure yoga node with this renderable's layout properties."""
         pass
 
     def _apply_yoga_layout(self) -> None:
-        """Apply computed yoga layout to this renderable."""
+        """Apply computed yoga layout to this renderable.
+
+        Writes positions to _x/_y (later converted to absolute screen
+        coordinates by _apply_yoga_layout_recursive) and computed
+        dimensions to _layout_width/_layout_height.  The original
+        _width/_height are left untouched so _configure_yoga_node always
+        sees the developer-specified values (None for flex, 30 for fixed).
+        """
         if self._yoga_node is None:
             return
 
         layout = yoga_layout.get_layout(self._yoga_node)
         self._x = int(layout["x"])
         self._y = int(layout["y"])
-        self._width = int(layout["width"])
-        self._height = int(layout["height"])
-
-    def _sync_yoga_layout_to_children(self) -> None:
-        """Sync yoga layout to children."""
-        for child in self._children:
-            if hasattr(child, "_apply_yoga_layout"):
-                child._apply_yoga_layout()
-
-        for child in self._children:
-            if hasattr(child, "_sync_yoga_layout_to_children"):
-                child._sync_yoga_layout_to_children()
+        self._layout_width = int(layout["width"])
+        self._layout_height = int(layout["height"])
 
     @property
     def id(self) -> int:
@@ -210,8 +197,10 @@ class BaseRenderable:
         child._parent = self
         if index is not None:
             self._children.insert(index, child)
+            self._yoga_node.insert_child(child._yoga_node, index)
         else:
             self._children.append(child)
+            self._yoga_node.insert_child(child._yoga_node, self._yoga_node.child_count)
         self.mark_dirty()
         return child._id
 
@@ -219,6 +208,7 @@ class BaseRenderable:
         """Remove a child renderable."""
         if child in self._children:
             self._children.remove(child)
+            self._yoga_node.remove_child(child._yoga_node)
             child._parent = None
             self.mark_dirty()
 
@@ -229,6 +219,7 @@ class BaseRenderable:
         child._parent = self
         idx = self._children.index(anchor)
         self._children.insert(idx, child)
+        self._yoga_node.insert_child(child._yoga_node, idx)
         self.mark_dirty()
         return child._id
 
@@ -239,6 +230,14 @@ class BaseRenderable:
     def get_children_count(self) -> int:
         """Get the number of children."""
         return len(self._children)
+
+    def contains_point(self, x: int, y: int) -> bool:
+        """Return True when *(x, y)* falls within this renderable's layout bounds."""
+        width = int(self._layout_width or 0)
+        height = int(self._layout_height or 0)
+        if width <= 0 or height <= 0:
+            return False
+        return self._x <= x < self._x + width and self._y <= y < self._y + height
 
     def get_renderable(self, id: str) -> BaseRenderable | None:
         """Get a renderable by ID."""
@@ -454,7 +453,10 @@ class Renderable(BaseRenderable):
     ):
         super().__init__(key=key)
 
-        # Layout
+        # Layout — _width/_height hold the developer-specified prop value
+        # (None for flex/auto, 30 for fixed, "50%" for percent).  They are
+        # never overwritten by yoga; computed dimensions go into
+        # _layout_width/_layout_height (inherited from BaseRenderable).
         self._x = 0
         self._y = 0
         self._width = width
@@ -1004,15 +1006,15 @@ class Renderable(BaseRenderable):
             return
 
         layout = yoga_layout.get_layout(self._yoga_node)
-        old_w = self._width
-        old_h = self._height
+        old_w = self._layout_width
+        old_h = self._layout_height
         self._x = int(layout["x"])
         self._y = int(layout["y"])
-        self._width = int(layout["width"])
-        self._height = int(layout["height"])
+        self._layout_width = int(layout["width"])
+        self._layout_height = int(layout["height"])
 
-        if self._on_size_change and (old_w != self._width or old_h != self._height):
-            self._on_size_change(self._width, self._height)
+        if self._on_size_change and (old_w != self._layout_width or old_h != self._layout_height):
+            self._on_size_change(self._layout_width, self._layout_height)
 
     def update_layout(self, delta_time: float = 0) -> None:
         """Update layout (would integrate with layout engine)."""

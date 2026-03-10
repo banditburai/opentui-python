@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .. import structs as s
-from ..text_utils import measure_text
+from ..text_utils import measure_text, wrap_text
 from .base import Renderable
 
 if TYPE_CHECKING:
@@ -67,6 +67,9 @@ class Text(Renderable):
         )
         self._wrap_mode = wrap_mode if wrap_mode in ("none", "char", "word") else "word"
 
+        # Set yoga measure function (closure reads self._content dynamically)
+        self._setup_measure_func()
+
         # Process children as text modifiers
         self._text_modifiers: list[TextModifier] = []
         for child in children:
@@ -101,11 +104,8 @@ class Text(Renderable):
             if self._yoga_node is not None:
                 self._yoga_node.mark_dirty()
 
-    def _build_yoga_tree(self) -> Any:
-        """Build yoga tree with measure function for text."""
-        from ..text_utils import measure_text
-
-        node = self._ensure_yoga_node()
+    def _setup_measure_func(self) -> None:
+        """Set up yoga measure function for text layout."""
 
         def measure(yoga_node, width, width_mode, height, height_mode):
             import yoga
@@ -129,14 +129,9 @@ class Text(Renderable):
             if width_mode == yoga.MeasureMode.AtMost:
                 measured_w = min(width, measured_w)
 
-            # Exactly mode: should return measured, but yoga sometimes ignores it
-            # Return measured size regardless
-
             return (measured_w, measured_h)
 
-        node.set_measure_func(measure)
-
-        return node
+        self._yoga_node.set_measure_func(measure)
 
     def _get_attributes(self) -> int:
         """Get text attribute flags."""
@@ -152,12 +147,22 @@ class Text(Renderable):
         return attrs
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the text."""
+        """Render the text with word wrapping."""
         if not self._visible or not self._content:
             return
 
         x = self._x + self._padding_left
         y = self._y + self._padding_top
+
+        # Compute available width for wrapping from yoga layout
+        available_width = 0
+        if self._layout_width:
+            available_width = int(self._layout_width) - self._padding_left - self._padding_right
+        if available_width <= 0:
+            available_width = 0  # unlimited
+
+        # Get wrapped lines
+        lines = wrap_text(self._content, available_width, self._wrap_mode)
 
         # Draw selection highlight if there's a valid selection
         if (
@@ -165,28 +170,19 @@ class Text(Renderable):
             and self._selection_end is not None
             and self._selection_start < self._selection_end
         ):
-            content = self._content
             start_pos = max(0, self._selection_start)
-            end_pos = min(len(content), self._selection_end)
+            end_pos = min(len(self._content), self._selection_end)
 
-            # Measure text before selection
-            before_sel = content[:start_pos]
-            sel_text = content[start_pos:end_pos]
+            # For selection, compute positions on the unwrapped line
+            before_width, _ = measure_text(self._content[:start_pos], 0, "none")
+            sel_width, _ = measure_text(self._content[start_pos:end_pos], 0, "none")
 
-            _, text_height = measure_text(content, 0, "none")
-            text_height = max(1, text_height)
-
-            # Calculate x positions
-            before_width, _ = measure_text(before_sel, 0, "none")
-            sel_width, _ = measure_text(sel_text, 0, "none")
-
-            # Draw selection background
             if sel_width > 0:
-                buffer.fill_rect(x + before_width, y, sel_width, text_height, self._selection_bg)
+                buffer.fill_rect(x + before_width, y, sel_width, 1, self._selection_bg)
 
-        buffer.draw_text(
-            self._content, x, y, self._fg, self._background_color, self._get_attributes()
-        )
+        attrs = self._get_attributes()
+        for i, line in enumerate(lines):
+            buffer.draw_text(line, x, y + i, self._fg, self._background_color, attrs)
 
 
 class TextModifier(Renderable):

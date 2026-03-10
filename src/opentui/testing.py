@@ -323,7 +323,14 @@ class MockMouse:
         scroll_delta = delta if direction == "down" else -delta
         button = MouseButton.WHEEL_DOWN if direction == "down" else MouseButton.WHEEL_UP
         self._x, self._y = x, y
-        event = MouseEvent(type="scroll", x=x, y=y, button=button, scroll_delta=scroll_delta)
+        event = MouseEvent(
+            type="scroll",
+            x=x,
+            y=y,
+            button=button,
+            scroll_delta=scroll_delta,
+            scroll_direction=direction,
+        )
         self._dispatch_mouse(event)
 
 

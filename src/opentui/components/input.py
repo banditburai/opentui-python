@@ -156,7 +156,7 @@ class Input(Renderable):
 
         x = self._x + self._padding_left
         y = self._y + self._padding_top
-        width = self._width or (buffer.width - x)
+        width = self._layout_width or (buffer.width - x)
 
         # Draw background
         if self._background_color:
@@ -219,8 +219,8 @@ class Textarea(Input):
 
         x = self._x + self._padding_left
         y = self._y + self._padding_top
-        width = self._width or (buffer.width - x)
-        height = self._height or self._rows
+        width = self._layout_width or (buffer.width - x)
+        height = self._layout_height or self._rows
 
         # Draw background
         if self._background_color:
@@ -335,7 +335,7 @@ class Select(Renderable):
 
         x = self._x + self._padding_left
         y = self._y + self._padding_top
-        width = self._width or (buffer.width - x)
+        width = self._layout_width or (buffer.width - x)
 
         # Draw background
         if self._background_color:

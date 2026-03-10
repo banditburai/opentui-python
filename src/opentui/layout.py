@@ -154,7 +154,10 @@ def configure_node(
 ) -> None:
     """Configure a yoga node with layout properties."""
 
-    # Dimensions (support percentage and auto)
+    # Dimensions (support percentage and auto).
+    # When None, explicitly reset to auto so stale values from a previous
+    # frame (written by _apply_yoga_layout → _configure_yoga_node feedback
+    # loop) don't persist and override flex layout.
     if width is not None:
         val, kind = _parse_dimension(width)
         if kind == "percent":
@@ -163,6 +166,8 @@ def configure_node(
             node.set_width_auto()
         else:
             node.width = val
+    else:
+        node.set_width_auto()
     if height is not None:
         val, kind = _parse_dimension(height)
         if kind == "percent":
@@ -171,6 +176,8 @@ def configure_node(
             node.set_height_auto()
         else:
             node.height = val
+    else:
+        node.set_height_auto()
     if min_width is not None:
         val, kind = _parse_dimension(min_width)
         if kind == "percent":
@@ -203,12 +210,12 @@ def configure_node(
         node.flex_shrink = flex_shrink
     if flex_basis is not None:
         val, kind = _parse_dimension(flex_basis)
-        if kind == "percent":
-            node.set_flex_basis_percent(val)
+        if kind == "percent" and val is not None:
+            node.flex_basis = val  # yoga treats as percent via YGValue
         elif kind == "auto":
-            node.set_flex_basis_auto()
-        else:
-            node.set_flex_basis(val)
+            node.flex_basis = float("nan")  # yoga auto sentinel
+        elif val is not None:
+            node.flex_basis = val
     if flex_direction is not None:
         node.flex_direction = FLEX_DIRECTION_MAP.get(flex_direction, yoga.FlexDirection.Column)
     if flex_wrap is not None:
@@ -224,7 +231,7 @@ def configure_node(
 
     # Gap
     if gap is not None:
-        node.gap = gap
+        node.set_gap(yoga.Gutter.All, gap)
     if row_gap is not None:
         node.set_gap(yoga.Gutter.Row, row_gap)
     if column_gap is not None:

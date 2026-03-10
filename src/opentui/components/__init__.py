@@ -11,8 +11,9 @@ from .advanced import (
     TextTable,
 )
 from .base import BaseRenderable, LayoutOptions, Renderable, StyleOptions
-from .box import Box, ScrollBox
+from .box import Box, LinearScrollAccel, MacOSScrollAccel, ScrollBox
 from .composition import VRenderable
+from .control_flow import For, Match, Show, Switch
 from .framebuffer import FrameBuffer
 from .input import Input, Select, SelectOption, Textarea
 from .scrollbar import ScrollBar
@@ -27,6 +28,8 @@ __all__ = [
     "StyleOptions",
     # Box
     "Box",
+    "LinearScrollAccel",
+    "MacOSScrollAccel",
     "ScrollBox",
     # Text
     "Text",
@@ -51,6 +54,11 @@ __all__ = [
     "TabSelect",
     "Slider",
     "TextTable",
+    # Control flow
+    "For",
+    "Show",
+    "Switch",
+    "Match",
     # New components
     "ScrollBar",
     "FrameBuffer",

@@ -94,3 +94,79 @@ def _measure_char_wrap(line: str, max_width: int) -> tuple[int, int]:
 
     additional_lines = (line_len - 1) // max_width
     return (max_width, additional_lines)
+
+
+def wrap_text(text: str, max_width: int, wrap: str = "word") -> list[str]:
+    """Wrap text into lines that fit within max_width.
+
+    Uses the same logic as measure_text but returns the actual lines.
+
+    Args:
+        text: The text content to wrap
+        max_width: Maximum width available (0 for unlimited)
+        wrap: Wrap mode - "none", "char", or "word"
+
+    Returns:
+        List of wrapped lines
+    """
+    if not text:
+        return [""]
+
+    if wrap == "none" or max_width <= 0:
+        return text.split("\n")
+
+    result: list[str] = []
+    for line in text.split("\n"):
+        if not line:
+            result.append("")
+            continue
+
+        if wrap == "word":
+            result.extend(_wrap_line_word(line, max_width))
+        elif wrap == "char":
+            result.extend(_wrap_line_char(line, max_width))
+        else:
+            result.append(line)
+
+    return result
+
+
+def _wrap_line_word(line: str, max_width: int) -> list[str]:
+    """Word-wrap a single line. Returns list of wrapped lines."""
+    if len(line) <= max_width:
+        return [line]
+
+    words = line.split(" ")
+    lines: list[str] = []
+    current: list[str] = []
+    current_width = 0
+
+    for word in words:
+        word_width = len(word)
+        if current_width == 0:
+            current.append(word)
+            current_width = word_width
+        elif current_width + 1 + word_width > max_width:
+            lines.append(" ".join(current))
+            current = [word]
+            current_width = word_width
+        else:
+            current.append(word)
+            current_width += 1 + word_width
+
+    if current:
+        lines.append(" ".join(current))
+
+    return lines or [""]
+
+
+def _wrap_line_char(line: str, max_width: int) -> list[str]:
+    """Character-wrap a single line. Returns list of wrapped lines."""
+    if len(line) <= max_width:
+        return [line]
+
+    lines: list[str] = []
+    for i in range(0, len(line), max_width):
+        lines.append(line[i : i + max_width])
+
+    return lines or [""]

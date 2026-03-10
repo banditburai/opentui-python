@@ -172,3 +172,79 @@ class TestReconciler:
 
         for child in parent._children:
             assert child._parent is parent
+
+    def test_yoga_tree_synced_after_reconciliation(self):
+        """Yoga child_count matches len(_children) after reconciliation."""
+        parent = BaseRenderable()
+        old_a = BaseRenderable(key="a")
+        old_b = BaseRenderable(key="b")
+        parent.add(old_a)
+        parent.add(old_b)
+
+        new_b = BaseRenderable(key="b")
+        new_a = BaseRenderable(key="a")
+        new_c = BaseRenderable(key="c")
+
+        reconcile(parent, [old_a, old_b], [new_b, new_a, new_c])
+
+        assert parent._yoga_node.child_count == len(parent._children)
+        assert parent._yoga_node.child_count == 3
+        yoga_children = parent._yoga_node.get_layout_children()
+        for i, child in enumerate(parent._children):
+            assert yoga_children[i] is child._yoga_node
+
+    def test_yoga_tree_synced_through_nested_reconciliation(self):
+        """Yoga tree is correct at every level after recursive reconciliation."""
+        parent = BaseRenderable()
+        container = BaseRenderable(key="c")
+        child_x = BaseRenderable(key="x")
+        child_y = BaseRenderable(key="y")
+        parent.add(container)
+        container.add(child_x)
+        container.add(child_y)
+
+        # New tree: same container, reordered children + new child
+        new_container = BaseRenderable(key="c")
+        new_y = BaseRenderable(key="y")
+        new_x = BaseRenderable(key="x")
+        new_z = BaseRenderable(key="z")
+        new_container._children = [new_y, new_x, new_z]
+
+        reconcile(parent, [container], [new_container])
+
+        # Parent level: 1 child (container preserved)
+        assert parent._yoga_node.child_count == 1
+        assert parent._yoga_node.get_layout_children()[0] is container._yoga_node
+
+        # Container level: 3 children in new order
+        assert container._yoga_node.child_count == 3
+        yoga_gc = container._yoga_node.get_layout_children()
+        assert yoga_gc[0] is child_y._yoga_node  # y first now
+        assert yoga_gc[1] is child_x._yoga_node  # x second
+        assert yoga_gc[2] is new_z._yoga_node    # z is new
+
+    def test_template_yoga_children_detached_before_recursive_reconcile(self):
+        """New template children added via add() don't cause 'already has owner' errors.
+
+        When a component function creates Box(child_a, child_b), __init__ calls
+        add() which inserts yoga nodes. The reconciler must detach these from
+        the template before inserting them into the matched node's yoga tree.
+        """
+        parent = BaseRenderable()
+        old_container = BaseRenderable(key="c")
+        parent.add(old_container)
+
+        # Simulate component function creating template with add()-based children
+        new_container = BaseRenderable(key="c")
+        new_child_a = BaseRenderable(key="a")
+        new_child_b = BaseRenderable(key="b")
+        new_container.add(new_child_a)  # yoga node owned by new_container
+        new_container.add(new_child_b)  # yoga node owned by new_container
+
+        # This should NOT raise "Child already has a owner"
+        reconcile(parent, [old_container], [new_container])
+
+        assert old_container._yoga_node.child_count == 2
+        yoga_children = old_container._yoga_node.get_layout_children()
+        assert yoga_children[0] is new_child_a._yoga_node
+        assert yoga_children[1] is new_child_b._yoga_node

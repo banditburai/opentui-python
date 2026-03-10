@@ -152,8 +152,8 @@ class ScrollBar(Renderable):
         if self._auto_hide and not self.should_show:
             return
 
-        w = self._width or 1
-        h = self._height or 1
+        w = self._layout_width or 1
+        h = self._layout_height or 1
 
         if self._orientation == "vertical":
             self._render_vertical(buffer, w, h)
