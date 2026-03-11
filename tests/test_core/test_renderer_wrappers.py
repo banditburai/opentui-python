@@ -1,5 +1,13 @@
 """Tests for new CliRenderer wrapper methods — uses _FakeNative with call recording."""
 
+import select
+import sys
+import termios
+import time
+
+from opentui.components.base import Renderable
+from opentui.events import PasteEvent
+from opentui.hooks import clear_paste_handlers, use_paste
 from opentui.renderer import Buffer, CliRenderer, CliRendererConfig, RootRenderable
 
 
@@ -118,6 +126,35 @@ class TestCliRendererKittyFlags:
 
 
 class TestCliRendererMisc:
+    def test_get_capabilities(self):
+        r, n = _make()
+        n.renderer._set_return(
+            "get_terminal_capabilities",
+            {
+                "kitty_keyboard": True,
+                "kitty_graphics": True,
+                "rgb": True,
+                "unicode": True,
+                "sgr_pixels": False,
+                "color_scheme_updates": True,
+                "explicit_width": False,
+                "scaled_text": False,
+                "sixel": False,
+                "focus_tracking": True,
+                "sync": False,
+                "bracketed_paste": True,
+                "hyperlinks": True,
+                "osc52": True,
+                "explicit_cursor_positioning": True,
+            },
+        )
+
+        caps = r.get_capabilities()
+
+        assert caps.kitty_graphics is True
+        assert caps.term_name == ""
+        assert caps.term_version == ""
+
     def test_set_background_color(self):
         r, n = _make()
         r.set_background_color()
@@ -132,6 +169,89 @@ class TestCliRendererMisc:
         r, n = _make()
         r.query_pixel_resolution()
         assert "query_pixel_resolution" in n.renderer.calls
+
+    def test_get_event_forwarding_collects_paste_handlers(self):
+        r, _ = _make()
+        child = Renderable()
+        child.on_paste = lambda event: None
+        r._root.add(child)
+
+        handlers = r._get_event_forwarding()
+
+        assert len(handlers["paste"]) == 1
+
+    def test_run_registers_tree_and_hook_paste_handlers(self, monkeypatch):
+        class _FakeInputHandler:
+            def __init__(self):
+                self.key_handlers = []
+                self.mouse_handlers = []
+                self.paste_handlers = []
+
+            def on_key(self, handler):
+                self.key_handlers.append(handler)
+
+            def on_mouse(self, handler):
+                self.mouse_handlers.append(handler)
+
+            def on_paste(self, handler):
+                self.paste_handlers.append(handler)
+
+        class _FakeEventLoop:
+            last_instance = None
+
+            def __init__(self, target_fps):
+                self.target_fps = target_fps
+                self.input_handler = _FakeInputHandler()
+                self.frame_callbacks = []
+                type(self).last_instance = self
+
+            def on_frame(self, callback):
+                self.frame_callbacks.append(callback)
+
+            def run(self):
+                return None
+
+        class _FakeStdin:
+            def fileno(self):
+                return 0
+
+        ticks = {"value": -1}
+
+        def _fake_perf_counter():
+            ticks["value"] += 1
+            return ticks["value"] * 0.5
+
+        r, _ = _make()
+        seen = []
+        child = Renderable()
+        child.on_paste = lambda event: seen.append(("tree", event.text))
+        r._root.add(child)
+
+        clear_paste_handlers()
+        use_paste(lambda event: seen.append(("hook", event.text)))
+
+        monkeypatch.setattr("opentui.input.EventLoop", _FakeEventLoop)
+        monkeypatch.setattr(r, "setup", lambda: None)
+        monkeypatch.setattr(r, "_refresh_mouse_tracking", lambda: None)
+        monkeypatch.setattr(r, "_render_frame", lambda dt: None)
+        monkeypatch.setattr(sys, "stdin", _FakeStdin())
+        monkeypatch.setattr(termios, "tcgetattr", lambda fd: [0, 0, 0, 0, 0, 0, 0])
+        monkeypatch.setattr(termios, "tcsetattr", lambda *args: None)
+        monkeypatch.setattr(select, "select", lambda *args: ([], [], []))
+        monkeypatch.setattr(time, "perf_counter", _fake_perf_counter)
+
+        try:
+            r.run()
+            event_loop = _FakeEventLoop.last_instance
+            assert event_loop is not None
+            assert len(event_loop.input_handler.paste_handlers) == 2
+
+            for handler in event_loop.input_handler.paste_handlers:
+                handler(PasteEvent(text="clip"))
+
+            assert seen == [("tree", "clip"), ("hook", "clip")]
+        finally:
+            clear_paste_handlers()
 
 
 class TestBufferGetPlainText:

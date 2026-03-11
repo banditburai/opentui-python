@@ -16,6 +16,18 @@ class MouseButton:
 
 
 @dataclass
+class AttachmentPayload:
+    """Attachment payload carried by paste/drop events."""
+
+    kind: str
+    name: str | None = None
+    mime_type: str | None = None
+    path: str | None = None
+    data: bytes | None = None
+    text: str | None = None
+
+
+@dataclass
 class KeyEvent:
     """Keyboard event.
 
@@ -140,9 +152,11 @@ class PasteEvent:
 
     Attributes:
         text: The pasted text
+        attachments: Structured attachments from a paste/drop payload
     """
 
-    text: str
+    text: str | None = None
+    attachments: list[AttachmentPayload] = field(default_factory=list)
     _propagation_stopped: bool = field(default=False, repr=False)
     _default_prevented: bool = field(default=False, repr=False)
 
@@ -163,7 +177,8 @@ class PasteEvent:
         return self._default_prevented
 
     def __str__(self) -> str:
-        return f"PasteEvent({self.text[:20]!r}...)"
+        text = self.text or ""
+        return f"PasteEvent({text[:20]!r}...)"
 
 
 @dataclass
@@ -234,6 +249,7 @@ class Keys:
 
 
 __all__ = [
+    "AttachmentPayload",
     "KeyEvent",
     "MouseEvent",
     "PasteEvent",

@@ -35,6 +35,7 @@ from .components import (
     Code,
     Diff,
     FrameBuffer,
+    Image,
     Input,
     Italic,
     LayoutOptions,
@@ -73,6 +74,7 @@ from .edit_buffer import (
 
 # Events
 from .events import (
+    AttachmentPayload,
     FocusEvent,
     KeyEvent,
     Keys,
@@ -95,6 +97,16 @@ from .filters import (
     SepiaFilter,
     ClipboardHandler,
 )
+
+# Image model
+from .image import (
+    DecodedImage,
+    ImageFit,
+    ImageProtocol,
+    ImageSource,
+)
+from .image_loader import load_image, load_svg
+from .attachments import detect_dropped_paths, normalize_paste_payload
 
 # Hooks
 from .hooks import (
@@ -421,6 +433,7 @@ __all__ = [
     "Select",
     "SelectOption",
     "FrameBuffer",
+    "Image",
     "TextNode",
     "TextStyle",
     "StyledChunk",
@@ -447,6 +460,7 @@ __all__ = [
     "KeyEvent",
     "MouseEvent",
     "MouseButton",
+    "AttachmentPayload",
     "PasteEvent",
     "FocusEvent",
     "ResizeEvent",
@@ -470,6 +484,14 @@ __all__ = [
     # Filters
     "ImageRenderer",
     "ClipboardHandler",
+    "ImageProtocol",
+    "ImageFit",
+    "ImageSource",
+    "DecodedImage",
+    "load_image",
+    "load_svg",
+    "detect_dropped_paths",
+    "normalize_paste_payload",
     "Filter",
     "GrayscaleFilter",
     "BlurFilter",

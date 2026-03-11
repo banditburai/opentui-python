@@ -566,8 +566,8 @@ class CliRenderer:
             hyperlinks=caps_dict.get("hyperlinks", False),
             osc52=caps_dict.get("osc52", False),
             explicit_cursor_positioning=caps_dict.get("explicit_cursor_positioning", False),
-            term_name="",
-            term_version="",
+            term_name=caps_dict.get("term_name", ""),
+            term_version=caps_dict.get("term_version", ""),
         )
 
     def get_next_buffer(self) -> Buffer:
@@ -666,9 +666,15 @@ class CliRenderer:
             if event_type == "key":
                 for handler in handlers:
                     input_handler.on_key(handler)
+            elif event_type == "paste":
+                for handler in handlers:
+                    input_handler.on_paste(handler)
 
         for handler in hooks.get_keyboard_handlers():
             input_handler.on_key(handler)
+
+        for handler in hooks.get_paste_handlers():
+            input_handler.on_paste(handler)
 
         input_handler.on_mouse(self._dispatch_mouse_event)
 
@@ -873,6 +879,13 @@ class CliRenderer:
             handler = renderable._on_key_down
             if handler is not None:
                 handlers["key"].append(handler)
+        except AttributeError:
+            pass
+
+        try:
+            handler = renderable._on_paste
+            if handler is not None:
+                handlers["paste"].append(handler)
         except AttributeError:
             pass
 

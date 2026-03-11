@@ -1,5 +1,6 @@
 #include <nanobind/nanobind.h>
 #include <cstdint>
+#include <cstddef>
 #include <cstring>
 
 namespace nb = nanobind;
@@ -126,6 +127,11 @@ void bind_renderer(nb::module_& m) {
             bool hyperlinks;
             bool osc52;
             bool explicit_cursor_positioning;
+            const char* term_name_ptr;
+            size_t term_name_len;
+            const char* term_version_ptr;
+            size_t term_version_len;
+            bool term_from_xtversion;
         } caps;
         
         // Call the C function - it fills the struct in place

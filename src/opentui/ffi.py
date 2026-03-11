@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import importlib
 import importlib.util
+import ctypes
 import os
+import site
+import sys
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -15,27 +17,84 @@ _NATIVE_AVAILABLE = False
 _native_module: Any = None
 
 
+def _iter_binding_search_dirs() -> list[str]:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    package_dir = os.path.dirname(current_dir)
+
+    dirs: list[str] = [current_dir]
+
+    seen = set(dirs)
+    for base in site.getsitepackages():
+        candidate = os.path.join(base, "opentui")
+        if candidate not in seen:
+            dirs.append(candidate)
+            seen.add(candidate)
+
+    for base in sys.path:
+        if not base:
+            continue
+        candidate = os.path.join(base, "opentui")
+        if candidate not in seen:
+            dirs.append(candidate)
+            seen.add(candidate)
+
+    sibling = os.path.join(package_dir, "opentui_bindings")
+    if sibling not in seen:
+        dirs.append(sibling)
+
+    return dirs
+
+
+def _preload_opentui_library() -> None:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    package_dir = os.path.dirname(current_dir)
+    candidates = [
+        os.path.join(current_dir, "opentui-libs", "libopentui.dylib"),
+        os.path.join(package_dir, "opentui", "opentui-libs", "libopentui.dylib"),
+    ]
+
+    for so_dir in _iter_binding_search_dirs():
+        candidates.append(os.path.join(so_dir, "opentui-libs", "libopentui.dylib"))
+
+    for candidate in candidates:
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            ctypes.CDLL(candidate, mode=ctypes.RTLD_GLOBAL)
+            return
+        except OSError:
+            continue
+
+
 def _try_load_nanobind() -> None:
     """Try to load nanobind bindings from various locations."""
     global _NATIVE_AVAILABLE, _native_module
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    package_dir = os.path.dirname(current_dir)
-    bindings_dir = os.path.join(package_dir, "opentui_bindings")
+    existing = sys.modules.get("opentui_bindings")
+    if existing is not None:
+        _native_module = existing
+        _NATIVE_AVAILABLE = True
+        return
 
-    if os.path.isdir(bindings_dir):
+    _preload_opentui_library()
+
+    for bindings_dir in _iter_binding_search_dirs():
+        if not os.path.isdir(bindings_dir):
+            continue
         for f in os.listdir(bindings_dir):
-            if f.endswith(".so"):
-                so_file = os.path.join(bindings_dir, f)
-                try:
-                    spec = importlib.util.spec_from_file_location("opentui_bindings", so_file)
-                    if spec and spec.loader:
-                        _native_module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(_native_module)
-                        _NATIVE_AVAILABLE = True
-                        return
-                except Exception:
-                    pass
+            if not (f.startswith("opentui_bindings") and f.endswith((".so", ".pyd"))):
+                continue
+            so_file = os.path.join(bindings_dir, f)
+            try:
+                spec = importlib.util.spec_from_file_location("opentui_bindings", so_file)
+                if spec and spec.loader:
+                    _native_module = importlib.util.module_from_spec(spec)
+                    sys.modules["opentui_bindings"] = _native_module
+                    spec.loader.exec_module(_native_module)
+                    _NATIVE_AVAILABLE = True
+                    return
+            except Exception:
+                continue
 
 
 _try_load_nanobind()

@@ -180,8 +180,11 @@ class MockInput:
 
     def paste_text(self, text: str) -> None:
         """Dispatch text to paste handlers."""
+        from .attachments import normalize_paste_payload
+
+        event = normalize_paste_payload(text)
         for handler in hooks.get_paste_handlers():
-            handler(text)
+            handler(event)
 
 
 # ---------------------------------------------------------------------------

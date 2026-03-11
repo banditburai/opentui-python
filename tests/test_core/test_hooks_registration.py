@@ -58,20 +58,20 @@ class TestPasteHandlers:
         clear_paste_handlers()
 
     def test_register_and_get(self):
-        handler = lambda text: None
+        handler = lambda event: None
         use_paste(handler)
         handlers = get_paste_handlers()
         assert len(handlers) == 1
         assert handlers[0] is handler
 
     def test_clear_removes_all(self):
-        use_paste(lambda t: None)
-        use_paste(lambda t: None)
+        use_paste(lambda event: None)
+        use_paste(lambda event: None)
         clear_paste_handlers()
         assert get_paste_handlers() == []
 
     def test_get_returns_copy(self):
-        use_paste(lambda t: None)
+        use_paste(lambda event: None)
         h1 = get_paste_handlers()
         h2 = get_paste_handlers()
         assert h1 is not h2

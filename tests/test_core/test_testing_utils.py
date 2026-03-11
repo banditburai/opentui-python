@@ -3,7 +3,7 @@
 import pytest
 
 from opentui.components.base import BaseRenderable, Renderable
-from opentui.events import KeyEvent, Keys, MouseButton
+from opentui.events import KeyEvent, Keys, MouseButton, PasteEvent
 from opentui.hooks import (
     clear_keyboard_handlers,
     clear_paste_handlers,
@@ -196,9 +196,11 @@ class TestMockInputPaste:
         setup, _ = _make_setup()
         mi = MockInput(setup)
         received = []
-        use_paste(lambda text: received.append(text))
+        use_paste(lambda event: received.append(event))
         mi.paste_text("clipboard data")
-        assert received == ["clipboard data"]
+        assert len(received) == 1
+        assert isinstance(received[0], PasteEvent)
+        assert received[0].text == "clipboard data"
 
 
 # ---------------------------------------------------------------------------

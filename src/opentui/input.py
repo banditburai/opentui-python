@@ -6,18 +6,23 @@ This module handles reading and parsing terminal input events
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import select
 import sys
 import termios
 import tty
-import logging
 from collections.abc import Callable
 from typing import Any
 
+from .attachments import normalize_paste_payload
 from .events import KeyEvent, MouseButton, MouseEvent, PasteEvent
 
 _log = logging.getLogger(__name__)
+_BRACKETED_PASTE_END = "\x1b[201~"
+_MODIFY_OTHER_KEYS_RE = re.compile(r"^27;(\d+);(\d+)~$")
+_KITTY_KEY_RE = re.compile(r"^(\d+)(?::[\d:]+)?(?:;(\d+)(?::(\d+))?(?:;[\d:]+)?)?u$")
 
 
 def _decode_wheel(button_code: int) -> tuple[int, int, str] | None:
@@ -43,6 +48,8 @@ class InputHandler:
         self._key_handlers: list[Callable[[KeyEvent], None]] = []
         self._mouse_handlers: list[Callable[[MouseEvent], None]] = []
         self._paste_handlers: list[Callable[[PasteEvent], None]] = []
+        self._in_bracketed_paste = False
+        self._bracketed_paste_buffer = ""
         self._running = False
 
     def _read_char(self) -> str:
@@ -105,11 +112,19 @@ class InputHandler:
             if not char:
                 return False
 
+            if self._in_bracketed_paste:
+                self._consume_bracketed_paste_char(char)
+                return True
+
             # Check for escape sequences
             if char == "\x1b":  # ESC
                 return self._handle_escape()
-            elif char == "\r" or char == "\n":
+            elif char == "\r":
                 self._emit_key("return", char)
+            elif char == "\n":
+                # Many terminals emit LF for Shift+Enter while plain Enter
+                # remains CR, so preserve that distinction for multiline input.
+                self._emit_key("return", char, shift=True)
             elif char == "\t":
                 self._emit_key("tab", char)
             elif char == "\x7f":  # DEL
@@ -142,6 +157,11 @@ class InputHandler:
         elif char == "P":
             # DCS (Device Control String) — e.g. Ghostty's `\x1bP>|ghostty 1.3.0\x1b\\`
             # Consume until ST (String Terminator: \x1b\\ or \x9c)
+            self._consume_until_st()
+            return True
+        elif char == "_":
+            # APC (Application Program Command) — Kitty graphics replies use
+            # `\x1b_Gi=...;OK\x1b\\` and should be consumed silently.
             self._consume_until_st()
             return True
         elif char == "]":
@@ -181,6 +201,14 @@ class InputHandler:
             if char.isalpha() or char == "~":
                 break
 
+        return self._dispatch_csi_sequence(seq)
+
+    def _dispatch_csi_sequence(self, seq: str) -> bool:
+        """Parse and dispatch a completed CSI sequence."""
+        if seq == "200~":
+            self._begin_bracketed_paste()
+            return True
+
         # SGR mouse protocol: \x1b[<button;x;y;M (press) or m (release)
         if seq.startswith("<") and (seq.endswith("M") or seq.endswith("m")):
             _log.debug("input csi sgr mouse seq=%r", seq)
@@ -192,6 +220,11 @@ class InputHandler:
         if ";" in seq and (seq.endswith("M") or seq.endswith("m")):
             _log.debug("input csi rxvt mouse seq=%r", seq)
             return self._handle_rxvt_mouse(seq)
+
+        if self._handle_modify_other_keys(seq):
+            return True
+        if self._handle_kitty_keyboard(seq):
+            return True
 
         # Parse CSI sequence
         if seq == "A":
@@ -229,6 +262,73 @@ class InputHandler:
             _log.debug("input unknown csi seq=%r", seq)
             self._emit_key(f"unknown-{seq}", f"\x1b[{seq}")
 
+        return True
+
+    def _begin_bracketed_paste(self) -> None:
+        """Start accumulating a bracketed paste payload."""
+        self._in_bracketed_paste = True
+        self._bracketed_paste_buffer = ""
+
+    def _consume_bracketed_paste_char(self, char: str) -> None:
+        """Accumulate bracketed paste bytes until the terminator arrives."""
+        self._bracketed_paste_buffer += char
+        if self._bracketed_paste_buffer.endswith(_BRACKETED_PASTE_END):
+            text = self._bracketed_paste_buffer[: -len(_BRACKETED_PASTE_END)]
+            self._bracketed_paste_buffer = ""
+            self._in_bracketed_paste = False
+            self._emit_paste(text)
+
+    def _handle_modify_other_keys(self, seq: str) -> bool:
+        """Handle modifyOtherKeys CSI sequences for modified keys like Shift+Enter."""
+        match = _MODIFY_OTHER_KEYS_RE.match(seq)
+        if match is None:
+            return False
+
+        modifier = int(match.group(1)) - 1
+        char_code = int(match.group(2))
+        ctrl = bool(modifier & 4)
+        alt = bool(modifier & 2)
+        shift = bool(modifier & 1)
+        meta = bool(modifier & 8)
+
+        key = _char_code_to_key(char_code)
+        self._emit_key(key, f"\x1b[{seq}", ctrl=ctrl, shift=shift, alt=alt, meta=meta)
+        return True
+
+    def _handle_kitty_keyboard(self, seq: str) -> bool:
+        """Handle kitty keyboard CSI-u sequences such as Shift+Enter."""
+        match = _KITTY_KEY_RE.match(seq)
+        if match is None:
+            return False
+
+        key_code = int(match.group(1))
+        modifier_mask = int(match.group(2) or "1")
+        event_type = match.group(3) or "1"
+        modifier = modifier_mask - 1
+        shift = bool(modifier & 1)
+        alt = bool(modifier & 2)
+        ctrl = bool(modifier & 4)
+        meta = bool(modifier & 32)
+
+        key = _char_code_to_key(key_code)
+        repeated = event_type == "2"
+        event_kind = "release" if event_type == "3" else "press"
+
+        event = KeyEvent(
+            key=key,
+            code=f"\x1b[{seq}",
+            ctrl=ctrl,
+            shift=shift,
+            alt=alt,
+            meta=meta,
+            repeated=repeated,
+            event_type=event_kind,
+        )
+
+        for handler in self._key_handlers:
+            handler(event)
+            if event.propagation_stopped:
+                break
         return True
 
     def _handle_sgr_mouse(self, seq: str) -> bool:
@@ -406,7 +506,7 @@ class InputHandler:
 
     def _emit_paste(self, text: str) -> None:
         """Emit a paste event."""
-        event = PasteEvent(text=text)
+        event = normalize_paste_payload(text)
         for handler in self._paste_handlers:
             handler(event)
             if event.propagation_stopped:
@@ -426,6 +526,21 @@ def _csi_num_to_key(num: int) -> str:
         8: "end",
     }
     return mapping.get(num, f"unknown-{num}")
+
+
+def _char_code_to_key(char_code: int) -> str:
+    """Convert a modifyOtherKeys character code into an OpenTUI key name."""
+    mapping = {
+        8: "backspace",
+        9: "tab",
+        13: "return",
+        27: "escape",
+        32: "space",
+        127: "backspace",
+    }
+    if char_code in mapping:
+        return mapping[char_code]
+    return chr(char_code)
 
 
 _RESIZE_DEBOUNCE = 0.10  # seconds — matches OpenCode's resizeDebounceDelay
@@ -547,6 +662,12 @@ class EventLoop:
         # Notify the renderer (if accessible via hooks)
         try:
             renderer = hooks.use_renderer()
+            try:
+                from .filters import _clear_kitty_graphics
+
+                renderer.write_out(_clear_kitty_graphics(None))
+            except Exception:
+                pass
             renderer.resize(cols, lines)
             # Update root renderable dimensions
             if renderer._root is not None:

@@ -10,10 +10,27 @@ from __future__ import annotations
 
 import io
 import math
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .renderer import Buffer, TerminalCapabilities
+
+
+_ASCII_RAMP = " .:-=+*#%@"
+
+
+def _encode_png_from_rgba(data: bytes, width: int, height: int) -> bytes:
+    """Encode RGBA bytes as PNG for Kitty graphics."""
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise ImportError("Pillow required for Kitty PNG encoding") from exc
+
+    image = Image.frombytes("RGBA", (width, height), data)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
 
 
 class ImageRenderer:
@@ -107,6 +124,7 @@ class ImageRenderer:
         height: int,
         transmission: str = "direct",
         frame: int = 0,
+        graphics_id: int | None = None,
     ) -> bool:
         """Draw Kitty graphics protocol image.
 
@@ -136,13 +154,19 @@ class ImageRenderer:
 
         try:
             # Generate unique chunk ID for this image
-            chunk_id = self.get_next_graphics_id()
+            chunk_id = graphics_id if graphics_id is not None else self.get_next_graphics_id()
 
             # Encode data for Kitty protocol
             chunks = _encode_kitty(data, chunk_id, width, height, x, y, transmission)
 
             stdout = self._get_stdout()
-            for chunk in chunks:
+            wrapped_chunks = _wrap_kitty_for_transport(chunks)
+            output_chunks = wrapped_chunks if wrapped_chunks is not None else chunks
+            for chunk in output_chunks:
+                # Position the cursor before the first chunk so terminals place the image
+                # at the intended cell origin.
+                if chunk is output_chunks[0]:
+                    stdout.write(f"\x1b[{y + 1};{x + 1}H".encode())
                 stdout.write(chunk)
                 stdout.flush()
 
@@ -173,7 +197,29 @@ class ImageRenderer:
         Returns:
             True if drawn
         """
-        return False
+        if not hasattr(self._buffer, "draw_text"):
+            return False
+        if width <= 0 or height <= 0:
+            return False
+
+        expected = width * height * 4
+        if len(data) < expected:
+            return False
+
+        try:
+            for row in range(height):
+                chars: list[str] = []
+                for col in range(width):
+                    idx = (row * width + col) * 4
+                    r, g, b, a = data[idx : idx + 4]
+                    luminance = ((r * 299) + (g * 587) + (b * 114)) // 1000
+                    luminance = (luminance * a) // 255
+                    ramp_idx = min(len(_ASCII_RAMP) - 1, luminance * (len(_ASCII_RAMP) - 1) // 255)
+                    chars.append(_ASCII_RAMP[ramp_idx])
+                self._buffer.draw_text("".join(chars), x, y + row)
+            return True
+        except Exception:
+            return False
 
     def clear_graphics(self, graphics_id: int | None = None) -> None:
         """Clear graphics from screen.
@@ -207,6 +253,9 @@ class ImageRenderer:
         width: int,
         height: int,
         format: str = "RGBA",
+        graphics_id: int | None = None,
+        source_width: int | None = None,
+        source_height: int | None = None,
     ) -> bool:
         """Draw an image using native libopentui functions.
 
@@ -224,25 +273,43 @@ class ImageRenderer:
             True if successful, False if terminal doesn't support graphics
         """
         if not (self._caps.sixel or self._caps.kitty_graphics):
-            return False
+            return self.draw_image_plain(data, x, y, width, height)
+
+        if self._caps.sixel:
+            return self.draw_sixel(data, x, y, width, height)
+
+        if self._caps.kitty_graphics:
+            try:
+                png_data = _encode_png_from_rgba(
+                    data,
+                    source_width if source_width is not None else width,
+                    source_height if source_height is not None else height,
+                )
+            except Exception:
+                return self.draw_image_plain(data, x, y, width, height)
+            if graphics_id is None:
+                return self.draw_kitty(png_data, x, y, width, height)
+            return self.draw_kitty(png_data, x, y, width, height, graphics_id=graphics_id)
 
         if self._native is None:
-            return False
+            return self.draw_image_plain(data, x, y, width, height)
 
         try:
             packed_data, pitch = _convert_to_packed(data, width, height)
 
-            self._native.buffer_draw_packed_buffer(
-                self._buffer._ptr,
-                packed_data,
-                width,
-                height,
-                pitch,
-                1,  # cell_height
-            )
-            return True
+            if x == 0 and y == 0:
+                self._native.buffer_draw_packed_buffer(
+                    self._buffer._ptr,
+                    packed_data,
+                    width,
+                    height,
+                    pitch,
+                    1,  # cell_height
+                )
+                return True
+            return self.draw_image_plain(data, x, y, width, height)
         except Exception:
-            return False
+            return self.draw_image_plain(data, x, y, width, height)
 
     def draw_grayscale(
         self,
@@ -527,23 +594,15 @@ def _encode_kitty(
         List of escape sequence chunks to send
     """
     import base64
-    import zlib
 
-    # Compress data for smaller transmission
-    try:
-        compressed = zlib.compress(data, 9)
-    except Exception:
-        compressed = data
-
-    # Base64 encode
-    encoded = base64.b64encode(compressed)
+    # Kitty direct/file payloads are already encoded image bytes here (PNG for the
+    # current draw path). Recompressing them requires protocol flags we were not
+    # sending, which makes terminals reject the payload as invalid data.
+    encoded = base64.b64encode(data)
 
     # Split into chunks (max ~4096 bytes per chunk for Kitty)
     CHUNK_SIZE = 4000
     chunks: list[bytes] = []
-
-    # Determine if we need large or small dimension encoding
-    use_large = width > 4095 or height > 4095 or len(encoded) > 100000
 
     num_chunks = (len(encoded) + CHUNK_SIZE - 1) // CHUNK_SIZE
 
@@ -554,25 +613,19 @@ def _encode_kitty(
 
         if transmission == "file":
             # File transfer mode
-            header = f"{chunk_id};{i + 1};{num_chunks}".encode()
-            chunk = b"\x1b[_Gf" + header + b";" + chunk_data + b"\x1b\\"
+            more = 0 if is_last else 1
+            header = f"\x1b_Gi={chunk_id},a=T,t=f,m={more};".encode()
+            chunk = header + chunk_data + b"\x1b\\"
         else:
-            # Inline mode - small format (s) or large format (m)
             if is_first:
-                if use_large:
-                    # Large format: m = medium (32-bit dims)
-                    header = f"{chunk_id};{width};{height};{x};{y}".encode()
-                    chunk = b"\x1b[_Gm" + header + b";" + chunk_data
-                else:
-                    # Small format: s = small (16-bit dims)
-                    header = f"{chunk_id};{width};{height};{x};{y}".encode()
-                    chunk = b"\x1b[_Gs" + header + b";" + chunk_data
-            elif is_last:
-                # Last chunk - include terminator
-                chunk = chunk_data + b"\x1b\\"
+                more = 0 if is_last else 1
+                header = (
+                    f"\x1b_Gi={chunk_id},a=T,t=d,f=100,c={width},r={height},m={more};".encode()
+                )
+                chunk = header + chunk_data + b"\x1b\\"
             else:
-                # Continuation chunk - just data
-                chunk = chunk_data
+                more = 0 if is_last else 1
+                chunk = f"\x1b_Gm={more};".encode() + chunk_data + b"\x1b\\"
 
         chunks.append(chunk)
 
@@ -589,9 +642,29 @@ def _clear_kitty_graphics(graphics_id: int | None = None) -> bytes:
         Escape sequence bytes
     """
     if graphics_id is not None:
-        return f"\x1b[_Ga{graphics_id}\x1b\\".encode()
+        return f"\x1b_Ga=d,d=I,i={graphics_id}\x1b\\".encode()
     else:
-        return b"\x1b[_Ga\x1b\\"
+        return b"\x1b_Ga=d,d=A\x1b\\"
+
+
+def _wrap_kitty_for_transport(chunks: list[bytes]) -> list[bytes] | None:
+    """Wrap Kitty APC sequences for tmux/screen passthrough when needed."""
+    tmux = os.environ.get("TMUX")
+    if tmux:
+        wrapped: list[bytes] = []
+        for chunk in chunks:
+            doubled = chunk.replace(b"\x1b", b"\x1b\x1b")
+            wrapped.append(b"\x1bPtmux;" + doubled + b"\x1b\\")
+        return wrapped
+
+    if os.environ.get("STY"):
+        wrapped = []
+        for chunk in chunks:
+            doubled = chunk.replace(b"\x1b", b"\x1b\x1b")
+            wrapped.append(b"\x1bP" + doubled + b"\x1b\\")
+        return wrapped
+
+    return None
 
 
 class ClipboardHandler:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from ..events import MouseButton, MouseEvent
 from .base import Renderable
 
 if TYPE_CHECKING:
@@ -34,6 +35,7 @@ class ScrollBar(Renderable):
         total_items: int = 0,
         visible_items: int = 0,
         position: int = 0,
+        position_fn: Callable[[], int] | None = None,
         on_scroll: Callable[[int], None] | None = None,
         auto_hide: bool = True,
         # Arrow characters
@@ -51,6 +53,7 @@ class ScrollBar(Renderable):
         self._total_items = total_items
         self._visible_items = visible_items
         self._position = position
+        self._position_fn = position_fn
         self._on_scroll = on_scroll
         self._auto_hide = auto_hide
         self._arrow_up = arrow_up
@@ -60,6 +63,12 @@ class ScrollBar(Renderable):
         self._track_char = track_char
         self._slider_char = slider_char
         self._focusable = True
+        self._dragging_slider = False
+        self._drag_anchor = 0
+        self.on_mouse_down = self._handle_mouse_down
+        self.on_mouse_drag = self._handle_mouse_drag
+        self.on_mouse_up = self._handle_mouse_up
+        self.on_mouse_drag_end = self._handle_mouse_up
 
     @property
     def orientation(self) -> str:
@@ -139,11 +148,131 @@ class ScrollBar(Renderable):
 
         max_pos = self._total_items - self._visible_items
         if max_pos > 0:
-            slider_start = int((track_length - slider_size) * self._position / max_pos)
+            slider_start = int((track_length - slider_size) * self._effective_position() / max_pos)
         else:
             slider_start = 0
 
         return slider_start, slider_size
+
+    def _max_position(self) -> int:
+        return max(0, self._total_items - self._visible_items)
+
+    def _effective_position(self) -> int:
+        if self._position_fn is not None:
+            return max(0, min(int(self._position_fn()), self._max_position()))
+        return self._position
+
+    def _track_hit_info(self, event: MouseEvent) -> tuple[int, int, int] | None:
+        if not self.contains_point(event.x, event.y):
+            return None
+        if self._auto_hide and not self.should_show:
+            return None
+
+        if self._orientation == "vertical":
+            height = self._layout_height or 1
+            if height < 3:
+                return None
+            track_length = height - 2
+            track_index = event.y - self._y - 1
+        else:
+            width = self._layout_width or 1
+            if width < 3:
+                return None
+            track_length = width - 2
+            track_index = event.x - self._x - 1
+
+        slider_start, slider_size = self._get_slider_info(track_length)
+        return track_index, slider_start, slider_size
+
+    def _position_from_track(self, track_start: int, track_length: int, slider_size: int) -> int:
+        max_pos = self._max_position()
+        if max_pos <= 0:
+            return 0
+        available_track = max(0, track_length - slider_size)
+        if available_track <= 0:
+            return 0
+        clamped_start = max(0, min(track_start, available_track))
+        return round(clamped_start * max_pos / available_track)
+
+    def _handle_mouse_down(self, event: MouseEvent) -> None:
+        """Handle mouse presses on arrows, track, and slider thumb."""
+        if event.button != MouseButton.LEFT:
+            return
+        if not self.contains_point(event.x, event.y):
+            return
+        if self._auto_hide and not self.should_show:
+            return
+
+        if self._orientation == "vertical":
+            height = self._layout_height or 1
+            if height < 3:
+                return
+            if event.y == self._y:
+                self.scroll_by(-1)
+                event.stop_propagation()
+                return
+            if event.y == self._y + height - 1:
+                self.scroll_by(1)
+                event.stop_propagation()
+                return
+            track_length = height - 2
+        else:
+            width = self._layout_width or 1
+            if width < 3:
+                return
+            if event.x == self._x:
+                self.scroll_by(-1)
+                event.stop_propagation()
+                return
+            if event.x == self._x + width - 1:
+                self.scroll_by(1)
+                event.stop_propagation()
+                return
+            track_length = width - 2
+
+        hit = self._track_hit_info(event)
+        if hit is None:
+            return
+        track_index, slider_start, slider_size = hit
+        if track_index < slider_start:
+            self.scroll_page_up()
+        elif track_index >= slider_start + slider_size:
+            self.scroll_page_down()
+        else:
+            self._dragging_slider = True
+            self._drag_anchor = track_index - slider_start
+        event.stop_propagation()
+
+    def _handle_mouse_drag(self, event: MouseEvent) -> None:
+        """Drag the scrollbar thumb while the left mouse button is held."""
+        if not self._dragging_slider or not event.is_dragging:
+            return
+        if self._auto_hide and not self.should_show:
+            return
+
+        if self._orientation == "vertical":
+            height = self._layout_height or 1
+            if height < 3:
+                return
+            track_length = height - 2
+            track_index = event.y - self._y - 1
+        else:
+            width = self._layout_width or 1
+            if width < 3:
+                return
+            track_length = width - 2
+            track_index = event.x - self._x - 1
+
+        _, slider_size = self._get_slider_info(track_length)
+        track_start = track_index - self._drag_anchor
+        self.scroll_to(self._position_from_track(track_start, track_length, slider_size))
+        event.stop_propagation()
+
+    def _handle_mouse_up(self, event: MouseEvent) -> None:
+        """End any active scrollbar drag."""
+        if self._dragging_slider:
+            self._dragging_slider = False
+            event.stop_propagation()
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         """Render the scrollbar to the buffer."""
@@ -151,6 +280,9 @@ class ScrollBar(Renderable):
             return
         if self._auto_hide and not self.should_show:
             return
+
+        if self._position_fn is not None:
+            self._position = self._effective_position()
 
         w = self._layout_width or 1
         h = self._layout_height or 1

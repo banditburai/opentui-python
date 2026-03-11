@@ -1,5 +1,9 @@
 """Tests for ScrollBar component."""
 
+import asyncio
+
+from opentui import test_render as render_for_test
+from opentui.events import MouseButton, MouseEvent
 from opentui.components.scrollbar import ScrollBar
 
 
@@ -134,3 +138,99 @@ class TestScrollBar:
     def test_orientation_property(self):
         sb = ScrollBar(orientation="horizontal")
         assert sb.orientation == "horizontal"
+
+    def test_position_fn_updates_rendered_position(self):
+        current = 0
+        sb = ScrollBar(total_items=100, visible_items=20, position_fn=lambda: current, auto_hide=False)
+        sb._layout_width = 1
+        sb._layout_height = 10
+        sb._x = 0
+        sb._y = 0
+
+        class _Buffer:
+            def draw_text(self, *_args, **_kwargs):
+                return None
+
+        current = 35
+        sb.render(_Buffer())
+        assert sb.position == 35
+
+    def test_mouse_down_on_vertical_arrows_scrolls(self):
+        sb = ScrollBar(total_items=100, visible_items=20, position=10, auto_hide=False)
+        sb._x = 5
+        sb._y = 3
+        sb._layout_width = 1
+        sb._layout_height = 10
+
+        sb.on_mouse_down(MouseEvent(type="down", x=5, y=3, button=MouseButton.LEFT))
+        assert sb.position == 9
+
+        sb.on_mouse_down(MouseEvent(type="down", x=5, y=12, button=MouseButton.LEFT))
+        assert sb.position == 10
+
+    def test_mouse_down_on_track_pages(self):
+        sb = ScrollBar(total_items=100, visible_items=20, position=40, auto_hide=False)
+        sb._x = 0
+        sb._y = 0
+        sb._layout_width = 1
+        sb._layout_height = 12
+
+        sb.on_mouse_down(MouseEvent(type="down", x=0, y=1, button=MouseButton.LEFT))
+        assert sb.position == 20
+
+        sb.on_mouse_down(MouseEvent(type="down", x=0, y=10, button=MouseButton.LEFT))
+        assert sb.position == 40
+
+    def test_mouse_drag_vertical_slider_updates_position(self):
+        sb = ScrollBar(total_items=100, visible_items=20, position=20, auto_hide=False)
+        sb._x = 4
+        sb._y = 2
+        sb._layout_width = 1
+        sb._layout_height = 12
+
+        sb.on_mouse_down(MouseEvent(type="down", x=4, y=5, button=MouseButton.LEFT))
+        assert sb._dragging_slider is True
+
+        sb.on_mouse_drag(MouseEvent(type="drag", x=4, y=9, is_dragging=True))
+        assert sb.position > 20
+
+        sb.on_mouse_up(MouseEvent(type="up", x=4, y=9, button=MouseButton.LEFT))
+        assert sb._dragging_slider is False
+
+    def test_mouse_drag_horizontal_slider_updates_position(self):
+        sb = ScrollBar(orientation="horizontal", total_items=100, visible_items=20, position=20, auto_hide=False)
+        sb._x = 2
+        sb._y = 4
+        sb._layout_width = 12
+        sb._layout_height = 1
+
+        sb.on_mouse_down(MouseEvent(type="down", x=5, y=4, button=MouseButton.LEFT))
+        assert sb._dragging_slider is True
+
+        sb.on_mouse_drag(MouseEvent(type="drag", x=9, y=4, is_dragging=True))
+        assert sb.position > 20
+
+        sb.on_mouse_up(MouseEvent(type="up", x=9, y=4, button=MouseButton.LEFT))
+        assert sb._dragging_slider is False
+
+
+def test_renderer_dispatch_drag_reaches_scrollbar():
+    async def run_test():
+        setup = await render_for_test(
+            lambda: ScrollBar(total_items=100, visible_items=20, position=20, auto_hide=False, width=1, height=12),
+            {"width": 5, "height": 15},
+        )
+        setup.render_frame()
+
+        scrollbar = setup.renderer.root.get_children()[0]
+        start = scrollbar.position
+
+        setup.renderer._dispatch_mouse_event(MouseEvent(type="down", x=0, y=3, button=MouseButton.LEFT))
+        setup.renderer._dispatch_mouse_event(MouseEvent(type="drag", x=0, y=8, button=MouseButton.LEFT, is_dragging=True))
+        setup.renderer._dispatch_mouse_event(MouseEvent(type="up", x=0, y=8, button=MouseButton.LEFT))
+
+        assert scrollbar.position > start
+        assert scrollbar._dragging_slider is False
+        setup.destroy()
+
+    asyncio.run(run_test())

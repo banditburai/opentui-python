@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from .signals import Signal
 
 if TYPE_CHECKING:
-    from .events import KeyEvent, MouseEvent
+    from .events import KeyEvent, MouseEvent, PasteEvent
     from .renderer import CliRenderer
 
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 _current_renderer: CliRenderer | None = None
 _keyboard_handlers: list[Callable[[KeyEvent], None]] = []
 _mouse_handlers: list[Callable[[MouseEvent], None]] = []
-_paste_handlers: list[Callable[[str], None]] = []
+_paste_handlers: list[Callable[[PasteEvent], None]] = []
 _resize_handlers: list[Callable[[int, int], None]] = []
 _selection_handlers: list[Callable[[Any], None]] = []
 _terminal_dimensions = Signal("terminal_dimensions", (80, 24))
@@ -44,7 +44,7 @@ def clear_keyboard_handlers() -> None:
     _keyboard_handlers.clear()
 
 
-def get_paste_handlers() -> list[Callable[[str], None]]:
+def get_paste_handlers() -> list[Callable[[PasteEvent], None]]:
     """Get all registered paste handlers."""
     return _paste_handlers.copy()
 
@@ -198,15 +198,15 @@ def clear_mouse_handlers() -> None:
     _mouse_handlers.clear()
 
 
-def use_paste(callback: Callable[[str], None]) -> None:
+def use_paste(callback: Callable[[PasteEvent], None]) -> None:
     """Subscribe to paste events.
 
     Args:
-        callback: Called with pasted text
+        callback: Called with a structured paste event
 
     Usage:
-        def on_paste(text):
-            print(f"Pasted: {text}")
+        def on_paste(event):
+            print(f"Pasted: {event.text}")
 
         use_paste(on_paste)
     """

@@ -1,6 +1,6 @@
 """Tests for event types."""
 
-from opentui.events import KeyEvent, MouseEvent, PasteEvent, FocusEvent, ResizeEvent, Keys
+from opentui.events import AttachmentPayload, FocusEvent, KeyEvent, Keys, MouseEvent, PasteEvent, ResizeEvent
 
 
 class TestKeyEvent:
@@ -63,11 +63,17 @@ class TestPasteEvent:
     def test_text(self):
         e = PasteEvent(text="hello")
         assert e.text == "hello"
+        assert e.attachments == []
 
     def test_stop_propagation(self):
         e = PasteEvent(text="x")
         e.stop_propagation()
         assert e.propagation_stopped is True
+
+    def test_attachments(self):
+        e = PasteEvent(attachments=[AttachmentPayload(kind="image", mime_type="image/png", data=b"png")])
+        assert len(e.attachments) == 1
+        assert e.attachments[0].kind == "image"
 
 
 class TestFocusEvent:

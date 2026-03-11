@@ -15,6 +15,7 @@ from .box import Box, LinearScrollAccel, MacOSScrollAccel, ScrollBox
 from .composition import VRenderable
 from .control_flow import For, Match, Show, Switch
 from .framebuffer import FrameBuffer
+from .image import Image
 from .input import Input, Select, SelectOption, Textarea
 from .scrollbar import ScrollBar
 from .text import Bold, Italic, LineBreak, Link, Span, Text, TextModifier, Underline
@@ -62,6 +63,7 @@ __all__ = [
     # New components
     "ScrollBar",
     "FrameBuffer",
+    "Image",
     "TextNode",
     "TextStyle",
     "StyledChunk",
