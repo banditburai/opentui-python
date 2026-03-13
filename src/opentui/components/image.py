@@ -84,8 +84,29 @@ class Image(Renderable):
         self._decoded = None
         self._last_draw_signature: tuple[ImageSource, int, int, int, int, ImageProtocol] | None = None
         self._graphics_id: int | None = None
+        self._was_suppressed: bool = False
         self._cache = ImageCache()
         self.on_cleanup(lambda: self._cache.clear())
+        self.on_cleanup(self._clear_graphics_on_destroy)
+
+    def _register_active_graphics(self) -> None:
+        """Register this image's graphics ID with the renderer for stale tracking."""
+        if self._graphics_id is not None:
+            from ..hooks import get_renderer
+            cli = get_renderer()
+            if cli is not None:
+                cli.register_frame_graphics(self._graphics_id)
+
+    def _clear_graphics_on_destroy(self) -> None:
+        if self._graphics_id is not None:
+            import sys
+            try:
+                from ..filters import _clear_kitty_graphics
+                sys.stdout.buffer.write(_clear_kitty_graphics(self._graphics_id))
+                sys.stdout.buffer.flush()
+            except Exception:
+                pass
+            self._graphics_id = None
 
     @property
     def source(self) -> ImageSource:
@@ -141,6 +162,9 @@ class Image(Renderable):
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         """Render the image or fallback alt text."""
         if not self._visible:
+            if self._graphics_id is not None and self._last_draw_signature is not None:
+                self._clear_graphics_on_destroy()
+                self._last_draw_signature = None
             return
 
         try:
@@ -149,6 +173,26 @@ class Image(Renderable):
             capabilities = _protocol_capabilities(self._protocol)
             renderer = ImageRenderer(buffer, capabilities)
             use_graphics_protocol = capabilities.kitty_graphics or capabilities.sixel
+
+            # Check renderer-level suppression (e.g. overlay active).  When
+            # suppressed we skip the graphics draw and don't register our ID,
+            # so the stale-graphics tracker clears us automatically.  We
+            # record the state so we can force a redraw when unsuppressed.
+            if use_graphics_protocol:
+                from ..hooks import get_renderer as _get_renderer
+                cli = _get_renderer()
+                suppressed = cli is not None and cli.graphics_suppressed
+                if suppressed:
+                    self._was_suppressed = True
+                    # Show alt text while graphics are suppressed
+                    if self._alt and hasattr(buffer, "draw_text"):
+                        buffer.draw_text(self._alt, self._x, self._y)
+                    return
+                if self._was_suppressed:
+                    # Transitioning from suppressed → active: force redraw
+                    self._was_suppressed = False
+                    self._last_draw_signature = None
+
             if use_graphics_protocol:
                 width, height = self._fit_graphics_cells(
                     self._decoded.width, self._decoded.height, box_width, box_height
@@ -179,6 +223,7 @@ class Image(Renderable):
                 source_height = height
             if use_graphics_protocol:
                 if self._last_draw_signature == draw_signature:
+                    self._register_active_graphics()
                     return
                 if self._last_draw_signature is not None and self._graphics_id is not None:
                     renderer.clear_graphics(self._graphics_id)
@@ -198,6 +243,7 @@ class Image(Renderable):
             ):
                 if use_graphics_protocol:
                     self._last_draw_signature = draw_signature
+                    self._register_active_graphics()
                 return
         except Exception:
             pass

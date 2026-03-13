@@ -153,6 +153,109 @@ def test_bracketed_paste_emits_single_paste_event():
     assert seen[0].text == "hello\nworld"
 
 
+def test_poll_ctrl_k_emits_key_k_with_ctrl():
+    handler = InputHandler()
+    handler._running = True
+    handler._fd = 0
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    with (
+        patch("opentui.input.select.select", return_value=([0], [], [])),
+        patch.object(handler, "_read_char", return_value="\x0b"),  # Ctrl+K
+    ):
+        handled = handler.poll()
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "k"
+    assert event.ctrl is True
+    assert event.code == "\x0b"
+
+
+def test_poll_ctrl_x_emits_key_x_with_ctrl():
+    handler = InputHandler()
+    handler._running = True
+    handler._fd = 0
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    with (
+        patch("opentui.input.select.select", return_value=([0], [], [])),
+        patch.object(handler, "_read_char", return_value="\x18"),  # Ctrl+X
+    ):
+        handled = handler.poll()
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "x"
+    assert event.ctrl is True
+    assert event.code == "\x18"
+
+
+def test_poll_ctrl_a_emits_key_a_with_ctrl():
+    handler = InputHandler()
+    handler._running = True
+    handler._fd = 0
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    with (
+        patch("opentui.input.select.select", return_value=([0], [], [])),
+        patch.object(handler, "_read_char", return_value="\x01"),  # Ctrl+A
+    ):
+        handled = handler.poll()
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "a"
+    assert event.ctrl is True
+    assert event.code == "\x01"
+
+
+def test_poll_ctrl_c_still_works():
+    handler = InputHandler()
+    handler._running = True
+    handler._fd = 0
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    with (
+        patch("opentui.input.select.select", return_value=([0], [], [])),
+        patch.object(handler, "_read_char", return_value="\x03"),  # Ctrl+C
+    ):
+        handled = handler.poll()
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "c"
+    assert event.ctrl is True
+
+
+def test_poll_ctrl_d_still_works():
+    handler = InputHandler()
+    handler._running = True
+    handler._fd = 0
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    with (
+        patch("opentui.input.select.select", return_value=([0], [], [])),
+        patch.object(handler, "_read_char", return_value="\x04"),  # Ctrl+D
+    ):
+        handled = handler.poll()
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "d"
+    assert event.ctrl is True
+
+
 def test_escape_apc_sequence_is_consumed_silently():
     handler = InputHandler()
     seen = []

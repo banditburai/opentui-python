@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_SENTINEL = object()
+
 # Attributes that must NOT be copied during patching — these are either
 # identity / tree-structure fields managed by the reconciler itself, or
 # computed values that the layout engine will overwrite each frame.
@@ -39,6 +41,10 @@ _SKIP_ATTRS: frozenset[str] = frozenset({
     "_layout_y",
     "_layout_width",
     "_layout_height",
+    # Image render state (preserved from old node)
+    "_graphics_id",
+    "_last_draw_signature",
+    "_was_suppressed",
     # Scroll position (render-time state, not a tree property)
     "_scroll_offset_y",
     "_scroll_offset_x",
@@ -55,6 +61,8 @@ _SKIP_ATTRS: frozenset[str] = frozenset({
     "_sticky_scroll_left",
     "_sticky_scroll_right",
     "_scroll_acceleration",
+    # desired_scroll_y tracking (preserved from old node)
+    "_last_applied_desired_y",
 })
 
 # Cache: type → tuple of patchable slot names
@@ -204,9 +212,13 @@ def _patch_node(old: BaseRenderable, new: BaseRenderable) -> None:
     attrs (from subclasses that don't define __slots__).
     """
     # 1. Patch slot-based attributes (from BaseRenderable / Renderable)
+    changed = False
     for attr in _patchable_slots(type(new)):
         try:
-            setattr(old, attr, _rebind_bound_method(getattr(new, attr), old, new))
+            new_val = _rebind_bound_method(getattr(new, attr), old, new)
+            if new_val is not getattr(old, attr, _SENTINEL):
+                setattr(old, attr, new_val)
+                changed = True
         except AttributeError:
             pass  # Slot exists on new's class but not old's
 
@@ -216,11 +228,15 @@ def _patch_node(old: BaseRenderable, new: BaseRenderable) -> None:
         for attr, value in new_dict.items():
             if attr not in _SKIP_ATTRS:
                 try:
-                    setattr(old, attr, _rebind_bound_method(value, old, new))
+                    new_val = _rebind_bound_method(value, old, new)
+                    if new_val is not getattr(old, attr, _SENTINEL):
+                        setattr(old, attr, new_val)
+                        changed = True
                 except AttributeError:
                     pass
 
-    old.mark_dirty()
+    if changed:
+        old.mark_dirty()
 
 
 def _rebind_bound_method(value: object, old: BaseRenderable, new: BaseRenderable) -> object:

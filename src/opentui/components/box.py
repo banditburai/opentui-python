@@ -181,6 +181,13 @@ class Box(Renderable):
         # Visibility
         visible: bool = True,
         opacity: float = 1.0,
+        # Positioning
+        position: str = "relative",
+        top: float | str | None = None,
+        right: float | str | None = None,
+        bottom: float | str | None = None,
+        left: float | str | None = None,
+        z_index: int = 0,
     ):
         super().__init__(
             key=key,
@@ -225,6 +232,12 @@ class Box(Renderable):
             border_chars=border_chars,
             visible=visible,
             opacity=opacity,
+            position=position,
+            top=top,
+            right=right,
+            bottom=bottom,
+            left=left,
+            z_index=z_index,
         )
 
         # Add children (both positional and keyword)
@@ -280,6 +293,9 @@ class Box(Renderable):
 
         if clip:
             buffer.pop_scissor_rect()
+
+        if self._render_after:
+            self._render_after(buffer, delta_time, self)
 
     def _get_border_chars(self) -> dict:
         """Get border characters with validation."""
@@ -429,6 +445,7 @@ class ScrollBox(Box):
         scroll_offset_x: int = 0,
         scroll_offset_y: int = 0,
         scroll_offset_y_fn: Callable[[], int] | None = None,
+        desired_scroll_y: int | None = None,
         # Box options
         **kwargs,
     ):
@@ -443,6 +460,8 @@ class ScrollBox(Box):
         self._scroll_offset_x = scroll_offset_x
         self._scroll_offset_y = scroll_offset_y
         self._scroll_offset_y_fn = scroll_offset_y_fn
+        self._desired_scroll_y = desired_scroll_y
+        self._last_applied_desired_y = None
         self._scroll_accumulator_x = 0.0
         self._scroll_accumulator_y = 0.0
         self._scroll_width = 0
@@ -773,6 +792,15 @@ class ScrollBox(Box):
         if not self._visible:
             return
 
+        # Apply scroll target only when the desired position has changed.
+        # This prevents overwriting manual (trackpad/mouse) scrolling when
+        # the component re-renders with the same desired position.
+        if self._desired_scroll_y is not None:
+            if self._desired_scroll_y != self._last_applied_desired_y:
+                self._scroll_offset_y = self._desired_scroll_y
+                self._last_applied_desired_y = self._desired_scroll_y
+            self._desired_scroll_y = None
+
         width = self._layout_width or buffer.width
         height = self._layout_height or buffer.height
         self._sync_scroll_metrics()
@@ -811,12 +839,22 @@ class ScrollBox(Box):
         # Render children at their yoga-computed positions.
         # The buffer offset transparently shifts all drawing (including
         # grandchildren) without changing any yoga layout properties.
+        # Viewport culling: skip children entirely outside the visible
+        # scroll viewport to avoid unnecessary render work.
         for child in self._children:
             if isinstance(child, Renderable):
+                if self._scroll_y:
+                    cy_rel = child._y - self._y
+                    child_h = child._layout_height or 0
+                    if cy_rel + child_h <= offset_y or cy_rel >= offset_y + height:
+                        continue
                 child.render(buffer, delta_time)
 
         buffer.pop_offset()
         buffer.pop_scissor_rect()
+
+        if self._render_after:
+            self._render_after(buffer, delta_time, self)
 
 
 __all__ = [

@@ -217,14 +217,28 @@ class MockMouse:
         root = self._setup.renderer.root
         self._dispatch_to_tree(root, event)
 
-    def _dispatch_to_tree(self, renderable: Any, event: MouseEvent) -> None:
-        """Walk children in reverse order (front-most first), depth-first."""
+    def _dispatch_to_tree(self, renderable: Any, event: MouseEvent, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0) -> None:
+        """Walk children in reverse order (front-most first), depth-first.
+
+        Accumulates scroll offsets from ancestor ScrollBoxes so that
+        ``contains_point`` checks use content-space coordinates.
+        """
         if event.propagation_stopped:
             return
 
         children = list(renderable.get_children()) if hasattr(renderable, "get_children") else []
+
+        # Accumulate scroll offset for children
+        child_sx = scroll_adjust_x
+        child_sy = scroll_adjust_y
+        if getattr(renderable, "_scroll_y", False):
+            fn = getattr(renderable, "_scroll_offset_y_fn", None)
+            child_sy += int(fn()) if fn else int(getattr(renderable, "_scroll_offset_y", 0))
+        if getattr(renderable, "_scroll_x", False):
+            child_sx += int(getattr(renderable, "_scroll_offset_x", 0))
+
         for child in reversed(children):
-            self._dispatch_to_tree(child, event)
+            self._dispatch_to_tree(child, event, child_sx, child_sy)
             if event.propagation_stopped:
                 return
 

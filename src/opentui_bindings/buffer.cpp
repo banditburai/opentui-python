@@ -66,13 +66,20 @@ void bind_buffer(nb::module_& m) {
                                   std::optional<std::array<float, 4>> fg,
                                   std::optional<std::array<float, 4>> bg,
                                   uint32_t attrs) {
-        float fg_color[4], bg_color[4];
+        float fg_color[4];
         resolve_fg(fg, fg_color);
-        resolve_bg(bg, bg_color);
+
+        float bg_color[4];
+        float* bg_ptr = nullptr;
+        if (bg.has_value()) {
+            bg_color[0] = (*bg)[0]; bg_color[1] = (*bg)[1];
+            bg_color[2] = (*bg)[2]; bg_color[3] = (*bg)[3];
+            bg_ptr = bg_color;
+        }
 
         const char* chars = text.c_str();
         int32_t actual_len = (len < (int32_t)text.size()) ? len : (int32_t)text.size();
-        bufferDrawText(buffer, chars, actual_len, x, y, fg_color, bg_color, attrs);
+        bufferDrawText(buffer, chars, actual_len, x, y, fg_color, bg_ptr, attrs);
     }, nb::arg("buffer"), nb::arg("text"), nb::arg("len"), nb::arg("x"), nb::arg("y"),
        nb::arg("fg") = std::nullopt, nb::arg("bg") = std::nullopt, nb::arg("attrs") = 0);
 

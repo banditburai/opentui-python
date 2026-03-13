@@ -129,10 +129,9 @@ class InputHandler:
                 self._emit_key("tab", char)
             elif char == "\x7f":  # DEL
                 self._emit_key("backspace", char)
-            elif char == "\x03":  # Ctrl+C
-                self._emit_key("c", char, ctrl=True)
-            elif char == "\x04":  # Ctrl+D
-                self._emit_key("d", char, ctrl=True)
+            elif "\x01" <= char <= "\x1a":  # Ctrl+A through Ctrl+Z
+                letter = chr(ord("a") + ord(char) - 1)
+                self._emit_key(letter, char, ctrl=True)
             else:
                 self._emit_key(char, char)
 

@@ -16,6 +16,8 @@ def test_image_component_renders_loaded_image(monkeypatch):
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
+    monkeypatch.setenv("OPENTUI_IMAGE_PROTOCOL", "ascii")
+
     calls = {}
 
     class FakeImageRenderer:
@@ -219,6 +221,8 @@ def test_image_component_contain_centers_scaled_image(monkeypatch):
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
+    monkeypatch.setenv("OPENTUI_IMAGE_PROTOCOL", "ascii")
+
     calls = {}
 
     class FakeImageRenderer:
@@ -268,6 +272,8 @@ def test_image_component_caches_resized_variant(monkeypatch):
     from opentui.image import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
+
+    monkeypatch.setenv("OPENTUI_IMAGE_PROTOCOL", "ascii")
 
     calls = {"resize": 0}
 
@@ -448,3 +454,313 @@ def test_image_component_clears_previous_graphics_when_geometry_changes(monkeypa
     assert isinstance(first_draw[4], int)
     assert second_draw[4] == first_draw[4]
     assert calls["clear"] == [first_draw[4]]
+
+
+def test_image_destroy_clears_graphics(monkeypatch):
+    """Destroying an Image with an active kitty graphic should emit the clear escape."""
+    from opentui.image import DecodedImage, ImageSource
+    from opentui.components.image import Image
+    import opentui.components.image as image_component
+    import io
+
+    class FakeImageRenderer:
+        def __init__(self, buffer, caps=None):
+            pass
+
+        def draw_image(self, data, x, y, width, height, graphics_id=None, source_width=None, source_height=None):
+            return True
+
+    monkeypatch.setenv("OPENTUI_IMAGE_PROTOCOL", "kitty")
+    monkeypatch.setattr(
+        image_component,
+        "load_image",
+        lambda src, mime_type=None: DecodedImage(
+            data=b"\x00" * (2 * 2 * 4),
+            width=2,
+            height=2,
+            mime_type="image/png",
+            source=ImageSource.from_value(src, mime_type=mime_type),
+        ),
+    )
+    monkeypatch.setattr(image_component, "ImageRenderer", FakeImageRenderer)
+
+    image = Image("logo.png", width=6, height=6)
+    image._x = 0
+    image._y = 0
+    image._layout_width = 6
+    image._layout_height = 6
+    image.render(object())
+    assert image._graphics_id is not None
+
+    gid = image._graphics_id
+    fake_stdout = io.BytesIO()
+    monkeypatch.setattr("sys.stdout", type("FakeStdout", (), {"buffer": fake_stdout, "write": lambda s, x: None, "flush": lambda s: None})())
+
+    image.destroy()
+
+    written = fake_stdout.getvalue()
+    expected = f"\x1b_Ga=d,d=I,i={gid}\x1b\\".encode()
+    assert expected in written
+
+
+def test_image_invisible_clears_graphics(monkeypatch):
+    """Setting an Image invisible should clear the kitty graphic and reset signature."""
+    from opentui.image import DecodedImage, ImageSource
+    from opentui.components.image import Image
+    import opentui.components.image as image_component
+    import io
+
+    class FakeImageRenderer:
+        def __init__(self, buffer, caps=None):
+            pass
+
+        def draw_image(self, data, x, y, width, height, graphics_id=None, source_width=None, source_height=None):
+            return True
+
+    monkeypatch.setenv("OPENTUI_IMAGE_PROTOCOL", "kitty")
+    monkeypatch.setattr(
+        image_component,
+        "load_image",
+        lambda src, mime_type=None: DecodedImage(
+            data=b"\x00" * (2 * 2 * 4),
+            width=2,
+            height=2,
+            mime_type="image/png",
+            source=ImageSource.from_value(src, mime_type=mime_type),
+        ),
+    )
+    monkeypatch.setattr(image_component, "ImageRenderer", FakeImageRenderer)
+
+    image = Image("logo.png", width=6, height=6)
+    image._x = 0
+    image._y = 0
+    image._layout_width = 6
+    image._layout_height = 6
+    image.render(object())
+    assert image._graphics_id is not None
+    assert image._last_draw_signature is not None
+
+    fake_stdout = io.BytesIO()
+    monkeypatch.setattr("sys.stdout", type("FakeStdout", (), {"buffer": fake_stdout, "write": lambda s, x: None, "flush": lambda s: None})())
+
+    image._visible = False
+    image.render(object())
+
+    assert image._last_draw_signature is None
+    assert image._graphics_id is None
+    written = fake_stdout.getvalue()
+    assert len(written) > 0  # clear escape was written
+
+
+# ---------------------------------------------------------------------------
+# Graphics suppression tests
+# ---------------------------------------------------------------------------
+
+
+def _kitty_image_helper(monkeypatch):
+    """Shared helper: set up a Kitty-protocol Image with fake renderer."""
+    from opentui.image import DecodedImage, ImageSource
+    from opentui.components.image import Image
+    import opentui.components.image as image_component
+
+    calls = {"draw": 0, "registered": []}
+
+    class FakeImageRenderer:
+        def __init__(self, buffer, caps=None):
+            pass
+
+        def clear_graphics(self, graphics_id):
+            pass
+
+        def draw_image(self, data, x, y, width, height, graphics_id=None, source_width=None, source_height=None):
+            calls["draw"] += 1
+            return True
+
+    monkeypatch.setenv("OPENTUI_IMAGE_PROTOCOL", "kitty")
+    monkeypatch.setattr(
+        image_component,
+        "load_image",
+        lambda src, mime_type=None: DecodedImage(
+            data=b"\x00" * (2 * 2 * 4),
+            width=2,
+            height=2,
+            mime_type="image/png",
+            source=ImageSource.from_value(src, mime_type=mime_type),
+        ),
+    )
+    monkeypatch.setattr(image_component, "ImageRenderer", FakeImageRenderer)
+
+    image = Image("logo.png", alt="Logo", width=6, height=6)
+    image._x = 1
+    image._y = 2
+    image._layout_width = 6
+    image._layout_height = 6
+
+    return image, calls
+
+
+def _make_fake_renderer(*, suppressed: bool = False):
+    """Create a minimal fake CliRenderer for suppression tests."""
+    registered = []
+
+    class _FakeRenderer:
+        _graphics_suppressed = suppressed
+
+        @property
+        def graphics_suppressed(self):
+            return self._graphics_suppressed
+
+        def register_frame_graphics(self, gid):
+            registered.append(gid)
+
+    return _FakeRenderer(), registered
+
+
+def test_image_suppressed_shows_alt_text(monkeypatch):
+    """When graphics are suppressed, Image should render alt text instead."""
+    image, calls = _kitty_image_helper(monkeypatch)
+
+    renderer, registered = _make_fake_renderer(suppressed=True)
+    monkeypatch.setattr("opentui.hooks.get_renderer", lambda: renderer)
+
+    drawn_text = []
+
+    class MockBuffer:
+        def draw_text(self, text, x, y, **kw):
+            drawn_text.append((text, x, y))
+
+    image.render(MockBuffer())
+
+    assert calls["draw"] == 0, "Graphics draw should be skipped when suppressed"
+    assert drawn_text == [("Logo", 1, 2)], "Alt text should be rendered"
+    assert image._was_suppressed is True
+
+
+def test_image_suppressed_does_not_register_graphics(monkeypatch):
+    """Suppressed images should not register their graphics ID."""
+    image, calls = _kitty_image_helper(monkeypatch)
+
+    renderer, registered = _make_fake_renderer(suppressed=True)
+    monkeypatch.setattr("opentui.hooks.get_renderer", lambda: renderer)
+
+    class MockBuffer:
+        def draw_text(self, *a, **kw):
+            pass
+
+    image.render(MockBuffer())
+
+    assert registered == [], "No graphics ID should be registered when suppressed"
+
+
+def test_image_unsuppressed_forces_redraw(monkeypatch):
+    """Transitioning from suppressed → active should force a full redraw."""
+    image, calls = _kitty_image_helper(monkeypatch)
+
+    # First render: normal (active)
+    renderer, registered = _make_fake_renderer(suppressed=False)
+    monkeypatch.setattr("opentui.hooks.get_renderer", lambda: renderer)
+    image.render(object())
+    assert calls["draw"] == 1
+    assert image._last_draw_signature is not None
+
+    # Second render: suppressed — skip draw, set _was_suppressed
+    renderer._graphics_suppressed = True
+
+    class MockBuffer:
+        def draw_text(self, *a, **kw):
+            pass
+
+    image.render(MockBuffer())
+    assert calls["draw"] == 1, "No draw during suppression"
+    assert image._was_suppressed is True
+
+    # Third render: unsuppressed — should force redraw (signature cleared)
+    renderer._graphics_suppressed = False
+    image.render(object())
+    assert calls["draw"] == 2, "Image should redraw after unsuppression"
+    assert image._was_suppressed is False
+
+
+def test_image_no_alt_suppressed_still_skips_draw(monkeypatch):
+    """Suppression should skip graphics even when no alt text is set."""
+    from opentui.image import DecodedImage, ImageSource
+    from opentui.components.image import Image
+    import opentui.components.image as image_component
+
+    calls = {"draw": 0}
+
+    class FakeImageRenderer:
+        def __init__(self, buffer, caps=None):
+            pass
+
+        def draw_image(self, data, x, y, width, height, graphics_id=None, source_width=None, source_height=None):
+            calls["draw"] += 1
+            return True
+
+    monkeypatch.setenv("OPENTUI_IMAGE_PROTOCOL", "kitty")
+    monkeypatch.setattr(
+        image_component,
+        "load_image",
+        lambda src, mime_type=None: DecodedImage(
+            data=b"\x00" * (2 * 2 * 4),
+            width=2,
+            height=2,
+            mime_type="image/png",
+            source=ImageSource.from_value(src, mime_type=mime_type),
+        ),
+    )
+    monkeypatch.setattr(image_component, "ImageRenderer", FakeImageRenderer)
+
+    image = Image("logo.png", width=6, height=6)  # No alt text
+    image._x = 0
+    image._y = 0
+    image._layout_width = 6
+    image._layout_height = 6
+
+    renderer, _ = _make_fake_renderer(suppressed=True)
+    monkeypatch.setattr("opentui.hooks.get_renderer", lambda: renderer)
+
+    image.render(object())
+    assert calls["draw"] == 0
+
+
+def test_image_ascii_protocol_ignores_suppression(monkeypatch):
+    """ASCII protocol images should not check suppression (no graphics layer)."""
+    from opentui.image import DecodedImage, ImageSource
+    from opentui.components.image import Image
+    import opentui.components.image as image_component
+
+    calls = {"draw": 0}
+
+    class FakeImageRenderer:
+        def __init__(self, buffer, caps=None):
+            pass
+
+        def draw_image(self, data, x, y, width, height, graphics_id=None, source_width=None, source_height=None):
+            calls["draw"] += 1
+            return True
+
+    monkeypatch.setenv("OPENTUI_IMAGE_PROTOCOL", "ascii")
+    monkeypatch.setattr(
+        image_component,
+        "load_image",
+        lambda src, mime_type=None: DecodedImage(
+            data=b"\x00" * (2 * 2 * 4),
+            width=2,
+            height=2,
+            mime_type="image/png",
+            source=ImageSource.from_value(src, mime_type=mime_type),
+        ),
+    )
+    monkeypatch.setattr(image_component, "ImageRenderer", FakeImageRenderer)
+
+    # Even with a suppressed renderer, ASCII should still draw
+    renderer, _ = _make_fake_renderer(suppressed=True)
+    monkeypatch.setattr("opentui.hooks.get_renderer", lambda: renderer)
+
+    image = Image("logo.png", protocol="ascii", width=6, height=6)
+    image._layout_width = 6
+    image._layout_height = 6
+    image.render(object())
+
+    assert calls["draw"] == 1, "ASCII protocol should ignore suppression"

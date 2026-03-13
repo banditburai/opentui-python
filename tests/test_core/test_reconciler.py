@@ -223,6 +223,69 @@ class TestReconciler:
         assert yoga_gc[1] is child_x._yoga_node  # x second
         assert yoga_gc[2] is new_z._yoga_node    # z is new
 
+    def test_reconciler_preserves_graphics_id(self):
+        """_graphics_id and _last_draw_signature survive reconciliation patching.
+
+        Uses a dict-based subclass to simulate Image's instance attributes.
+        """
+        class ImageLike(Renderable):
+            """No __slots__ — attrs go into __dict__, like Image."""
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                self._graphics_id = None
+                self._last_draw_signature = None
+
+        parent = BaseRenderable()
+        old = ImageLike(key="img", width=10)
+        old._graphics_id = 42
+        old._last_draw_signature = ("logo.png", 0, 0, 10, 10, "kitty")
+        parent._children = [old]
+        old._parent = parent
+
+        new = ImageLike(key="img", width=20)
+        # Fresh node has None for both
+        assert new._graphics_id is None
+        assert new._last_draw_signature is None
+
+        reconcile(parent, [old], [new])
+
+        assert parent._children[0] is old
+        assert old._width == 20  # property was patched
+        assert old._graphics_id == 42  # preserved, NOT overwritten to None
+        assert old._last_draw_signature == ("logo.png", 0, 0, 10, 10, "kitty")
+
+    def test_change_detection_skips_mark_dirty_when_unchanged(self):
+        """_patch_node skips mark_dirty when all attributes are identical."""
+        parent = BaseRenderable()
+        old = Renderable(key="x", width=10, opacity=0.5)
+        parent._children = [old]
+        old._parent = parent
+        # Clear dirty flag set by construction
+        old._dirty = False
+
+        # Same attributes
+        new = Renderable(key="x", width=10, opacity=0.5)
+        reconcile(parent, [old], [new])
+
+        assert parent._children[0] is old
+        assert old._dirty is False, "mark_dirty should not be called when nothing changed"
+
+    def test_change_detection_calls_mark_dirty_when_changed(self):
+        """_patch_node calls mark_dirty when an attribute changes."""
+        parent = BaseRenderable()
+        old = Renderable(key="x", width=10, opacity=1.0)
+        parent._children = [old]
+        old._parent = parent
+        old._dirty = False
+
+        # Different width
+        new = Renderable(key="x", width=20, opacity=1.0)
+        reconcile(parent, [old], [new])
+
+        assert parent._children[0] is old
+        assert old._width == 20
+        assert old._dirty is True, "mark_dirty should be called when an attribute changed"
+
     def test_template_yoga_children_detached_before_recursive_reconcile(self):
         """New template children added via add() don't cause 'already has owner' errors.
 

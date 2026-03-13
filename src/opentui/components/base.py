@@ -559,6 +559,8 @@ class Renderable(BaseRenderable):
         if isinstance(color, s.RGBA):
             return color
         if isinstance(color, str):
+            if color in ("transparent", "none"):
+                return None
             return s.RGBA.from_hex(color)
         return None
 
