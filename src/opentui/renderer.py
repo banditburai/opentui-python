@@ -403,6 +403,27 @@ class CliRenderer:
         self._force_next_render: bool = True  # Force first frame to be a full repaint
         self._clear_color: s.RGBA | None = self._parse_clear_color(config.clear_color)
         self._mouse_enabled: bool = False
+        # Per-frame cursor state — components call request_cursor() and
+        # request_cursor_style() during render_after callbacks;
+        # _apply_cursor() resolves everything after the frame buffer is
+        # flushed.
+        self._cursor_request: tuple[int, int] | None = None
+        self._cursor_style_request: str | None = None
+        self._cursor_color_request: str | None = None
+        self._cursor_style: str = "block"
+        self._cursor_color: str | None = None
+        # Per-frame Kitty graphics tracking — Image components register their
+        # graphics IDs each frame via register_frame_graphics().  After the
+        # frame is flushed, _clear_stale_graphics() deletes any IDs that were
+        # active last frame but not this frame (e.g. Image removed from tree,
+        # hidden by overlay, or source changed).
+        self._prev_frame_graphics: set[int] = set()
+        self._frame_graphics: set[int] = set()
+        # Graphics suppression — when True, Image components skip Kitty/sixel
+        # draws and don't register their IDs, so _clear_stale_graphics()
+        # removes them automatically.  Overlays set this to hide graphics
+        # that would otherwise bleed through the text layer.
+        self._graphics_suppressed: bool = False
 
         if config.testing:
             self._width = config.width
@@ -502,6 +523,153 @@ class CliRenderer:
     def set_cursor_position(self, x: int, y: int, visible: bool = True) -> None:
         """Set the cursor position and visibility."""
         self._native.renderer.set_cursor_position(self._ptr, x, y, visible)
+
+    def request_cursor(self, x: int, y: int) -> None:
+        """Request the terminal cursor at (x, y) for this frame.
+
+        Components call this from ``render_after`` callbacks when screen
+        coordinates are known.  The last request wins — only one cursor
+        can be active.  After the frame buffer is flushed, ``_apply_cursor``
+        resolves the request via ``set_cursor_position``.
+        """
+        self._cursor_request = (x, y)
+
+    def request_cursor_style(self, style: str = "block", color: str | None = None) -> None:
+        """Request a cursor style (and optional color) for this frame.
+
+        Components call this from ``render_after`` callbacks alongside
+        ``request_cursor``.  If no position is requested the style is
+        ignored (hidden cursor doesn't need styling).
+        """
+        self._cursor_style_request = style
+        self._cursor_color_request = color
+
+    _DECSCUSR = {
+        "block": 1, "underline": 3, "bar": 5,
+        "steady_block": 2, "steady_underline": 4, "steady_bar": 6,
+    }
+
+    def _apply_cursor(self) -> None:
+        """Apply (or hide) the cursor after the frame buffer is flushed.
+
+        **Testing mode** delegates to ``set_cursor_position`` + ``write_out``
+        for simple assertion-based tests.
+
+        **Live mode** keeps the native cursor permanently hidden so that
+        ``render()`` never sends ``\\x1b[?25h`` every frame (which resets
+        the terminal's blink timer and prevents blinking).  Instead,
+        cursor position, shape, and visibility are managed directly via
+        ``sys.stdout`` with a software blink timer that toggles show/hide
+        at ~530 ms intervals — matching typical OS cursor blink rates.
+        """
+        req = self._cursor_request
+        style_req = self._cursor_style_request
+        color_req = self._cursor_color_request
+        self._cursor_request = None
+        self._cursor_style_request = None
+        self._cursor_color_request = None
+
+        # ── Testing path ──────────────────────────────────────────
+        if self._config.testing:
+            if req is not None:
+                self.set_cursor_position(req[0] + 1, req[1] + 1, visible=True)
+                style = style_req or "block"
+                code = self._DECSCUSR.get(style, 1)
+                esc = f"\x1b[{code} q"
+                self._cursor_style = style
+                if color_req is not None:
+                    self._cursor_color = color_req
+                    esc += f"\x1b]12;{color_req}\x07"
+                elif self._cursor_color is not None:
+                    self._cursor_color = None
+                    esc += "\x1b]112\x07"
+                self.write_out(esc.encode())
+            else:
+                self.set_cursor_position(0, 0, visible=False)
+            return
+
+        # ── Live path ─────────────────────────────────────────────
+        # Keep native cursor hidden so render() emits \x1b[?25l
+        # (harmless no-op) instead of \x1b[?25h (which kills blink).
+        self.set_cursor_position(0, 0, visible=False)
+
+        if req is not None:
+            import time as _time
+
+            # Software blink: alternate visible / hidden at ~530 ms.
+            blink_on = int(_time.monotonic() * 1000 / 530) % 2 == 0
+
+            if blink_on:
+                col = req[0] + 1
+                row = req[1] + 1
+                style = style_req or "block"
+                # Steady DECSCUSR — shape only; blink handled by our timer.
+                _STEADY = {
+                    "block": 2, "underline": 4, "bar": 6,
+                    "steady_block": 2, "steady_underline": 4, "steady_bar": 6,
+                }
+                code = _STEADY.get(style, 2)
+                self._cursor_style = style
+
+                # CUP (position) → DECSCUSR (shape) → DECTCEM (show)
+                esc = f"\x1b[{row};{col}H\x1b[{code} q\x1b[?25h"
+
+                if color_req is not None:
+                    self._cursor_color = color_req
+                    esc += f"\x1b]12;{color_req}\x07"
+                elif self._cursor_color is not None:
+                    self._cursor_color = None
+                    esc += "\x1b]112\x07"
+
+                import sys as _sys
+                _sys.stdout.write(esc)
+                _sys.stdout.flush()
+            # blink_off: render()'s \x1b[?25l keeps cursor hidden.
+
+    @property
+    def graphics_suppressed(self) -> bool:
+        """Whether Kitty/sixel graphics drawing is currently suppressed."""
+        return self._graphics_suppressed
+
+    def suppress_graphics(self) -> None:
+        """Suppress Kitty/sixel graphics drawing.
+
+        While suppressed, Image components skip their graphics protocol draws
+        and don't register their IDs.  The stale-graphics tracker then clears
+        any previously drawn graphics automatically.  Call
+        ``unsuppress_graphics()`` to resume; Images detect the transition and
+        force a redraw.
+
+        Typical use: overlay managers call this when a dialog opens and
+        ``unsuppress_graphics()`` when it closes.
+        """
+        self._graphics_suppressed = True
+
+    def unsuppress_graphics(self) -> None:
+        """Resume Kitty/sixel graphics drawing after suppression."""
+        self._graphics_suppressed = False
+
+    def register_frame_graphics(self, graphics_id: int) -> None:
+        """Register a Kitty graphics ID as active for this frame.
+
+        Image components call this during ``render()`` each frame they draw
+        (or skip drawing due to an unchanged signature).  After the frame
+        buffer is flushed, ``_clear_stale_graphics()`` deletes any IDs that
+        were active last frame but not this frame.
+        """
+        self._frame_graphics.add(graphics_id)
+
+    def _clear_stale_graphics(self) -> None:
+        """Delete Kitty graphics IDs that went stale since the last frame."""
+        stale = self._prev_frame_graphics - self._frame_graphics
+        if stale:
+            import sys as _sys
+            from .filters import _clear_kitty_graphics
+            for gid in stale:
+                _sys.stdout.buffer.write(_clear_kitty_graphics(gid))
+            _sys.stdout.buffer.flush()
+        self._prev_frame_graphics = self._frame_graphics
+        self._frame_graphics = set()
 
     def get_cursor_state(self) -> dict:
         """Get the current cursor state (position, visibility)."""
@@ -694,6 +862,15 @@ class CliRenderer:
             else:
                 raise
         finally:
+            # Restore terminal default cursor style (DECSCUSR 0) and color
+            # (OSC 112) so the shell cursor returns to its normal appearance.
+            try:
+                import sys as _csys
+                _csys.stdout.write("\x1b[0 q\x1b]112\x07")
+                _csys.stdout.flush()
+            except Exception:
+                pass
+
             # Native destroy_renderer() performs the real renderer shutdown
             # sequence, including alt-screen exit and terminal state reset.
             # This Python-side cleanup should only drain in-flight stdin data
@@ -769,6 +946,12 @@ class CliRenderer:
         if force:
             self._force_next_render = False
         self.render(force=force)
+
+        # Clear Kitty graphics that were active last frame but not this one.
+        self._clear_stale_graphics()
+
+        # Position (or hide) the terminal cursor after the frame is flushed.
+        self._apply_cursor()
 
     def _rebuild_component_tree(self) -> None:
         """Rebuild the component tree from the component function."""
@@ -954,43 +1137,76 @@ class CliRenderer:
                 if fallback is not None:
                     fallback(event)
 
-    def _find_scroll_target(self, renderable, x: int, y: int):
+    def _find_scroll_target(self, renderable, x: int, y: int, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0):
         """Return the deepest registered scroll target under *(x, y)*."""
         try:
             children = list(renderable.get_children())
         except AttributeError:
             children = []
 
+        # Accumulate scroll offset for children (same as _dispatch_mouse_to_tree)
+        child_sx = scroll_adjust_x
+        child_sy = scroll_adjust_y
+        if getattr(renderable, "_scroll_y", False):
+            fn = getattr(renderable, "_scroll_offset_y_fn", None)
+            child_sy += int(fn()) if fn else int(getattr(renderable, "_scroll_offset_y", 0))
+        if getattr(renderable, "_scroll_x", False):
+            child_sx += int(getattr(renderable, "_scroll_offset_x", 0))
+
         for child in reversed(children):
-            found = self._find_scroll_target(child, x, y)
+            found = self._find_scroll_target(child, x, y, child_sx, child_sy)
             if found is not None:
                 return found
 
+        check_x = x + scroll_adjust_x
+        check_y = y + scroll_adjust_y
         contains_point = getattr(renderable, "contains_point", None)
-        inside = True if contains_point is None else contains_point(x, y)
+        inside = True if contains_point is None else contains_point(check_x, check_y)
 
         if inside and getattr(renderable, "_is_scroll_target", False):
             return renderable
         return None
 
-    def _dispatch_mouse_to_tree(self, renderable, event) -> None:
-        """Walk children front-to-back and dispatch to the deepest hit target."""
+    def _dispatch_mouse_to_tree(self, renderable, event, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0) -> None:
+        """Walk children front-to-back and dispatch to the deepest hit target.
+
+        *scroll_adjust_x/y* accumulate scroll offsets from ancestor ScrollBoxes.
+        Children inside a ScrollBox have layout coordinates in content space
+        (not screen space), so we add the parent's scroll offset to the mouse
+        coordinates when checking ``contains_point``.  This mirrors how the
+        TypeScript reference adjusts child ``y`` for scroll position.
+        """
         if event.propagation_stopped:
             return
 
+        check_x = event.x + scroll_adjust_x
+        check_y = event.y + scroll_adjust_y
+
         contains_point = getattr(renderable, "contains_point", None)
-        inside = True if contains_point is None else contains_point(event.x, event.y)
+        inside = True if contains_point is None else contains_point(check_x, check_y)
 
         try:
             children = list(renderable.get_children())
         except AttributeError:
             children = []
 
+        # If this renderable is a scroll container, accumulate its scroll
+        # offset for child hit-testing.  Uses duck-typing to avoid imports.
+        child_scroll_x = scroll_adjust_x
+        child_scroll_y = scroll_adjust_y
+        if getattr(renderable, "_scroll_y", False):
+            fn = getattr(renderable, "_scroll_offset_y_fn", None)
+            child_scroll_y += int(fn()) if fn else int(getattr(renderable, "_scroll_offset_y", 0))
+        if getattr(renderable, "_scroll_x", False):
+            child_scroll_x += int(getattr(renderable, "_scroll_offset_x", 0))
+
         for child in reversed(children):
+            child_check_x = event.x + child_scroll_x
+            child_check_y = event.y + child_scroll_y
             child_contains = getattr(child, "contains_point", None)
-            if child_contains is not None and not child_contains(event.x, event.y):
+            if child_contains is not None and not child_contains(child_check_x, child_check_y):
                 continue
-            self._dispatch_mouse_to_tree(child, event)
+            self._dispatch_mouse_to_tree(child, event, child_scroll_x, child_scroll_y)
             if event.propagation_stopped:
                 return
 
@@ -1043,9 +1259,21 @@ class CliRenderer:
 
     # Cursor and theme
     def set_cursor_style(self, style: str) -> None:
-        """Set cursor style ('block', 'underline', 'bar')."""
-        style_map = {"block": 2, "underline": 4, "bar": 6}
-        code = style_map.get(style, 2)
+        """Set cursor style using DECSCUSR escape codes.
+
+        Blinking variants by default:
+          ``"block"`` → 1, ``"underline"`` → 3, ``"bar"`` → 5
+        Steady variants:
+          ``"steady_block"`` → 2, ``"steady_underline"`` → 4, ``"steady_bar"`` → 6
+        """
+        style_map = {
+            "block": 1, "underline": 3, "bar": 5,
+            "steady_block": 2, "steady_underline": 4, "steady_bar": 6,
+        }
+        code = style_map.get(style, 1)
+        if self._cursor_style == style:
+            return
+        self._cursor_style = style
         try:
             import sys
             sys.stdout.write(f"\x1b[{code} q")
@@ -1054,10 +1282,23 @@ class CliRenderer:
             pass
 
     def set_cursor_color(self, color: str) -> None:
-        """Set cursor color (hex string)."""
+        """Set cursor color (hex string).  Cached — skips write if unchanged."""
+        if self._cursor_color == color:
+            return
+        self._cursor_color = color
         try:
             import sys
             sys.stdout.write(f"\x1b]12;{color}\x07")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+    def _reset_cursor_color(self) -> None:
+        """Reset cursor color to terminal default via OSC 112."""
+        self._cursor_color = None
+        try:
+            import sys
+            sys.stdout.write("\x1b]112\x07")
             sys.stdout.flush()
         except Exception:
             pass

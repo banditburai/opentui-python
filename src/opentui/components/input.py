@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
 from ..events import KeyEvent
+from ..hooks import use_cursor, use_cursor_style
 from .base import Renderable
 
 if TYPE_CHECKING:
@@ -39,6 +40,9 @@ class Input(Renderable):
         on_change: Callable[[str], None] | None = None,
         on_submit: Callable[[str], None] | None = None,
         on_key: Callable[[KeyEvent], bool] | None = None,
+        # Cursor style
+        cursor_style: str = "bar",
+        cursor_color: str | None = None,
         # Style
         **kwargs,
     ):
@@ -51,6 +55,8 @@ class Input(Renderable):
         self._placeholder = placeholder
         self._max_length = max_length
         self._cursor_position = len(self._value)
+        self._cursor_style = cursor_style
+        self._cursor_color = cursor_color
 
         # Register event handlers
         if on_input:
@@ -177,12 +183,10 @@ class Input(Renderable):
 
         buffer.draw_text(display_text, x, y, text_color, bg_color)
 
-        # Draw cursor if focused
+        # Position the terminal's native cursor (blink handled by the terminal)
         if self._focused and self._cursor_position <= width:
-            cursor_char = "█"
-            cursor_x = x + self._cursor_position
-            cursor_bg = s.RGBA(1, 1, 1, 1)
-            buffer.draw_text(cursor_char, cursor_x, y, s.RGBA(0, 0, 0, 1), cursor_bg)
+            use_cursor(x + self._cursor_position, y)
+            use_cursor_style(self._cursor_style, self._cursor_color)
 
 
 class Textarea(Input):

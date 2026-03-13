@@ -228,6 +228,36 @@ def use_selection_handler(callback: Callable[[Any], None]) -> None:
     _selection_handlers.append(callback)
 
 
+def use_cursor(x: int, y: int) -> None:
+    """Request the terminal cursor at screen position (x, y).
+
+    Call this from a ``render_after`` callback where absolute coordinates
+    are known.  The renderer positions the real terminal cursor after the
+    frame buffer is flushed — the terminal emulator handles blinking
+    natively, so there is zero rebuild overhead.
+    """
+    renderer = get_renderer()
+    if renderer is not None:
+        renderer.request_cursor(x, y)
+
+
+def use_cursor_style(style: str = "block", color: str | None = None) -> None:
+    """Request a cursor style (and optional color) for this frame.
+
+    Call alongside ``use_cursor`` from a ``render_after`` callback.
+    If no position is requested this frame, the style is silently ignored.
+
+    *style*: ``"block"``, ``"underline"``, ``"bar"`` (blinking variants),
+    or ``"steady_block"``, ``"steady_underline"``, ``"steady_bar"``.
+
+    *color*: Optional hex color string (e.g. ``"#ff0000"``).
+    Pass ``None`` to use the terminal default.
+    """
+    renderer = get_renderer()
+    if renderer is not None:
+        renderer.request_cursor_style(style, color)
+
+
 def use_timeline(options: dict | None = None) -> Timeline:
     """Create and manage a Timeline for animations.
 
@@ -376,6 +406,8 @@ __all__ = [
     "use_keyboard",
     "use_mouse",
     "use_paste",
+    "use_cursor",
+    "use_cursor_style",
     "use_selection_handler",
     "use_timeline",
     "Timeline",

@@ -254,6 +254,167 @@ class TestCliRendererMisc:
             clear_paste_handlers()
 
 
+class TestRendererCursorRequest:
+    """Tests for the per-frame cursor request/apply infrastructure."""
+
+    def test_request_cursor_applies_position(self):
+        r, n = _make()
+        r.request_cursor(10, 5)
+        r._apply_cursor()
+        # use_cursor takes 0-based coords; _apply_cursor adds +1 for 1-based native API
+        assert n.renderer.calls["set_cursor_position"] == (1, 11, 6, True)
+
+    def test_no_request_hides_cursor(self):
+        r, n = _make()
+        r._apply_cursor()
+        assert n.renderer.calls["set_cursor_position"] == (1, 0, 0, False)
+
+    def test_last_request_wins(self):
+        r, n = _make()
+        r.request_cursor(1, 2)
+        r.request_cursor(30, 15)
+        r._apply_cursor()
+        # 0-based (30, 15) → 1-based (31, 16)
+        assert n.renderer.calls["set_cursor_position"] == (1, 31, 16, True)
+
+    def test_request_cleared_each_frame(self):
+        r, n = _make()
+        # Frame 1: cursor requested — 0-based (5, 5) → 1-based (6, 6)
+        r.request_cursor(5, 5)
+        r._apply_cursor()
+        assert n.renderer.calls["set_cursor_position"] == (1, 6, 6, True)
+        # Frame 2: no request → cursor hidden
+        r._apply_cursor()
+        assert n.renderer.calls["set_cursor_position"] == (1, 0, 0, False)
+
+
+class TestRendererStaleGraphics:
+    """Tests for per-frame Kitty graphics tracking and stale cleanup."""
+
+    def test_register_frame_graphics_tracks_id(self):
+        r, _ = _make()
+        r.register_frame_graphics(42)
+        assert 42 in r._frame_graphics
+
+    def test_stale_graphics_cleared(self, monkeypatch):
+        """Graphics active last frame but not this frame are cleared."""
+        import io
+
+        fake_buf = io.BytesIO()
+
+        class _FakeStdout:
+            buffer = fake_buf
+
+        monkeypatch.setattr(sys, "stdout", _FakeStdout())
+
+        r, _ = _make()
+
+        # Frame 1: register graphics ID 10
+        r.register_frame_graphics(10)
+        r._clear_stale_graphics()
+        # No stale IDs — nothing cleared
+        assert fake_buf.getvalue() == b""
+        assert 10 in r._prev_frame_graphics
+
+        # Frame 2: don't register ID 10 → it's stale
+        r._clear_stale_graphics()
+        output = fake_buf.getvalue()
+        assert b"Ga=d,d=I,i=10" in output
+
+    def test_active_graphics_not_cleared(self, monkeypatch):
+        """Graphics re-registered each frame are never cleared."""
+        import io
+
+        fake_buf = io.BytesIO()
+
+        class _FakeStdout:
+            buffer = fake_buf
+
+        monkeypatch.setattr(sys, "stdout", _FakeStdout())
+
+        r, _ = _make()
+
+        # Frame 1
+        r.register_frame_graphics(5)
+        r._clear_stale_graphics()
+        # Frame 2 — still active
+        r.register_frame_graphics(5)
+        r._clear_stale_graphics()
+
+        assert fake_buf.getvalue() == b""
+
+    def test_multiple_stale_ids_all_cleared(self, monkeypatch):
+        """Multiple stale IDs from one frame are all cleared."""
+        import io
+
+        fake_buf = io.BytesIO()
+
+        class _FakeStdout:
+            buffer = fake_buf
+
+        monkeypatch.setattr(sys, "stdout", _FakeStdout())
+
+        r, _ = _make()
+        r.register_frame_graphics(1)
+        r.register_frame_graphics(2)
+        r.register_frame_graphics(3)
+        r._clear_stale_graphics()
+
+        # Frame 2: only ID 2 survives
+        r.register_frame_graphics(2)
+        r._clear_stale_graphics()
+
+        output = fake_buf.getvalue()
+        assert b"i=1" in output
+        assert b"i=3" in output
+        assert b"i=2" not in output
+
+
+class TestRendererGraphicsSuppression:
+    """Tests for renderer-level graphics suppression."""
+
+    def test_suppress_unsuppress(self):
+        r, _ = _make()
+        assert r.graphics_suppressed is False
+        r.suppress_graphics()
+        assert r.graphics_suppressed is True
+        r.unsuppress_graphics()
+        assert r.graphics_suppressed is False
+
+    def test_suppressed_graphics_become_stale(self, monkeypatch):
+        """When suppressed, unregistered graphics are cleared by stale tracker."""
+        import io
+
+        fake_buf = io.BytesIO()
+
+        class _FakeStdout:
+            buffer = fake_buf
+
+        monkeypatch.setattr(sys, "stdout", _FakeStdout())
+
+        r, _ = _make()
+
+        # Frame 1: image active
+        r.register_frame_graphics(7)
+        r._clear_stale_graphics()
+        assert fake_buf.getvalue() == b""
+
+        # Frame 2: suppressed — image doesn't register
+        r.suppress_graphics()
+        r._clear_stale_graphics()
+        output = fake_buf.getvalue()
+        assert b"Ga=d,d=I,i=7" in output
+
+    def test_unsuppress_does_not_auto_redraw(self):
+        """Unsuppress only flips the flag — Images detect the transition themselves."""
+        r, _ = _make()
+        r.suppress_graphics()
+        r.unsuppress_graphics()
+        # No side effects — just a boolean flip
+        assert r.graphics_suppressed is False
+        assert r._frame_graphics == set()
+
+
 class TestBufferGetPlainText:
     def test_returns_text(self):
         native_buf = _FakeBufferNS()
@@ -274,3 +435,70 @@ class TestBufferGetPlainText:
 
         buf = Buffer(1, _Exploding())
         assert buf.get_plain_text() == ""
+
+
+class TestRendererCursorStyleRequest:
+    """Tests for the per-frame cursor style request/apply infrastructure.
+
+    Style and color escapes go through ``write_out`` (native output) so
+    they land in the same byte stream as the cursor position call.
+    """
+
+    def test_request_cursor_style_applies(self):
+        """Style is applied via DECSCUSR when cursor + style both requested."""
+        r, n = _make()
+        r.request_cursor(10, 5)
+        r.request_cursor_style("bar")
+        r._apply_cursor()
+
+        # bar → DECSCUSR 5 ("\x1b[5 q") sent through write_out
+        assert "write_out" in n.renderer.calls
+        written = n.renderer.calls["write_out"][1]  # (ptr, data)
+        assert b"\x1b[5 q" in written
+        # Position set first (0-based → 1-based)
+        assert n.renderer.calls["set_cursor_position"] == (1, 11, 6, True)
+
+    def test_no_style_request_defaults_to_block(self):
+        """Position only → block style (DECSCUSR 1)."""
+        r, n = _make()
+        r.request_cursor(0, 0)
+        # No request_cursor_style() call
+        r._apply_cursor()
+
+        written = n.renderer.calls["write_out"][1]
+        assert b"\x1b[1 q" in written  # block → 1
+
+    def test_style_without_position_ignored(self):
+        """Style only, no position → cursor hidden, no style write."""
+        r, n = _make()
+        r.request_cursor_style("bar")
+        # No request_cursor()
+        r._apply_cursor()
+
+        # Cursor hidden
+        assert n.renderer.calls["set_cursor_position"] == (1, 0, 0, False)
+        # No write_out for style
+        assert "write_out" not in n.renderer.calls
+
+    def test_cursor_color_request(self):
+        """Color applied via OSC 12 when both position and color requested."""
+        r, n = _make()
+        r.request_cursor(5, 5)
+        r.request_cursor_style("block", color="#ff0000")
+        r._apply_cursor()
+
+        written = n.renderer.calls["write_out"][1]
+        assert b"\x1b]12;#ff0000\x07" in written
+
+    def test_color_reset_when_not_requested(self):
+        """Previous color cleared via OSC 112 when not requested this frame."""
+        r, n = _make()
+        # Simulate a previous frame that set a color
+        r._cursor_color = "#ff0000"
+
+        # This frame: position but no color requested
+        r.request_cursor(5, 5)
+        r._apply_cursor()
+
+        written = n.renderer.calls["write_out"][1]
+        assert b"\x1b]112\x07" in written
