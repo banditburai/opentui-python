@@ -113,7 +113,11 @@ def test_kitty_keyboard_shift_enter_emits_shifted_return():
     assert event.code == "\x1b[13;2u"
 
 
-def test_poll_treats_linefeed_as_shift_enter():
+def test_poll_treats_linefeed_as_linefeed():
+    """LF (\\n) emits key='linefeed' — distinct from CR ('return').
+
+    Matches upstream parseKeypress.ts which maps \\n → "linefeed".
+    """
     handler = InputHandler()
     handler._running = True
     handler._fd = 0
@@ -129,8 +133,8 @@ def test_poll_treats_linefeed_as_shift_enter():
     assert handled is True
     assert len(seen) == 1
     event = seen[0]
-    assert event.key == "return"
-    assert event.shift is True
+    assert event.key == "linefeed"
+    assert event.shift is False
     assert event.code == "\n"
 
 

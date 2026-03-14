@@ -186,6 +186,7 @@ class TestCliRendererMisc:
                 self.key_handlers = []
                 self.mouse_handlers = []
                 self.paste_handlers = []
+                self.focus_handlers = []
 
             def on_key(self, handler):
                 self.key_handlers.append(handler)
@@ -195,6 +196,9 @@ class TestCliRendererMisc:
 
             def on_paste(self, handler):
                 self.paste_handlers.append(handler)
+
+            def on_focus(self, handler):
+                self.focus_handlers.append(handler)
 
         class _FakeEventLoop:
             last_instance = None

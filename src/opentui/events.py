@@ -38,8 +38,17 @@ class KeyEvent:
         shift: Whether Shift key is pressed
         alt: Whether Alt key is pressed
         meta: Whether Meta (Cmd/Windows) key is pressed
+        hyper: Whether Hyper modifier is pressed (kitty bit 4)
+        caps_lock: Whether CapsLock is active (kitty bit 6)
+        num_lock: Whether NumLock is active (kitty bit 7)
         repeated: Whether the key is being held down (auto-repeat)
         event_type: "press" or "release"
+        sequence: Associated text from the key event (kitty CSI-u field 3
+            or raw character). Used for text insertion — may differ from
+            ``key`` when IME composition is active.
+        source: Parser source — ``"raw"`` for legacy or ``"kitty"`` for
+            kitty keyboard protocol.
+        number: Whether the key is a digit (0-9).
     """
 
     key: str
@@ -48,8 +57,14 @@ class KeyEvent:
     shift: bool = False
     alt: bool = False
     meta: bool = False
+    hyper: bool = False
+    caps_lock: bool = False
+    num_lock: bool = False
     repeated: bool = False
     event_type: str = "press"
+    sequence: str = ""
+    source: str = "raw"
+    number: bool = False
     _propagation_stopped: bool = field(default=False, repr=False)
     _default_prevented: bool = field(default=False, repr=False)
 
@@ -84,6 +99,8 @@ class KeyEvent:
             parts.append("shift")
         if self.meta:
             parts.append("meta")
+        if self.hyper:
+            parts.append("hyper")
         parts.append(self.key)
         return "+".join(parts)
 
@@ -246,6 +263,8 @@ class Keys:
     F10 = "f10"
     F11 = "f11"
     F12 = "f12"
+    LINEFEED = "linefeed"
+    CLEAR = "clear"
 
 
 __all__ = [

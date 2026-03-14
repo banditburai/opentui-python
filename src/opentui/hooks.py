@@ -19,6 +19,7 @@ _mouse_handlers: list[Callable[[MouseEvent], None]] = []
 _paste_handlers: list[Callable[[PasteEvent], None]] = []
 _resize_handlers: list[Callable[[int, int], None]] = []
 _selection_handlers: list[Callable[[Any], None]] = []
+_focus_handlers: list[Callable[[str], None]] = []
 _terminal_dimensions = Signal("terminal_dimensions", (80, 24))
 
 
@@ -77,6 +78,27 @@ def get_selection_handlers() -> list[Callable[[Any], None]]:
 def clear_selection_handlers() -> None:
     """Clear all selection handlers."""
     _selection_handlers.clear()
+
+
+def get_focus_handlers() -> list[Callable[[str], None]]:
+    """Get all registered focus handlers."""
+    return _focus_handlers.copy()
+
+
+def clear_focus_handlers() -> None:
+    """Clear all focus handlers."""
+    _focus_handlers.clear()
+
+
+def use_focus(handler: Callable[[str], None]) -> None:
+    """Subscribe to terminal focus/blur events.
+
+    Args:
+        handler: Called with ``"focus"`` or ``"blur"`` when the terminal
+            window gains or loses focus.
+    """
+    if not any(h is handler for h in _focus_handlers):
+        _focus_handlers.append(handler)
 
 
 def use_renderer() -> CliRenderer:
@@ -422,4 +444,7 @@ __all__ = [
     "clear_resize_handlers",
     "get_selection_handlers",
     "clear_selection_handlers",
+    "get_focus_handlers",
+    "clear_focus_handlers",
+    "use_focus",
 ]

@@ -22,7 +22,88 @@ from .events import KeyEvent, MouseButton, MouseEvent, PasteEvent
 _log = logging.getLogger(__name__)
 _BRACKETED_PASTE_END = "\x1b[201~"
 _MODIFY_OTHER_KEYS_RE = re.compile(r"^27;(\d+);(\d+)~$")
-_KITTY_KEY_RE = re.compile(r"^(\d+)(?::[\d:]+)?(?:;(\d+)(?::(\d+))?(?:;[\d:]+)?)?u$")
+_KITTY_KEY_RE = re.compile(r"^(\d+(?::\d+)*)(?:;(\d+(?::\d+)*))?(?:;([\d:]+))?u$")
+# xterm-style modified key: CSI 1;modifier letter (e.g. 1;2A = Shift+Up)
+_XTERM_MODIFIED_KEY_RE = re.compile(r"^1;(\d+)([A-HPS])$")
+_XTERM_MODIFIED_KEY_MAP: dict[str, str] = {
+    "A": "up", "B": "down", "C": "right", "D": "left",
+    "H": "home", "F": "end",
+    "P": "f1", "Q": "f2", "R": "f3", "S": "f4",
+}
+# ANSI escape stripping for paste text (equivalent to Bun.stripANSI)
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\].*?(?:\x1b\\|\x07)|\x1b[^[\]()]")
+
+# Kitty functional key range (57344–57454) — matches upstream kittyKeyMap
+_KITTY_KEY_MAP: dict[int, str] = {
+    57344: "escape", 57345: "return", 57346: "tab", 57347: "backspace",
+    57348: "insert", 57349: "delete", 57350: "left", 57351: "right",
+    57352: "up", 57353: "down", 57354: "pageup", 57355: "pagedown",
+    57356: "home", 57357: "end", 57358: "capslock", 57359: "scrolllock",
+    57360: "numlock", 57361: "printscreen", 57362: "pause",
+    57363: "menu",
+    # F1–F35
+    57364: "f1", 57365: "f2", 57366: "f3", 57367: "f4", 57368: "f5",
+    57369: "f6", 57370: "f7", 57371: "f8", 57372: "f9", 57373: "f10",
+    57374: "f11", 57375: "f12", 57376: "f13", 57377: "f14", 57378: "f15",
+    57379: "f16", 57380: "f17", 57381: "f18", 57382: "f19", 57383: "f20",
+    57384: "f21", 57385: "f22", 57386: "f23", 57387: "f24", 57388: "f25",
+    57389: "f26", 57390: "f27", 57391: "f28", 57392: "f29", 57393: "f30",
+    57394: "f31", 57395: "f32", 57396: "f33", 57397: "f34", 57398: "f35",
+    # Keypad
+    57399: "kp0", 57400: "kp1", 57401: "kp2", 57402: "kp3", 57403: "kp4",
+    57404: "kp5", 57405: "kp6", 57406: "kp7", 57407: "kp8", 57408: "kp9",
+    57409: "kpdecimal", 57410: "kpdivide", 57411: "kpmultiply",
+    57412: "kpsubtract", 57413: "kpadd", 57414: "kpenter",
+    57415: "kpequal", 57416: "kpseparator",
+    57417: "kpleft", 57418: "kpright", 57419: "kpup", 57420: "kpdown",
+    57421: "kppageup", 57422: "kppagedown", 57423: "kphome", 57424: "kpend",
+    57425: "kpinsert", 57426: "kpdelete", 57427: "kpbegin",
+    # Media
+    57428: "mediaplay", 57429: "mediapause", 57430: "mediaplaypause",
+    57431: "mediareverse", 57432: "mediastop", 57433: "mediafastforward",
+    57434: "mediarewind", 57435: "mediatracknext", 57436: "mediatrackprevious",
+    57437: "mediarecord",
+    # Volume
+    57438: "lowervolume", 57439: "raisevolume", 57440: "mutevolume",
+    # Modifier keys as keys
+    57441: "leftshift", 57442: "leftcontrol", 57443: "leftalt",
+    57444: "leftsuper", 57445: "lefthyper", 57446: "leftmeta",
+    57447: "rightshift", 57448: "rightcontrol", 57449: "rightalt",
+    57450: "rightsuper", 57451: "righthyper", 57452: "rightmeta",
+    # ISO
+    57453: "isolevel3shift", 57454: "isolevel5shift",
+}
+
+# CSI tilde key map — num~ sequences for navigation and function keys
+_TILDE_KEY_MAP: dict[int, str] = {
+    1: "home", 2: "insert", 3: "delete", 4: "end",
+    5: "pageup", 6: "pagedown", 7: "home", 8: "end",
+    11: "f1", 12: "f2", 13: "f3", 14: "f4",
+    15: "f5", 17: "f6", 18: "f7", 19: "f8",
+    20: "f9", 21: "f10", 23: "f11", 24: "f12",
+}
+
+# SS3 key map — ESC O letter
+_SS3_KEY_MAP: dict[str, str] = {
+    "A": "up", "B": "down", "C": "right", "D": "left", "E": "clear",
+    "H": "home", "F": "end",
+    "P": "f1", "Q": "f2", "R": "f3", "S": "f4",
+}
+
+# Meta key map for ESC+letter — special motion keys in Meta mode
+_META_KEY_MAP: dict[str, str] = {
+    "f": "right", "b": "left", "p": "up", "n": "down",
+}
+
+# rxvt shifted key suffixes (CSI code a/b/c/d/e or CSI num$)
+_SHIFT_CODES: dict[str, str] = {
+    "a": "up", "b": "down", "c": "right", "d": "left", "e": "clear",
+}
+
+# rxvt ctrl key suffixes (ESC O a/b/c/d/e or CSI num^)
+_CTRL_CODES: dict[str, str] = {
+    "a": "up", "b": "down", "c": "right", "d": "left", "e": "clear",
+}
 
 
 def _decode_wheel(button_code: int) -> tuple[int, int, str] | None:
@@ -48,21 +129,58 @@ class InputHandler:
         self._key_handlers: list[Callable[[KeyEvent], None]] = []
         self._mouse_handlers: list[Callable[[MouseEvent], None]] = []
         self._paste_handlers: list[Callable[[PasteEvent], None]] = []
+        self._focus_handlers: list[Callable[[str], None]] = []
         self._in_bracketed_paste = False
         self._bracketed_paste_buffer = ""
         self._running = False
 
     def _read_char(self) -> str:
-        """Read a single byte from the terminal fd, bypassing Python's buffer.
+        """Read a single UTF-8 character from the terminal fd.
 
         Using os.read() on the raw fd prevents the select/read mismatch
         that occurs with sys.stdin.read(1): Python's BufferedReader may
         pre-read more bytes from the fd into its internal buffer, causing
         subsequent select() calls to report "no data" even though Python's
         buffer holds the remaining bytes of an escape sequence.
+
+        Multi-byte UTF-8 characters (e.g. Korean, Chinese, emoji) require
+        reading additional continuation bytes after the leading byte:
+        - 0xxxxxxx → 1 byte  (ASCII)
+        - 110xxxxx → 2 bytes
+        - 1110xxxx → 3 bytes (CJK, most BMP)
+        - 11110xxx → 4 bytes (emoji, supplementary)
         """
         data = os.read(self._fd, 1)
-        return data.decode("utf-8", errors="replace") if data else ""
+        if not data:
+            return ""
+
+        b = data[0]
+        if b < 0x80:
+            return chr(b)  # Fast path: ASCII
+
+        # Determine how many continuation bytes this UTF-8 sequence needs.
+        if b < 0xC0:
+            remaining = 0  # Stray continuation byte
+        elif b < 0xE0:
+            remaining = 1  # 2-byte sequence
+        elif b < 0xF0:
+            remaining = 2  # 3-byte sequence (Korean, Chinese, etc.)
+        elif b < 0xF8:
+            remaining = 3  # 4-byte sequence (emoji)
+        else:
+            remaining = 0  # Invalid leading byte
+
+        for _ in range(remaining):
+            # Continuation bytes arrive essentially instantly (same
+            # keystroke), so a short timeout is sufficient.
+            if not select.select([self._fd], [], [], 0.05)[0]:
+                break
+            extra = os.read(self._fd, 1)
+            if not extra:
+                break
+            data += extra
+
+        return data.decode("utf-8", errors="replace")
 
     def start(self) -> None:
         """Start reading input."""
@@ -73,10 +191,11 @@ class InputHandler:
         self._old_settings = termios.tcgetattr(self._fd)
         tty.setcbreak(self._fd)
         # Disable ISIG so Ctrl+C delivers \x03 byte to stdin instead of
-        # raising SIGINT.  This lets the key handler process it cleanly
-        # without asyncio's signal handler interfering with shutdown.
+        # raising SIGINT.  Disable IEXTEN so VDISCARD (Ctrl+O on macOS)
+        # and VLNEXT (Ctrl+V) aren't consumed by the line discipline.
         new_settings = termios.tcgetattr(self._fd)
-        new_settings[3] &= ~termios.ISIG  # lflags
+        new_settings[0] &= ~termios.ICRNL  # iflag: don't translate CR→NL
+        new_settings[3] &= ~(termios.ISIG | termios.IEXTEN)  # lflags
         termios.tcsetattr(self._fd, termios.TCSANOW, new_settings)
 
     def stop(self) -> None:
@@ -100,6 +219,13 @@ class InputHandler:
         """Register a paste event handler."""
         self._paste_handlers.append(handler)
 
+    def on_focus(self, handler: Callable[[str], None]) -> None:
+        """Register a focus event handler.
+
+        Handler receives "focus" or "blur" as the argument.
+        """
+        self._focus_handlers.append(handler)
+
     def poll(self) -> bool:
         """Poll for input. Returns True if input was processed."""
         if not self._running:
@@ -120,30 +246,36 @@ class InputHandler:
             if char == "\x1b":  # ESC
                 return self._handle_escape()
             elif char == "\r":
-                self._emit_key("return", char)
+                self._emit_key("return", char, sequence=char)
             elif char == "\n":
-                # Many terminals emit LF for Shift+Enter while plain Enter
-                # remains CR, so preserve that distinction for multiline input.
-                self._emit_key("return", char, shift=True)
+                # LF is "linefeed" — distinct from CR ("return"), matching
+                # upstream parseKeypress.ts which maps \n → key "linefeed".
+                self._emit_key("linefeed", char, sequence=char)
             elif char == "\t":
-                self._emit_key("tab", char)
+                self._emit_key("tab", char, sequence=char)
             elif char == "\x7f":  # DEL
-                self._emit_key("backspace", char)
+                self._emit_key("backspace", char, sequence=char)
             elif "\x01" <= char <= "\x1a":  # Ctrl+A through Ctrl+Z
                 letter = chr(ord("a") + ord(char) - 1)
-                self._emit_key(letter, char, ctrl=True)
+                self._emit_key(letter, char, ctrl=True, sequence=char)
             else:
-                self._emit_key(char, char)
+                _log.debug("input raw char=%r U+%04X", char, ord(char))
+                self._emit_key(char, char, sequence=char)
 
             return True
 
         return False
 
     def _handle_escape(self) -> bool:
-        """Handle escape sequence."""
+        """Handle escape sequence.
+
+        In addition to CSI/SS3/DCS/APC/OSC, handles:
+        - Meta+char: ESC followed by a printable char → alt=True
+        - Meta+Ctrl+letter: ESC followed by a control char → alt=True, ctrl=True
+        """
         if not select.select([self._fd], [], [], 0)[0]:
             # Just ESC pressed
-            self._emit_key("escape", "\x1b")
+            self._emit_key("escape", "\x1b", sequence="\x1b")
             return True
 
         char = self._read_char()
@@ -168,7 +300,22 @@ class InputHandler:
             self._consume_until_st()
             return True
 
-        self._emit_key("escape", "\x1b")
+        # Meta+Ctrl+letter: ESC followed by a control character (0x01-0x1A)
+        if "\x01" <= char <= "\x1a":
+            letter = chr(ord("a") + ord(char) - 1)
+            key = _META_KEY_MAP.get(letter, letter)
+            self._emit_key(key, f"\x1b{char}", alt=True, ctrl=True)
+            return True
+
+        # Meta+char: ESC followed by a printable character
+        if ord(char) >= 32 and ord(char) != 127:
+            lower = char.lower()
+            key = _META_KEY_MAP.get(lower, lower)
+            shift = char != lower and char.isalpha()
+            self._emit_key(key, f"\x1b{char}", alt=True, shift=shift, sequence=char)
+            return True
+
+        self._emit_key("escape", "\x1b", sequence="\x1b")
         return True
 
     def _consume_until_st(self) -> None:
@@ -196,8 +343,9 @@ class InputHandler:
         while True:
             char = self._read_char()
             seq += char
-            # SGR mouse ends with 'M' or 'm'; normal CSI ends with alpha or '~'
-            if char.isalpha() or char == "~":
+            # SGR mouse ends with 'M' or 'm'; normal CSI ends with alpha,
+            # '~', '$' (rxvt shifted), or '^' (rxvt ctrl).
+            if char.isalpha() or char in ("~", "$", "^"):
                 break
 
         return self._dispatch_csi_sequence(seq)
@@ -206,6 +354,21 @@ class InputHandler:
         """Parse and dispatch a completed CSI sequence."""
         if seq == "200~":
             self._begin_bracketed_paste()
+            return True
+
+        # Focus events — filter silently (matching upstream parseKeypress.ts)
+        if seq == "I":
+            _log.debug("input focus-in event (filtered)")
+            self._emit_focus("focus")
+            return True
+        if seq == "O":
+            _log.debug("input focus-out event (filtered)")
+            self._emit_focus("blur")
+            return True
+
+        # Shift-Tab: CSI Z → key="tab", shift=True
+        if seq == "Z":
+            self._emit_key("tab", f"\x1b[{seq}", shift=True)
             return True
 
         # SGR mouse protocol: \x1b[<button;x;y;M (press) or m (release)
@@ -225,42 +388,88 @@ class InputHandler:
         if self._handle_kitty_keyboard(seq):
             return True
 
-        # Parse CSI sequence
-        if seq == "A":
-            self._emit_key("up", f"\x1b[{seq}")
-        elif seq == "B":
-            self._emit_key("down", f"\x1b[{seq}")
-        elif seq == "C":
-            self._emit_key("right", f"\x1b[{seq}")
-        elif seq == "D":
-            self._emit_key("left", f"\x1b[{seq}")
-        elif seq == "H":
-            self._emit_key("home", f"\x1b[{seq}")
-        elif seq == "F":
-            self._emit_key("end", f"\x1b[{seq}")
-        elif seq == "P":
-            self._emit_key("f1", f"\x1b[{seq}")
-        elif seq == "Q":
-            self._emit_key("f2", f"\x1b[{seq}")
-        elif seq == "R":
-            self._emit_key("f3", f"\x1b[{seq}")
-        elif seq == "S":
-            self._emit_key("f4", f"\x1b[{seq}")
-        elif seq.startswith("1") and seq.endswith("~"):
-            # Home, Insert, etc.
-            self._emit_key(_csi_num_to_key(int(seq[1:-1])), f"\x1b[{seq}")
-        elif seq.startswith("2") and seq.endswith("~"):
-            self._emit_key(_csi_num_to_key(int(seq[1:-1])), f"\x1b[{seq}")
-        elif seq.startswith("3") and seq.endswith("~"):
-            self._emit_key(_csi_num_to_key(int(seq[1:-1])), f"\x1b[{seq}")
-        elif seq.startswith("5") and seq.endswith("~"):
-            self._emit_key("pageup", f"\x1b[{seq}")
-        elif seq.startswith("6") and seq.endswith("~"):
-            self._emit_key("pagedown", f"\x1b[{seq}")
-        else:
-            _log.debug("input unknown csi seq=%r", seq)
-            self._emit_key(f"unknown-{seq}", f"\x1b[{seq}")
+        # xterm-style modified keys: CSI 1;modifier letter
+        # e.g. \x1b[1;2A = Shift+Up, \x1b[1;5C = Ctrl+Right
+        xm = _XTERM_MODIFIED_KEY_RE.match(seq)
+        if xm is not None:
+            modifier = int(xm.group(1)) - 1
+            key_name = _XTERM_MODIFIED_KEY_MAP.get(xm.group(2))
+            if key_name is not None:
+                shift = bool(modifier & 1)
+                alt = bool(modifier & 2)
+                ctrl = bool(modifier & 4)
+                meta = bool(modifier & 8)
+                self._emit_key(key_name, f"\x1b[{seq}", shift=shift, alt=alt, ctrl=ctrl, meta=meta)
+                return True
 
+        # rxvt shifted key suffixes: CSI [num] $ (e.g., \x1b[2$ = Shift+Insert)
+        if seq.endswith("$"):
+            body = seq[:-1]
+            try:
+                num = int(body)
+                key_name = _TILDE_KEY_MAP.get(num)
+                if key_name:
+                    self._emit_key(key_name, f"\x1b[{seq}", shift=True)
+                    return True
+            except ValueError:
+                pass
+
+        # rxvt ctrl key suffixes: CSI [num] ^ (e.g., \x1b[2^ = Ctrl+Insert)
+        if seq.endswith("^"):
+            body = seq[:-1]
+            try:
+                num = int(body)
+                key_name = _TILDE_KEY_MAP.get(num)
+                if key_name:
+                    self._emit_key(key_name, f"\x1b[{seq}", ctrl=True)
+                    return True
+            except ValueError:
+                pass
+
+        # Single-letter CSI sequences (unmodified)
+        _SINGLE_LETTER: dict[str, str] = {
+            "A": "up", "B": "down", "C": "right", "D": "left",
+            "H": "home", "F": "end", "E": "clear",
+            "P": "f1", "Q": "f2", "R": "f3", "S": "f4",
+        }
+        if len(seq) == 1 and seq in _SINGLE_LETTER:
+            self._emit_key(_SINGLE_LETTER[seq], f"\x1b[{seq}")
+            return True
+
+        # rxvt shifted arrow keys: CSI lowercase a/b/c/d/e
+        if len(seq) == 1 and seq in _SHIFT_CODES:
+            self._emit_key(_SHIFT_CODES[seq], f"\x1b[{seq}", shift=True)
+            return True
+
+        # CSI tilde sequences: num~ (F1-F12, nav keys)
+        if seq.endswith("~"):
+            body = seq[:-1]
+            # Handle modified tilde: num;modifier~ (e.g. 3;5~ = Ctrl+Delete)
+            if ";" in body:
+                parts = body.split(";")
+                try:
+                    num = int(parts[0])
+                    modifier = int(parts[1]) - 1
+                    key_name = _TILDE_KEY_MAP.get(num, f"unknown-{num}")
+                    shift = bool(modifier & 1)
+                    alt = bool(modifier & 2)
+                    ctrl = bool(modifier & 4)
+                    meta = bool(modifier & 8)
+                    self._emit_key(key_name, f"\x1b[{seq}", shift=shift, alt=alt, ctrl=ctrl, meta=meta)
+                    return True
+                except (ValueError, IndexError):
+                    pass
+            else:
+                try:
+                    num = int(body)
+                    key_name = _TILDE_KEY_MAP.get(num, f"unknown-{num}")
+                    self._emit_key(key_name, f"\x1b[{seq}")
+                    return True
+                except ValueError:
+                    pass
+
+        _log.debug("input unknown csi seq=%r", seq)
+        self._emit_key(f"unknown-{seq}", f"\x1b[{seq}")
         return True
 
     def _begin_bracketed_paste(self) -> None:
@@ -291,28 +500,87 @@ class InputHandler:
         meta = bool(modifier & 8)
 
         key = _char_code_to_key(char_code)
-        self._emit_key(key, f"\x1b[{seq}", ctrl=ctrl, shift=shift, alt=alt, meta=meta)
+        sequence = chr(char_code) if char_code >= 32 and char_code != 127 else ""
+        self._emit_key(key, f"\x1b[{seq}", ctrl=ctrl, shift=shift, alt=alt, meta=meta, sequence=sequence)
         return True
 
     def _handle_kitty_keyboard(self, seq: str) -> bool:
-        """Handle kitty keyboard CSI-u sequences such as Shift+Enter."""
+        """Handle kitty keyboard CSI-u sequences such as Shift+Enter.
+
+        CSI-u format (kitty keyboard protocol):
+            CSI key_code[:shifted[:base]] ; [modifier[:event_type]] [; text_codepoints] u
+
+        Field 3 (text_codepoints) carries the *associated text* — the actual
+        composed text produced by the key event (e.g. IME-composed Korean
+        syllables).  This is stored in ``KeyEvent.sequence`` and should be
+        used for text insertion instead of ``key``.
+        """
         match = _KITTY_KEY_RE.match(seq)
         if match is None:
             return False
 
-        key_code = int(match.group(1))
-        modifier_mask = int(match.group(2) or "1")
-        event_type = match.group(3) or "1"
+        # Field 1: key_code[:shifted_codepoint[:base_layout_codepoint]]
+        field1 = match.group(1).split(":")
+        key_code = int(field1[0])
+
+        # Field 2: modifier_mask[:event_type]
+        field2 = match.group(2)
+        if field2:
+            f2_parts = field2.split(":")
+            modifier_mask = int(f2_parts[0])
+            event_type_code = f2_parts[1] if len(f2_parts) > 1 else "1"
+        else:
+            modifier_mask = 1
+            event_type_code = "1"
+
         modifier = modifier_mask - 1
         shift = bool(modifier & 1)
         alt = bool(modifier & 2)
         ctrl = bool(modifier & 4)
-        meta = bool(modifier & 32)
+        meta = bool(modifier & 8)  # super in kitty = meta in our model
+        hyper = bool(modifier & 16)
+        # bit 5 (32) = meta in kitty — merge with our meta field
+        if modifier & 32:
+            meta = True
+        caps_lock = bool(modifier & 64)
+        num_lock = bool(modifier & 128)
+
+        # Field 3: text as colon-separated Unicode codepoints
+        sequence = ""
+        field3 = match.group(3)
+        if field3:
+            for cp_str in field3.split(":"):
+                try:
+                    cp = int(cp_str)
+                    if 0 < cp <= 0x10FFFF:
+                        sequence += chr(cp)
+                except ValueError:
+                    pass
 
         key = _char_code_to_key(key_code)
-        repeated = event_type == "2"
-        event_kind = "release" if event_type == "3" else "press"
 
+        # Fallback: if terminal didn't send associated text, synthesize from
+        # field 1 — matching the upstream TypeScript behaviour.
+        if not sequence:
+            if key == "space":
+                sequence = " "
+            elif len(key) == 1 and ord(key) >= 32:
+                shifted_cp = int(field1[1]) if len(field1) > 1 else 0
+                if shift and shifted_cp > 0:
+                    sequence = chr(shifted_cp)
+                elif shift:
+                    sequence = key.upper()
+                else:
+                    sequence = key
+
+        repeated = event_type_code == "2"
+        event_kind = "release" if event_type_code == "3" else "press"
+        _log.debug(
+            "input kitty key=%r code=%d mod=%d type=%s seq=%r text=%r",
+            key, key_code, modifier, event_kind, seq, sequence,
+        )
+
+        is_digit = len(key) == 1 and key.isdigit()
         event = KeyEvent(
             key=key,
             code=f"\x1b[{seq}",
@@ -320,8 +588,14 @@ class InputHandler:
             shift=shift,
             alt=alt,
             meta=meta,
+            hyper=hyper,
+            caps_lock=caps_lock,
+            num_lock=num_lock,
             repeated=repeated,
             event_type=event_kind,
+            sequence=sequence,
+            source="kitty",
+            number=is_digit,
         )
 
         for handler in self._key_handlers:
@@ -447,25 +721,23 @@ class InputHandler:
         return True
 
     def _handle_ss3(self) -> bool:
-        """Handle SS3 (Single Shift 3) escape sequences."""
+        """Handle SS3 (Single Shift 3) escape sequences.
+
+        Covers function keys (P-S), navigation (H, F), arrow keys
+        (A/B/C/D), and clear (E) — matching upstream parseKeypress.ts.
+        """
         if not select.select([self._fd], [], [], 0)[0]:
             self._emit_key("O", "\x1bO")
             return True
 
         char = self._read_char()
 
-        if char == "P":
-            self._emit_key("f1", f"\x1bO{char}")
-        elif char == "Q":
-            self._emit_key("f2", f"\x1bO{char}")
-        elif char == "R":
-            self._emit_key("f3", f"\x1bO{char}")
-        elif char == "S":
-            self._emit_key("f4", f"\x1bO{char}")
-        elif char == "H":
-            self._emit_key("home", f"\x1bO{char}")
-        elif char == "F":
-            self._emit_key("end", f"\x1bO{char}")
+        key_name = _SS3_KEY_MAP.get(char)
+        if key_name is not None:
+            self._emit_key(key_name, f"\x1bO{char}")
+        elif char in _CTRL_CODES:
+            # rxvt ctrl arrow keys: ESC O a/b/c/d/e → ctrl + direction
+            self._emit_key(_CTRL_CODES[char], f"\x1bO{char}", ctrl=True)
         else:
             self._emit_key(f"ss3-{char}", f"\x1bO{char}")
 
@@ -479,8 +751,11 @@ class InputHandler:
         shift: bool = False,
         alt: bool = False,
         meta: bool = False,
+        sequence: str = "",
+        source: str = "raw",
     ) -> None:
         """Emit a keyboard event."""
+        is_digit = len(key) == 1 and key.isdigit()
         event = KeyEvent(
             key=key,
             code=code,
@@ -489,6 +764,9 @@ class InputHandler:
             alt=alt,
             meta=meta,
             repeated=False,
+            sequence=sequence,
+            source=source,
+            number=is_digit,
         )
 
         for handler in self._key_handlers:
@@ -503,8 +781,25 @@ class InputHandler:
             if event.propagation_stopped:
                 break
 
+    def _emit_focus(self, focus_type: str) -> None:
+        """Emit a focus event (focus-in or focus-out).
+
+        Focus events are NOT keyboard events — they are dispatched to
+        registered focus handlers and should not reach key handlers.
+        """
+        for handler in self._focus_handlers:
+            try:
+                handler(focus_type)
+            except Exception:
+                pass
+
     def _emit_paste(self, text: str) -> None:
-        """Emit a paste event."""
+        """Emit a paste event, stripping ANSI escape sequences first.
+
+        Matches upstream KeyHandler.processPaste() which calls
+        Bun.stripANSI() before emitting.
+        """
+        text = _ANSI_RE.sub("", text)
         event = normalize_paste_payload(text)
         for handler in self._paste_handlers:
             handler(event)
@@ -512,34 +807,21 @@ class InputHandler:
                 break
 
 
-def _csi_num_to_key(num: int) -> str:
-    """Convert CSI sequence number to key name."""
-    mapping = {
-        1: "home",
-        2: "insert",
-        3: "delete",
-        4: "end",
-        5: "pageup",
-        6: "pagedown",
-        7: "home",
-        8: "end",
-    }
-    return mapping.get(num, f"unknown-{num}")
-
-
 def _char_code_to_key(char_code: int) -> str:
-    """Convert a modifyOtherKeys character code into an OpenTUI key name."""
-    mapping = {
-        8: "backspace",
-        9: "tab",
-        13: "return",
-        27: "escape",
-        32: "space",
-        127: "backspace",
+    """Convert a character code (raw or kitty) into an OpenTUI key name."""
+    # Kitty functional key range (57344+)
+    if char_code in _KITTY_KEY_MAP:
+        return _KITTY_KEY_MAP[char_code]
+    # Standard control/special keys
+    _SPECIAL: dict[int, str] = {
+        8: "backspace", 9: "tab", 13: "return", 27: "escape",
+        32: "space", 127: "backspace",
     }
-    if char_code in mapping:
-        return mapping[char_code]
-    return chr(char_code)
+    if char_code in _SPECIAL:
+        return _SPECIAL[char_code]
+    if 0 < char_code < 0x10FFFF:
+        return chr(char_code)
+    return f"unknown-{char_code}"
 
 
 _RESIZE_DEBOUNCE = 0.10  # seconds — matches OpenCode's resizeDebounceDelay

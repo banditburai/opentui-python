@@ -32,6 +32,14 @@ class CliRendererConfig:
     target_fps: int = 60
     console_options: dict | None = None
     clear_color: s.RGBA | str | None = None
+    # Kitty keyboard protocol flags.  Bit layout:
+    #   1 = disambiguate escape codes
+    #   2 = report event types (press / repeat / release)
+    #  16 = report associated text (IME-composed text in CSI-u field 3)
+    # Flag 16 is critical for CJK IME — the terminal sends the composed
+    # syllable in field 3 instead of raw key codes, so Korean/Chinese/
+    # Japanese input works correctly.
+    kitty_keyboard_flags: int = 19  # 1 + 2 + 16
 
 
 @dataclass
@@ -403,6 +411,7 @@ class CliRenderer:
         self._force_next_render: bool = True  # Force first frame to be a full repaint
         self._clear_color: s.RGBA | None = self._parse_clear_color(config.clear_color)
         self._mouse_enabled: bool = False
+        self._captured_renderable: Any = None
         # Per-frame cursor state — components call request_cursor() and
         # request_cursor_style() during render_after callbacks;
         # _apply_cursor() resolves everything after the frame buffer is
@@ -797,6 +806,14 @@ class CliRenderer:
 
         self.setup()
 
+        # Enable the kitty keyboard protocol for structured modifier reporting
+        # and associated text (flag 16) for CJK IME composition.
+        if not self._config.testing and self._config.kitty_keyboard_flags:
+            try:
+                self.enable_keyboard(self._config.kitty_keyboard_flags)
+            except Exception:
+                pass
+
         # Drain capability responses from stdin so they don't get
         # misinterpreted as user input by the InputHandler.
         # Poll with a deadline; stop early after idle silence.
@@ -844,6 +861,22 @@ class CliRenderer:
         for handler in hooks.get_paste_handlers():
             input_handler.on_paste(handler)
 
+        # Focus event handling — restore terminal modes on focus-in
+        # (matching upstream renderer.ts restoreTerminalModes pattern).
+        self._should_restore_modes = False
+
+        def _on_focus(focus_type: str) -> None:
+            if focus_type == "blur":
+                self._should_restore_modes = True
+            elif focus_type == "focus" and self._should_restore_modes:
+                self._should_restore_modes = False
+                self._restore_terminal_modes()
+
+        input_handler.on_focus(_on_focus)
+
+        for handler in hooks.get_focus_handlers():
+            input_handler.on_focus(handler)
+
         input_handler.on_mouse(self._dispatch_mouse_event)
 
         # Forward mouse handlers and enable mouse tracking
@@ -862,6 +895,13 @@ class CliRenderer:
             else:
                 raise
         finally:
+            # Disable kitty keyboard protocol before tearing down the
+            # terminal so the shell doesn't receive extended key reports.
+            try:
+                self.disable_keyboard()
+            except Exception:
+                pass
+
             # Restore terminal default cursor style (DECSCUSR 0) and color
             # (OSC 112) so the shell cursor returns to its normal appearance.
             try:
@@ -1113,13 +1153,77 @@ class CliRenderer:
             return False
 
     def _dispatch_mouse_event(self, event) -> None:
-        """Dispatch a mouse event through the render tree before global hooks."""
+        """Dispatch a mouse event through the render tree before global hooks.
+
+        Implements mouse capture: when a drag begins on a renderable, that
+        element receives ALL subsequent drag events directly (skipping tree
+        traversal) until the mouse button is released.  This matches the
+        OpenCode TypeScript reference and is required for click-and-drag
+        operations like text selection to work correctly.
+        """
         if self._root is None:
             return
         if event.type == "scroll":
             self._dispatch_scroll_event(event)
             return
+
+        captured = self._captured_renderable
+
+        if event.type in ("down", "drag", "up"):
+            _log.debug(
+                "mouse dispatch type=%s x=%s y=%s button=%s captured=%s",
+                event.type, event.x, event.y,
+                getattr(event, "button", None),
+                type(captured).__name__ if captured is not None else None,
+            )
+
+        # Route drag/move events directly to captured element (skip tree walk).
+        if captured is not None and event.type not in ("up", "down"):
+            handler = getattr(captured, "_on_mouse_drag", None)
+            if handler is not None:
+                event.target = captured
+                handler(event)
+                _log.debug("mouse capture→drag handler fired on %s", type(captured).__name__)
+            else:
+                _log.debug("mouse capture active but no _on_mouse_drag on %s", type(captured).__name__)
+            return
+
+        # On mouse-up: send drag-end + up to captured element, then release.
+        if captured is not None and event.type == "up":
+            drag_end_handler = getattr(captured, "_on_mouse_drag_end", None)
+            if drag_end_handler is not None:
+                event.target = captured
+                drag_end_handler(event)
+            up_handler = getattr(captured, "_on_mouse_up", None)
+            if up_handler is not None:
+                event.target = captured
+                up_handler(event)
+            self._captured_renderable = None
+            _log.debug("mouse capture released on up")
+            return
+
+        # Normal tree dispatch for down/other events.
         self._dispatch_mouse_to_tree(self._root, event)
+
+        target = getattr(event, "target", None)
+        _log.debug(
+            "mouse tree dispatch result type=%s target=%s has_drag=%s",
+            event.type,
+            type(target).__name__ if target is not None else None,
+            getattr(target, "_on_mouse_drag", None) is not None if target else False,
+        )
+
+        # After dispatching a drag event, capture the target element so
+        # subsequent drags bypass the tree walk.
+        if event.type == "drag" and target is not None:
+            self._captured_renderable = target
+            _log.debug("mouse captured %s on drag", type(target).__name__)
+        # On mouse-down, capture the target for drag tracking.
+        elif event.type == "down" and target is not None:
+            handler = getattr(target, "_on_mouse_drag", None)
+            if handler is not None:
+                self._captured_renderable = target
+                _log.debug("mouse captured %s on down (has drag handler)", type(target).__name__)
 
     def _dispatch_scroll_event(self, event) -> None:
         """Route wheel input to the deepest scroll target under the pointer."""
@@ -1317,6 +1421,33 @@ class CliRenderer:
         except (ValueError, IndexError):
             pass
         return None
+
+    def _restore_terminal_modes(self) -> None:
+        """Re-enable terminal modes after a focus-in event.
+
+        When the terminal loses focus and regains it, some terminals
+        (particularly tmux, screen) may drop protocol state.  This
+        re-sends the kitty keyboard flags, mouse tracking, and
+        bracketed paste to ensure the application continues working.
+        Matches upstream renderer.ts restoreTerminalModes().
+        """
+        if self._config.testing:
+            return
+        try:
+            import sys as _sys
+            buf = ""
+            # Re-enable kitty keyboard protocol
+            if self._config.kitty_keyboard_flags:
+                self.enable_keyboard(self._config.kitty_keyboard_flags)
+            # Re-enable mouse tracking
+            if self._mouse_enabled:
+                self.enable_mouse()
+            # Re-enable bracketed paste mode
+            buf += "\x1b[?2004h"
+            _sys.stdout.write(buf)
+            _sys.stdout.flush()
+        except Exception:
+            _log.debug("Failed to restore terminal modes on focus", exc_info=True)
 
     def stop(self) -> None:
         """Stop the renderer and event loop."""
