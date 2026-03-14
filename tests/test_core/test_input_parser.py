@@ -277,3 +277,107 @@ def test_escape_apc_sequence_is_consumed_silently():
 
     assert handled is True
     assert seen == []
+
+
+# ── xterm modified key with kitty event type suffix ──────────────
+
+
+def test_xterm_modified_key_with_release_event_type():
+    """CSI 1;1:3A = Up arrow release (kitty keyboard protocol flag 2)."""
+    handler = InputHandler()
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    handled = handler._dispatch_csi_sequence("1;1:3A")
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "up"
+    assert event.event_type == "release"
+    assert event.repeated is False
+
+
+def test_xterm_modified_key_with_repeat_event_type():
+    """CSI 1;1:2B = Down arrow repeat (kitty keyboard protocol flag 2)."""
+    handler = InputHandler()
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    handled = handler._dispatch_csi_sequence("1;1:2B")
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "down"
+    assert event.event_type == "press"
+    assert event.repeated is True
+
+
+def test_xterm_modified_key_with_press_event_type():
+    """CSI 1;2:1A = Shift+Up press (explicit event type 1)."""
+    handler = InputHandler()
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    handled = handler._dispatch_csi_sequence("1;2:1A")
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "up"
+    assert event.shift is True
+    assert event.event_type == "press"
+    assert event.repeated is False
+
+
+def test_xterm_modified_key_without_event_type_still_works():
+    """CSI 1;5C = Ctrl+Right (no event type suffix — classic xterm)."""
+    handler = InputHandler()
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    handled = handler._dispatch_csi_sequence("1;5C")
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "right"
+    assert event.ctrl is True
+    assert event.event_type == "press"
+    assert event.repeated is False
+
+
+# ── modified tilde with kitty event type suffix ──────────────────
+
+
+def test_modified_tilde_with_release_event_type():
+    """CSI 3;1:3~ = Delete release (kitty keyboard protocol flag 2)."""
+    handler = InputHandler()
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    handled = handler._dispatch_csi_sequence("3;1:3~")
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "delete"
+    assert event.event_type == "release"
+    assert event.repeated is False
+
+
+def test_modified_tilde_with_repeat_event_type():
+    """CSI 5;1:2~ = PageUp repeat (kitty keyboard protocol flag 2)."""
+    handler = InputHandler()
+    seen = []
+    handler.on_key(lambda event: seen.append(event))
+
+    handled = handler._dispatch_csi_sequence("5;1:2~")
+
+    assert handled is True
+    assert len(seen) == 1
+    event = seen[0]
+    assert event.key == "pageup"
+    assert event.event_type == "press"
+    assert event.repeated is True

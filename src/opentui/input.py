@@ -23,8 +23,9 @@ _log = logging.getLogger(__name__)
 _BRACKETED_PASTE_END = "\x1b[201~"
 _MODIFY_OTHER_KEYS_RE = re.compile(r"^27;(\d+);(\d+)~$")
 _KITTY_KEY_RE = re.compile(r"^(\d+(?::\d+)*)(?:;(\d+(?::\d+)*))?(?:;([\d:]+))?u$")
-# xterm-style modified key: CSI 1;modifier letter (e.g. 1;2A = Shift+Up)
-_XTERM_MODIFIED_KEY_RE = re.compile(r"^1;(\d+)([A-HPS])$")
+# xterm-style modified key: CSI 1;modifier[:event_type] letter
+# e.g. 1;2A = Shift+Up, 1;1:3A = Up release (kitty keyboard protocol)
+_XTERM_MODIFIED_KEY_RE = re.compile(r"^1;(\d+)(?::(\d+))?([A-HPS])$")
 _XTERM_MODIFIED_KEY_MAP: dict[str, str] = {
     "A": "up", "B": "down", "C": "right", "D": "left",
     "H": "home", "F": "end",
@@ -388,18 +389,36 @@ class InputHandler:
         if self._handle_kitty_keyboard(seq):
             return True
 
-        # xterm-style modified keys: CSI 1;modifier letter
+        # xterm-style modified keys: CSI 1;modifier[:event_type] letter
         # e.g. \x1b[1;2A = Shift+Up, \x1b[1;5C = Ctrl+Right
+        # With kitty keyboard protocol, event_type suffix: 1;1:3A = Up release
         xm = _XTERM_MODIFIED_KEY_RE.match(seq)
         if xm is not None:
             modifier = int(xm.group(1)) - 1
-            key_name = _XTERM_MODIFIED_KEY_MAP.get(xm.group(2))
+            event_type_code = xm.group(2) or "1"
+            key_name = _XTERM_MODIFIED_KEY_MAP.get(xm.group(3))
             if key_name is not None:
                 shift = bool(modifier & 1)
                 alt = bool(modifier & 2)
                 ctrl = bool(modifier & 4)
                 meta = bool(modifier & 8)
-                self._emit_key(key_name, f"\x1b[{seq}", shift=shift, alt=alt, ctrl=ctrl, meta=meta)
+                repeated = event_type_code == "2"
+                event_kind = "release" if event_type_code == "3" else "press"
+                event = KeyEvent(
+                    key=key_name,
+                    code=f"\x1b[{seq}",
+                    ctrl=ctrl,
+                    shift=shift,
+                    alt=alt,
+                    meta=meta,
+                    repeated=repeated,
+                    event_type=event_kind,
+                    source="raw",
+                )
+                for handler in self._key_handlers:
+                    handler(event)
+                    if event.propagation_stopped:
+                        break
                 return True
 
         # rxvt shifted key suffixes: CSI [num] $ (e.g., \x1b[2$ = Shift+Insert)
@@ -444,18 +463,42 @@ class InputHandler:
         # CSI tilde sequences: num~ (F1-F12, nav keys)
         if seq.endswith("~"):
             body = seq[:-1]
-            # Handle modified tilde: num;modifier~ (e.g. 3;5~ = Ctrl+Delete)
+            # Handle modified tilde: num;modifier[:event_type]~
+            # e.g. 3;5~ = Ctrl+Delete, 3;1:3~ = Delete release
             if ";" in body:
                 parts = body.split(";")
                 try:
                     num = int(parts[0])
-                    modifier = int(parts[1]) - 1
+                    mod_field = parts[1]
+                    if ":" in mod_field:
+                        mod_str, evt_str = mod_field.split(":", 1)
+                        modifier = int(mod_str) - 1
+                        event_type_code = evt_str
+                    else:
+                        modifier = int(mod_field) - 1
+                        event_type_code = "1"
                     key_name = _TILDE_KEY_MAP.get(num, f"unknown-{num}")
                     shift = bool(modifier & 1)
                     alt = bool(modifier & 2)
                     ctrl = bool(modifier & 4)
                     meta = bool(modifier & 8)
-                    self._emit_key(key_name, f"\x1b[{seq}", shift=shift, alt=alt, ctrl=ctrl, meta=meta)
+                    repeated = event_type_code == "2"
+                    event_kind = "release" if event_type_code == "3" else "press"
+                    event = KeyEvent(
+                        key=key_name,
+                        code=f"\x1b[{seq}",
+                        ctrl=ctrl,
+                        shift=shift,
+                        alt=alt,
+                        meta=meta,
+                        repeated=repeated,
+                        event_type=event_kind,
+                        source="raw",
+                    )
+                    for handler in self._key_handlers:
+                        handler(event)
+                        if event.propagation_stopped:
+                            break
                     return True
                 except (ValueError, IndexError):
                     pass
