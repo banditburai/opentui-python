@@ -85,24 +85,21 @@ class For(Renderable):
                 new_children.append(child)
                 created += 1
 
-        # Destroy removed children
-        destroyed = 0
-        for child in list(self._children):
-            if child.key is not None and child.key not in new_keys:
-                child._parent = None
-                child.destroy_recursively()
-                destroyed += 1
-
-        _log.debug(
-            "For[%s] reconcile: reused=%d created=%d destroyed=%d total=%d",
-            self.key, reused, created, destroyed, len(new_children),
-        )
+        # Collect removed children for destruction AFTER yoga sync.
+        # destroy_recursively() sets _yoga_node=None which releases the
+        # Python reference to the C++ yoga node — if the GC collects it
+        # while still in the parent's yoga child list, remove_all_children
+        # would dereference freed memory.
+        removed = [
+            child for child in self._children
+            if child.key is not None and child.key not in new_keys
+        ]
 
         self._children = new_children
         for child in new_children:
             child._parent = self
 
-        # Sync yoga tree
+        # Sync yoga tree BEFORE destroying removed nodes.
         if self._yoga_node is not None:
             self._yoga_node.remove_all_children()
             for child in new_children:
@@ -113,6 +110,16 @@ class For(Renderable):
                     self._yoga_node.insert_child(
                         child._yoga_node, self._yoga_node.child_count
                     )
+
+        # Now safe to destroy — yoga nodes are detached from parent.
+        for child in removed:
+            child._parent = None
+            child.destroy_recursively()
+
+        _log.debug(
+            "For[%s] reconcile: reused=%d created=%d destroyed=%d total=%d",
+            self.key, reused, created, len(removed), len(new_children),
+        )
 
     def _configure_yoga_node(self, node: Any) -> None:
         """Ensure keyed children exist before layout/configuration."""

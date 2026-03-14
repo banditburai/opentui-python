@@ -31,9 +31,12 @@ def detect_dropped_paths(text: str) -> list[str]:
 
     paths: list[str] = []
     for candidate in candidates:
-        path = Path(candidate).expanduser()
-        if path.exists():
-            paths.append(str(path))
+        try:
+            path = Path(candidate).expanduser()
+            if path.exists():
+                paths.append(str(path))
+        except OSError:
+            continue
     return paths
 
 
