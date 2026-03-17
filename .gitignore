@@ -14,7 +14,7 @@ build/
 .vscode/
 *.swp
 *.swo
-
+.claude/
 # Build artifacts
 src/opentui/opentui-libs/
 src/opentui_bindings/build/
@@ -25,6 +25,10 @@ _skbuild/
 CMakeCache.txt
 CMakeFiles/
 
+# Coverage
+.coverage
+htmlcov/
+
 # Cache
 .ruff_cache/
 .mypy_cache/
@@ -33,8 +37,16 @@ CMakeFiles/
 # OS
 .DS_Store
 
-# Project-specific
+# Reference upstream source (not for distribution)
+reference/
+
+# Internal docs and planning (not for distribution)
+docs/
+AGENTS.md
+PLAN.md
 progress.md
-DESIGN.md
+buffer_dump/
+
+# Issue tracking
 .beads/
-docs/plans/
+

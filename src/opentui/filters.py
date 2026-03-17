@@ -14,6 +14,8 @@ import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from .renderer import Buffer, TerminalCapabilities
 
 
@@ -105,10 +107,7 @@ class ImageRenderer:
             if not sixel_data:
                 return False
 
-            # Position cursor
             self._get_stdout().write(f"\x1b[{y + 1};{x + 1}H".encode())
-
-            # Write SIXEL data
             self._get_stdout().write(sixel_data)
             self._get_stdout().flush()
             return True
@@ -153,18 +152,13 @@ class ImageRenderer:
             return False
 
         try:
-            # Generate unique chunk ID for this image
             chunk_id = graphics_id if graphics_id is not None else self.get_next_graphics_id()
-
-            # Encode data for Kitty protocol
             chunks = _encode_kitty(data, chunk_id, width, height, x, y, transmission)
 
             stdout = self._get_stdout()
             wrapped_chunks = _wrap_kitty_for_transport(chunks)
             output_chunks = wrapped_chunks if wrapped_chunks is not None else chunks
             for chunk in output_chunks:
-                # Position the cursor before the first chunk so terminals place the image
-                # at the intended cell origin.
                 if chunk is output_chunks[0]:
                     stdout.write(f"\x1b[{y + 1};{x + 1}H".encode())
                 stdout.write(chunk)
@@ -228,7 +222,6 @@ class ImageRenderer:
             graphics_id: Specific graphics ID to clear, or None to clear all
         """
         try:
-            # Use Kitty protocol to clear (works for both Kitty and SIXEL)
             clear_seq = _clear_kitty_graphics(graphics_id)
             self._get_stdout().write(clear_seq)
             self._get_stdout().flush()
@@ -365,13 +358,12 @@ class ImageRenderer:
         try:
             from PIL import Image
         except ImportError:
-            raise ImportError("Pillow required for image loading: pip install pillow")
+            raise ImportError("Pillow required for image loading: pip install pillow") from None
 
         with Image.open(path) as img:
-            if img.mode != "RGBA":
-                img = img.convert("RGBA")
-            width, height = img.size
-            return img.tobytes(), width, height
+            converted = img.convert("RGBA") if img.mode != "RGBA" else img
+            width, height = converted.size
+            return converted.tobytes(), width, height
 
 
 class _EmptyCapabilities:
@@ -453,7 +445,7 @@ def _encode_sixel(
     """Encode RGBA image data as SIXEL graphics escape sequence.
 
     SIXEL encodes 6 vertical pixels as 6 bits (0-63 values).
-    Each group of 6 pixels becomes one character.
+    Each group of 6 pixels becomes one character in range 63-126.
 
     Args:
         data: Raw RGBA image data
@@ -472,97 +464,85 @@ def _encode_sixel(
     if len(data) < expected:
         return b""
 
-    # Build color palette - map RGB to palette index
     palette: dict[tuple[int, int, int], int] = {}
     palette_list: list[tuple[int, int, int]] = []
 
-    # Add background color as first palette entry
-    bg_sixel = (bg_color[0] * 63 // 255, bg_color[1] * 63 // 255, bg_color[2] * 63 // 255)
-    palette[bg_sixel] = 0
-    palette_list.append(bg_sixel)
-
-    # Convert RGB to 6-bit values (0-63) for SIXEL
-    def rgb_to_sixel(r: int, g: int, b: int) -> tuple[int, int, int]:
-        return (r * 63 // 255, g * 63 // 255, b * 63 // 255)
+    def rgb_to_quantized(r: int, g: int, b: int) -> tuple[int, int, int]:
+        return (r * 100 // 255, g * 100 // 255, b * 100 // 255)
 
     def get_color_index(r: int, g: int, b: int) -> int:
         key = (r, g, b)
         if key in palette:
             return palette[key]
         if len(palette_list) >= 256:
-            # Find closest existing color - use first palette color as fallback
             return 0
         idx = len(palette_list)
         palette_list.append(key)
         palette[key] = idx
         return idx
 
-    # SIXEL encoding: each 6 vertical pixels become one character
-    # We encode column by column
-    num_strips = (height + 5) // 6  # 6-pixel high strips
-    raster_data = bytearray()
+    # Register background color
+    bg_q = rgb_to_quantized(*bg_color)
+    get_color_index(*bg_q)
 
-    for x in range(width):
-        for strip in range(num_strips):
-            strip_start = strip * 6
-            strip_height = min(6, height - strip_start)
+    # Build a color index map for each pixel
+    pixel_colors = []
+    for i in range(width * height):
+        idx = i * bytes_per_pixel
+        r = data[idx]
+        g = data[idx + 1]
+        b = data[idx + 2]
+        a = data[idx + 3] if idx + 3 < len(data) else 255
 
-            # Build 6-pixel values for this strip
-            values = []
-            for dy in range(strip_height):
-                y = strip_start + dy
-                idx = (y * width + x) * bytes_per_pixel
+        if a < 128:
+            pixel_colors.append(0)  # Background color index
+        else:
+            q = rgb_to_quantized(r, g, b)
+            pixel_colors.append(get_color_index(*q))
 
-                r = data[idx]
-                g = data[idx + 1]
-                b = data[idx + 2]
-                a = data[idx + 3] if idx + 3 < len(data) else 255
+    num_strips = (height + 5) // 6
 
-                if a < 128:  # Transparent - use background
-                    values.append(0)  # Background color index
-                else:
-                    sixel_rgb = rgb_to_sixel(r, g, b)
-                    values.append(get_color_index(*sixel_rgb))
-
-            # Pad to 6 pixels with background
-            while len(values) < 6:
-                values.append(0)
-
-            # SIXEL encoding: each pixel is a bit in a 6-bit value
-            # Bit 0 = top pixel, bit 5 = bottom pixel
-            sixel_value = 0
-            for i, color_idx in enumerate(values):
-                if color_idx > 0:  # Only set bit if not background
-                    sixel_value |= 1 << i
-
-            # Output: Select color if different from previous, then output character
-            # For simplicity, we output color select + character
-            raster_data.append(63 + values[0])  # Single color encoding
-
-    # Build palette string
-    palette_parts = []
-    for i, (r, g, b) in enumerate(palette_list):
-        r8 = r * 255 // 63
-        g8 = g * 255 // 63
-        b8 = b * 255 // 63
-        palette_parts.append(f"#{i + 1};2;{r8};{g8};{b8}".encode())
-
-    palette_str = b"".join(palette_parts)
-
-    # Build final SIXEL sequence
+    # Build palette definitions: #colornum;2;r;g;b (RGB percentages 0-100)
     result = bytearray()
-    result.extend(b"\x1bP")  # SIXEL introducer
-    result.extend(b"q")  # Sixel graphics
+    result.extend(b"\x1bPq")  # SIXEL introducer: DCS q
+    # Raster attributes: "pan;pad;ph;pv
+    result.extend(f'"1;1;{width};{height}'.encode())
 
-    # Raster attributes: width;height;ph;pv;colors;raster-style
-    result.extend(f"{width};{height};1;1;{len(palette_list)};1".encode())
+    for i, (r, g, b) in enumerate(palette_list):
+        result.extend(f"#{i};2;{r};{g};{b}".encode())
 
-    if palette_str:
-        result.extend(b";")
-        result.extend(palette_str)
+    # Encode strips: each strip is 6 rows of pixels
+    for strip in range(num_strips):
+        strip_start = strip * 6
+        strip_height = min(6, height - strip_start)
 
-    result.extend(raster_data)
-    result.extend(b"\x1b\\")  # SIXEL terminator
+        # For each color in this strip, output a row of sixel characters
+        colors_in_strip: set[int] = set()
+        for dy in range(strip_height):
+            y = strip_start + dy
+            for x in range(width):
+                colors_in_strip.add(pixel_colors[y * width + x])
+
+        first_color = True
+        for color_idx in sorted(colors_in_strip):
+            if not first_color:
+                result.extend(b"$")  # Carriage return within strip
+            first_color = False
+
+            result.extend(f"#{color_idx}".encode())  # Select color
+
+            for x in range(width):
+                sixel_value = 0
+                for dy in range(strip_height):
+                    y = strip_start + dy
+                    if pixel_colors[y * width + x] == color_idx:
+                        sixel_value |= 1 << dy
+                result.append(63 + sixel_value)
+
+        if strip < num_strips - 1:
+            result.extend(b"-")  # Graphics new line
+
+    result.extend(b"\x1b\\")  # SIXEL terminator: ST
 
     return bytes(result)
 
@@ -595,12 +575,10 @@ def _encode_kitty(
     """
     import base64
 
-    # Kitty direct/file payloads are already encoded image bytes here (PNG for the
-    # current draw path). Recompressing them requires protocol flags we were not
-    # sending, which makes terminals reject the payload as invalid data.
+    # Recompressing payloads requires protocol flags we weren't sending,
+    # which makes terminals reject the payload as invalid.
     encoded = base64.b64encode(data)
 
-    # Split into chunks (max ~4096 bytes per chunk for Kitty)
     CHUNK_SIZE = 4000
     chunks: list[bytes] = []
 
@@ -612,20 +590,16 @@ def _encode_kitty(
         is_last = i == num_chunks - 1
 
         if transmission == "file":
-            # File transfer mode
             more = 0 if is_last else 1
             header = f"\x1b_Gi={chunk_id},a=T,t=f,m={more};".encode()
             chunk = header + chunk_data + b"\x1b\\"
+        elif is_first:
+            more = 0 if is_last else 1
+            header = f"\x1b_Gi={chunk_id},a=T,t=d,f=100,c={width},r={height},m={more};".encode()
+            chunk = header + chunk_data + b"\x1b\\"
         else:
-            if is_first:
-                more = 0 if is_last else 1
-                header = (
-                    f"\x1b_Gi={chunk_id},a=T,t=d,f=100,c={width},r={height},m={more};".encode()
-                )
-                chunk = header + chunk_data + b"\x1b\\"
-            else:
-                more = 0 if is_last else 1
-                chunk = f"\x1b_Gm={more};".encode() + chunk_data + b"\x1b\\"
+            more = 0 if is_last else 1
+            chunk = f"\x1b_Gm={more};".encode() + chunk_data + b"\x1b\\"
 
         chunks.append(chunk)
 
@@ -701,9 +675,7 @@ class ClipboardHandler:
             True if data appears to be an image
         """
         if len(data) < 8:
-            if len(data) >= 2 and data[:2] == self.JPEG_MAGIC:
-                return True
-            return False
+            return bool(len(data) >= 2 and data[:2] == self.JPEG_MAGIC)
 
         return data[:8] == self.PNG_MAGIC or data[:2] == self.JPEG_MAGIC
 
@@ -756,7 +728,7 @@ class ClipboardHandler:
         Raises:
             ImportError: If Pillow is not installed
         """
-        if data[:4] == self.PNG_MAGIC:
+        if data[:8] == self.PNG_MAGIC:
             raise ImportError("Pillow required for PNG: pip install pillow")
         elif data[:2] == self.JPEG_MAGIC:
             raise ImportError("Pillow required for JPEG: pip install pillow")
@@ -814,6 +786,7 @@ class GrayscaleFilter(Filter):
         """
         try:
             import numpy as np
+
             return self._apply_numpy(data, format)
         except ImportError:
             return self._apply_pure(data, format)
@@ -883,7 +856,6 @@ class GrayscaleFilter(Filter):
         pixels[:, 0] = gray
         pixels[:, 1] = gray
         pixels[:, 2] = gray
-        # Alpha channel (index 3) is preserved as-is from the copy
 
         return pixels.tobytes()
 
@@ -928,6 +900,7 @@ class BlurFilter(Filter):
         """
         try:
             import numpy as np
+
             return self._apply_numpy(data, width, height, format)
         except ImportError:
             return self._apply_pure(data, width, height, format)
@@ -1047,34 +1020,28 @@ class BlurFilter(Filter):
         if radius < 1:
             return data
 
-        # Create 1D Gaussian kernel for separable convolution
         sigma = radius / 3.0
         kernel_1d = self._create_gaussian_kernel_1d(radius, sigma)
 
-        # Reshape data into (height, width, channels) float array
-        arr = np.frombuffer(data, dtype=np.uint8).reshape(height, width, bytes_per_pixel).astype(np.float64)
+        arr = (
+            np.frombuffer(data, dtype=np.uint8)
+            .reshape(height, width, bytes_per_pixel)
+            .astype(np.float64)
+        )
 
-        # Determine which channels to blur (all color channels, preserve alpha)
-        num_blur_channels = bytes_per_pixel  # blur all channels including alpha for consistency
-
-        # Pad the image with edge values (replicate border)
         padded = np.pad(arr, ((radius, radius), (radius, radius), (0, 0)), mode="edge")
 
-        # Horizontal pass: convolve each row with the 1D kernel
-        kernel_h = kernel_1d.reshape(1, -1, 1)  # shape: (1, kernel_size, 1) for broadcasting
+        kernel_size = len(kernel_1d)
         h_result = np.zeros_like(arr, dtype=np.float64)
-        for k in range(len(kernel_1d)):
+        for k in range(kernel_size):
             h_result += padded[radius : radius + height, k : k + width, :] * kernel_1d[k]
 
-        # Pad the horizontal result for the vertical pass
         padded_h = np.pad(h_result, ((radius, radius), (0, 0), (0, 0)), mode="edge")
 
-        # Vertical pass: convolve each column with the 1D kernel
         v_result = np.zeros_like(arr, dtype=np.float64)
-        for k in range(len(kernel_1d)):
+        for k in range(kernel_size):
             v_result += padded_h[k : k + height, :, :] * kernel_1d[k]
 
-        # Clamp to [0, 255] and convert back to uint8
         result = np.clip(v_result, 0, 255).astype(np.uint8)
 
         return result.tobytes()
@@ -1103,7 +1070,7 @@ class BlurFilter(Filter):
 
         return [k / sum_val for k in kernel]
 
-    def _create_gaussian_kernel_1d(self, radius: int, sigma: float) -> "np.ndarray":
+    def _create_gaussian_kernel_1d(self, radius: int, sigma: float) -> np.ndarray:
         """Create a 1D Gaussian kernel for separable convolution.
 
         Args:
@@ -1157,6 +1124,7 @@ class BrightnessFilter(Filter):
         """
         try:
             import numpy as np
+
             return self._apply_numpy(data, format)
         except ImportError:
             return self._apply_pure(data, format)
@@ -1211,7 +1179,6 @@ class BrightnessFilter(Filter):
         arr = arr[: num_pixels * bytes_per_pixel]
         pixels = arr.reshape(num_pixels, bytes_per_pixel)
 
-        # Scale color channels, leave alpha untouched
         color = pixels[:, :3].astype(np.float64) * self._factor
         pixels[:, :3] = np.clip(color, 0, 255).astype(np.uint8)
 
@@ -1253,6 +1220,7 @@ class ContrastFilter(Filter):
         """
         try:
             import numpy as np
+
             return self._apply_numpy(data, format)
         except ImportError:
             return self._apply_pure(data, format)
@@ -1308,7 +1276,6 @@ class ContrastFilter(Filter):
         arr = arr[: num_pixels * bytes_per_pixel]
         pixels = arr.reshape(num_pixels, bytes_per_pixel)
 
-        # Apply contrast formula: midpoint + (value - midpoint) * factor
         color = pixels[:, :3].astype(np.float64)
         color = 128.0 + (color - 128.0) * self._factor
         pixels[:, :3] = np.clip(color, 0, 255).astype(np.uint8)
@@ -1345,6 +1312,7 @@ class SepiaFilter(Filter):
         """
         try:
             import numpy as np
+
             return self._apply_numpy(data, format)
         except ImportError:
             return self._apply_pure(data, format)
@@ -1414,15 +1382,13 @@ class SepiaFilter(Filter):
         # Extract RGB channels as float
         rgb = pixels[:, :3].astype(np.float64)
 
-        # Sepia transformation matrix (applied as matrix multiply)
-        # Each row produces one output channel from all three input channels
-        sepia_matrix = np.array([
-            [0.393, 0.769, 0.189],  # R' coefficients
-            [0.349, 0.686, 0.168],  # G' coefficients
-            [0.272, 0.534, 0.131],  # B' coefficients
-        ])
-
-        # Matrix multiply: (num_pixels, 3) @ (3, 3)^T -> (num_pixels, 3)
+        sepia_matrix = np.array(
+            [
+                [0.393, 0.769, 0.189],  # R' coefficients
+                [0.349, 0.686, 0.168],  # G' coefficients
+                [0.272, 0.534, 0.131],
+            ]
+        )
         sepia_rgb = rgb @ sepia_matrix.T
 
         pixels[:, :3] = np.clip(sepia_rgb, 0, 255).astype(np.uint8)
@@ -1454,6 +1420,7 @@ class InvertFilter(Filter):
         """
         try:
             import numpy as np
+
             return self._apply_numpy(data, format)
         except ImportError:
             return self._apply_pure(data, format)
@@ -1507,7 +1474,6 @@ class InvertFilter(Filter):
         arr = arr[: num_pixels * bytes_per_pixel]
         pixels = arr.reshape(num_pixels, bytes_per_pixel)
 
-        # Invert only color channels, preserve alpha
         pixels[:, :3] = 255 - pixels[:, :3]
 
         return pixels.tobytes()

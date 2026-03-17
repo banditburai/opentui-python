@@ -48,25 +48,25 @@ import logging
 import time
 
 import opentui
-from opentui import Box, Text, Signal, use_keyboard, use_mouse, use_renderer
-from opentui.components.box import ScrollBox
+from opentui import Box, Signal, Text, use_keyboard, use_mouse, use_renderer
+from opentui.components.box import MacOSScrollAccel, ScrollBox
 from opentui.components.composition import VRenderable
 from opentui.components.control_flow import For, Switch
 from opentui.structs import RGBA
 
 # ── Theme ─────────────────────────────────────────────────────────────────
 
-BG = RGBA(0.09, 0.09, 0.13, 1.0)           # Dark background
-BG_SURFACE = RGBA(0.12, 0.12, 0.18, 1.0)   # Slightly lighter surface
-BORDER_COLOR = RGBA(0.25, 0.25, 0.35, 1.0) # Subtle border
-TEXT_DIM = RGBA(0.40, 0.40, 0.50, 1.0)     # Dimmed text
+BG = RGBA(0.09, 0.09, 0.13, 1.0)  # Dark background
+BG_SURFACE = RGBA(0.12, 0.12, 0.18, 1.0)  # Slightly lighter surface
+BORDER_COLOR = RGBA(0.25, 0.25, 0.35, 1.0)  # Subtle border
+TEXT_DIM = RGBA(0.40, 0.40, 0.50, 1.0)  # Dimmed text
 TEXT_NORMAL = RGBA(0.75, 0.75, 0.80, 1.0)  # Normal text
-TEXT_BRIGHT = RGBA(1.0, 1.0, 1.0, 1.0)     # Bright text
+TEXT_BRIGHT = RGBA(1.0, 1.0, 1.0, 1.0)  # Bright text
 TAB_ACTIVE_BG = RGBA(0.2, 0.3, 0.5, 1.0)  # Active tab background
 
-COLOR_INFO = RGBA(0.3, 0.5, 0.9, 1.0)     # Blue
-COLOR_WARN = RGBA(0.9, 0.7, 0.2, 1.0)     # Yellow
-COLOR_ERROR = RGBA(0.9, 0.3, 0.3, 1.0)    # Red
+COLOR_INFO = RGBA(0.3, 0.5, 0.9, 1.0)  # Blue
+COLOR_WARN = RGBA(0.9, 0.7, 0.2, 1.0)  # Yellow
+COLOR_ERROR = RGBA(0.9, 0.3, 0.3, 1.0)  # Red
 COLOR_SUCCESS = RGBA(0.3, 0.8, 0.3, 1.0)  # Green
 
 SCROLLBAR_TRACK = RGBA(0.4, 0.4, 0.5, 1.0)
@@ -108,8 +108,8 @@ DETAILS = [
 # ── Signals ──────────────────────────────────────────────────────────────
 
 count = Signal("count", 0)
-active_tab = Signal("active_tab", 0)        # 0 = counter, 1 = log
-log_entries = Signal("log_entries", [])      # list of entry dicts
+active_tab = Signal("active_tab", 0)  # 0 = counter, 1 = log
+log_entries = Signal("log_entries", [])  # list of entry dicts
 border_round = Signal("border_round", False)
 status_color_idx = Signal("status_color_idx", 0)
 entry_counter = Signal("entry_counter", 0)  # auto-increment ID
@@ -120,15 +120,15 @@ entry_counter = Signal("entry_counter", 0)  # auto-increment ID
 # so only the cheap render path runs.  This matches OpenCode's approach
 # where scroll state NEVER triggers full component rebuilds.
 _scroll_offset: int = 0
-_user_scrolled: bool = False   # True = user scrolled away from bottom
-_new_below: int = 0            # entries added while scrolled up
-selected_entry = Signal("selected_entry", None) # entry ID for expand/collapse
+_user_scrolled: bool = False  # True = user scrolled away from bottom
+_new_below: int = 0  # entries added while scrolled up
+selected_entry = Signal("selected_entry", None)  # entry ID for expand/collapse
 
 STATUS_COLORS = [
     COLOR_SUCCESS,  # green
-    COLOR_WARN,     # yellow
-    COLOR_ERROR,    # red
-    COLOR_INFO,     # blue
+    COLOR_WARN,  # yellow
+    COLOR_ERROR,  # red
+    COLOR_INFO,  # blue
 ]
 
 TAB_NAMES = ["Counter", "Log"]
@@ -142,83 +142,6 @@ EXPANDED_EXTRA_ROWS = 4  # border + 2 detail lines + border
 #
 # Source: reference/opentui/packages/core/src/lib/scroll-acceleration.ts
 #
-# macOS-inspired exponential scroll acceleration.  Measures inter-tick
-# intervals, keeps a short moving window, and maps average velocity to
-# a multiplier via an exponential curve.  Filters duplicate Ghostty
-# ticks (<6 ms apart) and resets after 150 ms of inactivity.
-
-import math
-
-class MacOSScrollAccel:
-    """macOS-inspired scroll acceleration (ported from OpenTUI TypeScript).
-
-    Measures time between consecutive scroll events and applies an
-    exponential multiplier so quick bursts accelerate while slower
-    gestures stay precise.
-
-    Options mirror the TypeScript constructor:
-      A             – amplitude of the exponential curve (default 0.8)
-      tau           – velocity divisor / time constant (default 3)
-      max_multiplier – hard cap on returned multiplier (default 6)
-    """
-
-    _HISTORY_SIZE = 3          # number of intervals in moving window
-    _STREAK_TIMEOUT = 150      # ms — reset if no scroll for this long
-    _MIN_TICK_INTERVAL = 6     # ms — ignore duplicate Ghostty ticks
-    _REFERENCE_INTERVAL = 100  # ms — baseline for velocity normalisation
-
-    __slots__ = ("_A", "_tau", "_max_mult", "_last_tick_ms", "_history")
-
-    def __init__(
-        self,
-        *,
-        A: float = 0.8,
-        tau: float = 3.0,
-        max_multiplier: float = 6.0,
-    ):
-        self._A = A
-        self._tau = tau
-        self._max_mult = max_multiplier
-        self._last_tick_ms: float = 0.0
-        self._history: list[float] = []
-
-    def tick(self, now_ms: float | None = None) -> float:
-        """Called on each scroll event.  Returns a multiplier (>= 1)."""
-        if now_ms is None:
-            now_ms = time.monotonic() * 1000.0  # ms
-
-        dt = (now_ms - self._last_tick_ms) if self._last_tick_ms else float("inf")
-
-        # Reset streak on first tick or after timeout
-        if dt == float("inf") or dt > self._STREAK_TIMEOUT:
-            self._last_tick_ms = now_ms
-            self._history.clear()
-            return 1.0
-
-        # Ignore duplicate trackpad ticks (Ghostty sends 2+ per notch)
-        # https://github.com/ghostty-org/ghostty/discussions/7577
-        if dt < self._MIN_TICK_INTERVAL:
-            return 1.0
-
-        self._last_tick_ms = now_ms
-
-        self._history.append(dt)
-        if len(self._history) > self._HISTORY_SIZE:
-            self._history.pop(0)
-
-        # Average interval → velocity → exponential multiplier
-        avg_interval = sum(self._history) / len(self._history)
-        velocity = self._REFERENCE_INTERVAL / avg_interval
-        x = velocity / self._tau
-        multiplier = 1.0 + self._A * (math.exp(x) - 1.0)
-
-        return min(multiplier, self._max_mult)
-
-    def reset(self) -> None:
-        self._last_tick_ms = 0.0
-        self._history.clear()
-
-
 _scroll_accel = MacOSScrollAccel()
 _scroll_accumulator_y: float = 0.0  # fractional precision across frames
 
@@ -438,8 +361,7 @@ def _render_scrollbar(buffer, _dt, node):
     if height != _last_viewport_height:
         _last_viewport_height = height
         ms = _max_scroll()
-        if _scroll_offset > ms:
-            _scroll_offset = ms
+        _scroll_offset = min(_scroll_offset, ms)
 
     total = _content_height()
     scroll = _scroll_offset
@@ -541,18 +463,18 @@ def log_panel():
 
         # Scroll indicator — fixed 1-row VRenderable (stable viewport height).
         # Reads _user_scrolled/_new_below at render time — no Signal, no rebuild.
-        panel_children.append(VRenderable(
-            render_fn=_render_scroll_indicator,
-            height=1,
-            flex_shrink=0,
-        ))
+        panel_children.append(
+            VRenderable(
+                render_fn=_render_scroll_indicator,
+                height=1,
+                flex_shrink=0,
+            )
+        )
 
         # Footer with live scroll info (VRenderable — updates every frame)
         panel_children.append(VRenderable(render_fn=_render_footer, height=1, flex_shrink=0))
     else:
-        panel_children.append(
-            Text("(empty — press 'a' to add)", italic=True, fg=TEXT_DIM, bg=BG)
-        )
+        panel_children.append(Text("(empty — press 'a' to add)", italic=True, fg=TEXT_DIM, bg=BG))
 
     return Box(*panel_children, padding=1, gap=0, flex_grow=1, overflow="hidden")
 
@@ -603,7 +525,11 @@ def dashboard():
         content,
         Box(Text("─" * 60, fg=BORDER_COLOR, bg=BG)),
         status_bar(),
-        Text("q=quit  Tab=switch  +/-=count  a/d=log  scroll=navigate  b=bottom  space=expand  t/c=style", fg=TEXT_DIM, bg=BG),
+        Text(
+            "q=quit  Tab=switch  +/-=count  a/d=log  scroll=navigate  b=bottom  space=expand  t/c=style",
+            fg=TEXT_DIM,
+            bg=BG,
+        ),
         border=True,
         border_style="round" if border_round() else "single",
         border_color=BORDER_COLOR,
@@ -624,7 +550,7 @@ def handle_key(event):
         use_renderer().stop()
     elif event.name == "tab":
         active_tab.set((active_tab() + 1) % len(TAB_NAMES))
-    elif event.name == "+" or event.name == "=":
+    elif event.name in {"+", "="}:
         count.add(1)
     elif event.name == "-":
         count.add(-1)
@@ -663,8 +589,7 @@ def handle_key(event):
             log_entries.set(entries)
             # Clamp scroll to new max
             ms = _max_scroll()
-            if _scroll_offset > ms:
-                _scroll_offset = ms
+            _scroll_offset = min(_scroll_offset, ms)
             if not entries:
                 _scroll_offset = 0
                 _user_scrolled = False
@@ -676,7 +601,7 @@ def handle_key(event):
             _scroll_to_bottom()
 
     # Expand/collapse entry
-    elif event.name == "space" or event.name == " ":
+    elif event.name in {"space", " "}:
         if active_tab() == 1:
             entries = log_entries()
             if entries:
@@ -737,6 +662,7 @@ def _debug_frame(dt):
 
     # Find the For node in the tree
     for_info = ""
+
     def _find_for(node):
         nonlocal for_info
         if isinstance(node, For):
@@ -745,6 +671,7 @@ def _debug_frame(dt):
                 for_info += f" yoga_children={node._yoga_node.child_count}"
                 # Check For's computed layout
                 from opentui import layout as yoga_layout
+
                 layout = yoga_layout.get_layout(node._yoga_node)
                 for_info += f" h={int(layout['height'])} w={int(layout['width'])}"
             return
@@ -755,8 +682,14 @@ def _debug_frame(dt):
 
     _debug_log.info(
         "frame=%d nodes=%d depth=%d entries=%d scroll=%d viewport=%d max_scroll=%d content_h=%d %s",
-        _frame_count, total_nodes, max_depth, len(entries),
-        _scroll_offset, _viewport_height(), _max_scroll(), _content_height(),
+        _frame_count,
+        total_nodes,
+        max_depth,
+        len(entries),
+        _scroll_offset,
+        _viewport_height(),
+        _max_scroll(),
+        _content_height(),
         for_info,
     )
 
@@ -772,6 +705,7 @@ def _setup_debug_logging():
     _debug_logging_setup = True
 
     import os
+
     level_name = os.environ.get("LOGLEVEL", "WARNING").upper()
     if level_name == "WARNING":
         return  # No debug logging requested

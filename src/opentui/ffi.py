@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import importlib.util
 import ctypes
+import importlib.util
+import logging
 import os
 import site
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    pass
-
+_log = logging.getLogger(__name__)
 
 _NATIVE_AVAILABLE = False
 _native_module: Any = None
@@ -24,15 +23,17 @@ def _iter_binding_search_dirs() -> list[str]:
     dirs: list[str] = [current_dir]
 
     seen = set(dirs)
-    for base in site.getsitepackages():
-        candidate = os.path.join(base, "opentui")
+
+    # Parent of package directory (for development/editable installs)
+    if package_dir not in seen:
+        candidate = os.path.join(package_dir, "opentui")
         if candidate not in seen:
             dirs.append(candidate)
             seen.add(candidate)
 
-    for base in sys.path:
-        if not base:
-            continue
+    # Trusted install locations only — do NOT iterate sys.path which
+    # includes the current working directory and enables SO/DLL hijacking.
+    for base in site.getsitepackages():
         candidate = os.path.join(base, "opentui")
         if candidate not in seen:
             dirs.append(candidate)
@@ -45,16 +46,29 @@ def _iter_binding_search_dirs() -> list[str]:
     return dirs
 
 
+def _get_lib_names() -> list[str]:
+    """Return candidate library filenames for the current platform."""
+    if sys.platform == "darwin":
+        return ["libopentui.dylib"]
+    elif sys.platform == "win32":
+        return ["opentui.dll", "libopentui.dll"]
+    else:  # linux and other unix
+        return ["libopentui.so"]
+
+
 def _preload_opentui_library() -> None:
     current_dir = os.path.dirname(os.path.abspath(__file__))
     package_dir = os.path.dirname(current_dir)
-    candidates = [
-        os.path.join(current_dir, "opentui-libs", "libopentui.dylib"),
-        os.path.join(package_dir, "opentui", "opentui-libs", "libopentui.dylib"),
-    ]
+    lib_names = _get_lib_names()
+
+    candidates = []
+    for lib_name in lib_names:
+        candidates.append(os.path.join(current_dir, "opentui-libs", lib_name))
+        candidates.append(os.path.join(package_dir, "opentui", "opentui-libs", lib_name))
 
     for so_dir in _iter_binding_search_dirs():
-        candidates.append(os.path.join(so_dir, "opentui-libs", "libopentui.dylib"))
+        for lib_name in lib_names:
+            candidates.append(os.path.join(so_dir, "opentui-libs", lib_name))
 
     for candidate in candidates:
         if not os.path.isfile(candidate):
@@ -62,7 +76,8 @@ def _preload_opentui_library() -> None:
         try:
             ctypes.CDLL(candidate, mode=ctypes.RTLD_GLOBAL)
             return
-        except OSError:
+        except OSError as exc:
+            _log.debug("Failed to preload library %s: %s", candidate, exc)
             continue
 
 
@@ -93,7 +108,8 @@ def _try_load_nanobind() -> None:
                     spec.loader.exec_module(_native_module)
                     _NATIVE_AVAILABLE = True
                     return
-            except Exception:
+            except Exception as exc:
+                _log.debug("Failed to load nanobind bindings from %s: %s", so_file, exc)
                 continue
 
 
@@ -143,8 +159,11 @@ class NanobindLibrary:
         return self._native.buffer.buffer_get_attributes_ptr(buffer)
 
 
+_cached_library: NanobindLibrary | None = None
+
+
 def get_library() -> NanobindLibrary:
-    """Get the global library instance.
+    """Get the global library instance (cached after first call).
 
     Returns:
         NanobindLibrary instance
@@ -152,11 +171,15 @@ def get_library() -> NanobindLibrary:
     Raises:
         RuntimeError: If nanobind bindings are not available
     """
+    global _cached_library
+    if _cached_library is not None:
+        return _cached_library
     if not _NATIVE_AVAILABLE or _native_module is None:
         raise RuntimeError(
             "OpenTUI native bindings not available. Please ensure nanobind bindings are installed."
         )
-    return NanobindLibrary()
+    _cached_library = NanobindLibrary()
+    return _cached_library
 
 
 def is_native_available() -> bool:

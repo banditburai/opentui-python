@@ -53,7 +53,6 @@ class VRenderable(Renderable):
         if self._render_fn:
             self._render_fn(buffer, delta_time, self)
 
-        # Render children
         for child in self._children:
             if isinstance(child, Renderable):
                 child.render(buffer, delta_time)

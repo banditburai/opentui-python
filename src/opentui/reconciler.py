@@ -11,7 +11,7 @@ import logging
 import types
 from typing import TYPE_CHECKING
 
-from .components.control_flow import For
+from .components.control_flow import For, Portal
 
 if TYPE_CHECKING:
     from .components.base import BaseRenderable
@@ -23,47 +23,59 @@ _SENTINEL = object()
 # Attributes that must NOT be copied during patching — these are either
 # identity / tree-structure fields managed by the reconciler itself, or
 # computed values that the layout engine will overwrite each frame.
-_SKIP_ATTRS: frozenset[str] = frozenset({
-    # Identity & tree structure (managed by reconciler)
-    "_id",
-    "key",
-    "_parent",
-    "_children",
-    # Internal state (preserved from old node)
-    "_event_handlers",
-    "_cleanups",
-    "_dirty",
-    # Layout engine state (recomputed by yoga each frame)
-    "_yoga_node",
-    "_x",
-    "_y",
-    "_layout_x",
-    "_layout_y",
-    "_layout_width",
-    "_layout_height",
-    # Image render state (preserved from old node)
-    "_graphics_id",
-    "_last_draw_signature",
-    "_was_suppressed",
-    # Scroll position (render-time state, not a tree property)
-    "_scroll_offset_y",
-    "_scroll_offset_x",
-    "_scroll_accumulator_x",
-    "_scroll_accumulator_y",
-    "_scroll_width",
-    "_scroll_height",
-    "_viewport_width",
-    "_viewport_height",
-    "_has_manual_scroll",
-    "_is_applying_sticky_scroll",
-    "_sticky_scroll_top",
-    "_sticky_scroll_bottom",
-    "_sticky_scroll_left",
-    "_sticky_scroll_right",
-    "_scroll_acceleration",
-    # desired_scroll_y tracking (preserved from old node)
-    "_last_applied_desired_y",
-})
+_SKIP_ATTRS: frozenset[str] = frozenset(
+    {
+        # Identity & tree structure (managed by reconciler)
+        "_id",
+        "_num",
+        "key",
+        "_parent",
+        "_children",
+        # Internal state (preserved from old node)
+        "_event_handlers",
+        "_cleanups",
+        "_dirty",
+        "_destroyed",
+        # Layout engine state (recomputed by yoga each frame)
+        "_yoga_node",
+        "_x",
+        "_y",
+        "_layout_x",
+        "_layout_y",
+        "_layout_width",
+        "_layout_height",
+        # Image render state (preserved from old node)
+        "_graphics_id",
+        "_last_draw_signature",
+        "_was_suppressed",
+        # Scroll position (render-time state, not a tree property)
+        "_scroll_offset_y",
+        "_scroll_offset_x",
+        "_scroll_accumulator_x",
+        "_scroll_accumulator_y",
+        "_scroll_width",
+        "_scroll_height",
+        "_viewport_width",
+        "_viewport_height",
+        "_has_manual_scroll",
+        "_is_applying_sticky_scroll",
+        "_sticky_scroll_top",
+        "_sticky_scroll_bottom",
+        "_sticky_scroll_left",
+        "_sticky_scroll_right",
+        "_scroll_acceleration",
+        # desired_scroll_y tracking (preserved from old node)
+        "_last_applied_desired_y",
+        # Portal runtime state (preserved from old node).
+        # Note: _mount_source and _ref_fn are intentionally NOT skipped —
+        # they should update on reconciliation so Portal picks up new mount
+        # targets and ref callbacks from the latest render output.
+        "_container",
+        "_current_mount",
+        "_host",
+        "_content_children",
+    }
+)
 
 # Cache: type → tuple of patchable slot names
 _slots_cache: dict[type, tuple[str, ...]] = {}
@@ -92,15 +104,22 @@ def _node_key(node: BaseRenderable) -> tuple[type, str | int | None]:
 
 
 def _init_nested_fors(node: BaseRenderable) -> None:
-    """Recursively find For nodes in a new subtree and build their children.
+    """Recursively find For/Portal nodes in a new subtree and initialize them.
 
     For nodes are lazy — __init__ does not call _reconcile_children().
+    Portal nodes need _ensure_container() called to create their container.
     When a new subtree is inserted (e.g. Box → ScrollBox → For), the
     reconciler only sees the top-level Box.  This function walks the
-    subtree to initialize any For nodes at any depth.
+    subtree to initialize any For/Portal nodes at any depth.
     """
     if isinstance(node, For):
         node._reconcile_children()
+    elif isinstance(node, Portal):
+        node._ensure_container()
+        if node._container is not None:
+            for child in node._container._children:
+                _init_nested_fors(child)
+        return  # Portal's own _children stays empty; don't recurse into it
     for child in node._children:
         _init_nested_fors(child)
 
@@ -116,7 +135,6 @@ def reconcile(
     - Unmatched old: destroy
     - Unmatched new: insert as-is
     """
-    # Build index of old children by (type, key)
     old_by_key: dict[tuple[type, str | int | None], BaseRenderable] = {}
     old_unkeyed: list[BaseRenderable] = []
 
@@ -155,11 +173,25 @@ def reconcile(
             # For component: self-managed idiomorph reconciliation
             if isinstance(matched, For):
                 matched._reconcile_children()
+            elif isinstance(matched, Portal):
+                # Portal manages its own container children
+                new_portal = new_child  # Same type as matched (Portal)
+                assert isinstance(new_portal, Portal)
+                if matched._container is not None:
+                    old_content = list(matched._container._children)
+                    new_content = list(new_portal._content_children)
+                    matched._container._children.clear()
+                    matched._container._children_tuple = None
+                    reconcile(matched._container, old_content, new_content)
+                else:
+                    # Container not yet created — update content children for next _ensure_container
+                    matched._content_children = list(new_portal._content_children)
             elif hasattr(new_child, "_children"):
                 # Normal recursive reconciliation
                 old_grandchildren = list(matched._children)
                 new_grandchildren = list(new_child._children)
                 matched._children.clear()
+                matched._children_tuple = None
                 reconcile(matched, old_grandchildren, new_grandchildren)
 
             matched._parent = parent
@@ -174,6 +206,7 @@ def reconcile(
             result.append(new_child)
 
     parent._children = result
+    parent._children_tuple = None
 
     # Sync yoga tree BEFORE destroying unmatched old nodes.
     #

@@ -61,8 +61,7 @@ def normalize_paste_payload(raw: bytes | str) -> PasteEvent:
     if paths:
         return PasteEvent(
             attachments=[
-                AttachmentPayload(kind="file", path=path, name=Path(path).name)
-                for path in paths
+                AttachmentPayload(kind="file", path=path, name=Path(path).name) for path in paths
             ]
         )
 

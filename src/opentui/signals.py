@@ -7,10 +7,12 @@ signal changes trigger re-renders.
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import itertools
 import threading
-from typing import Any, Callable, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Any, Protocol, runtime_checkable
 
 # Re-export Expr types for backward compatibility
 from .expr import (
@@ -35,6 +37,12 @@ _tracking_context: contextvars.ContextVar[set[Signal] | None] = contextvars.Cont
     "_tracking_context", default=None
 )
 
+# ── Batching state ──────────────────────────────────────────────────
+# Module-level globals for zero-overhead access on the hot path.
+# Single-threaded assumption (matches the rest of the signal system).
+_batch_depth: int = 0
+_batch_pending: set[Signal] = set()
+
 
 @runtime_checkable
 class ReadableSignal(Protocol):
@@ -53,6 +61,7 @@ class _SignalState:
 
     def __init__(self):
         self._signals: list[Signal] = []
+        self._signal_ids: set[int] = set()
         self._notified: set[Signal] = set()
         self._lock = threading.Lock()
 
@@ -63,8 +72,10 @@ class _SignalState:
         return cls._instance
 
     def register(self, signal: Signal) -> None:
+        sid = id(signal)
         with self._lock:
-            if not any(s is signal for s in self._signals):
+            if sid not in self._signal_ids:
+                self._signal_ids.add(sid)
                 self._signals.append(signal)
 
     def mark_notified(self, signal: Signal) -> None:
@@ -75,6 +86,7 @@ class _SignalState:
 
     def reset(self) -> None:
         self._signals.clear()
+        self._signal_ids.clear()
         self._notified.clear()
 
 
@@ -145,16 +157,21 @@ class Signal:
         self._subscribers.append(fn)
 
         def unsubscribe() -> None:
-            try:
+            with contextlib.suppress(ValueError):
                 self._subscribers.remove(fn)
-            except ValueError:
-                pass
 
         return unsubscribe
 
     def _notify(self) -> None:
-        """Notify _SignalState and subscribers."""
+        """Notify _SignalState and subscribers (deferred if inside a batch)."""
         _SignalState.get_instance().mark_notified(self)
+        if _batch_depth > 0:
+            _batch_pending.add(self)
+            return
+        self._run_subscribers()
+
+    def _run_subscribers(self) -> None:
+        """Fire subscriber callbacks with current value."""
         if self._notifying:
             return  # Prevent reentrant notification
         self._notifying = True
@@ -276,11 +293,54 @@ def effect(fn: Callable[[], Any], *deps: ReadableSignal) -> Callable[[], None]:
     return cleanup
 
 
+def _flush_batch() -> None:
+    """Flush all pending signal notifications after outermost batch exits."""
+    global _batch_pending
+    # Snapshot and clear before notifying — subscribers may call .set()
+    # on other signals, which will fire immediately (non-batched).
+    pending = _batch_pending
+    _batch_pending = set()
+    for signal in pending:
+        signal._run_subscribers()
+
+
+class Batch:
+    """Defer subscriber notifications until the outermost batch exits.
+
+    Values update immediately so reads within the batch see new state.
+    Subscribers fire at most once per signal with the final value.
+    Batches can nest — only the outermost flush triggers notifications.
+
+    Usage::
+
+        with Batch():
+            name.set("plan")
+            color.set("yellow")
+            model.set("claude-haiku")
+        # all subscribers notified once here
+    """
+
+    __slots__ = ()
+
+    def __enter__(self) -> None:
+        global _batch_depth
+        _batch_depth += 1
+
+    def __exit__(self, *_: Any) -> None:
+        global _batch_depth
+        if _batch_depth <= 0:
+            return
+        _batch_depth -= 1
+        if _batch_depth == 0:
+            _flush_batch()
+
+
 __all__ = [
     "Signal",
     "ReadableSignal",
     "computed",
     "effect",
+    "Batch",
     "_SignalState",
     "_ComputedSignal",
     # Re-exported from expr for backward compat

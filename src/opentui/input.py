@@ -6,6 +6,8 @@ This module handles reading and parsing terminal input events
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import logging
 import os
 import re
@@ -21,90 +23,245 @@ from .events import KeyEvent, MouseButton, MouseEvent, PasteEvent
 
 _log = logging.getLogger(__name__)
 _BRACKETED_PASTE_END = "\x1b[201~"
+_MAX_CSI_BUFFER = 1024  # Max CSI sequence length before reset
+_MAX_ST_BUFFER = 65536  # Max DCS/APC/OSC buffer size before reset
+MAX_PASTE_SIZE = 1024 * 1024  # 1 MB max paste size
 _MODIFY_OTHER_KEYS_RE = re.compile(r"^27;(\d+);(\d+)~$")
-_KITTY_KEY_RE = re.compile(r"^(\d+(?::\d+)*)(?:;(\d+(?::\d+)*))?(?:;([\d:]+))?u$")
+_KITTY_KEY_RE = re.compile(r"^(\d+(?::\d+)*)(?:;(\d+(?::\d*)*))?(?:;([\d:]+))?u$")
 # xterm-style modified key: CSI 1;modifier[:event_type] letter
 # e.g. 1;2A = Shift+Up, 1;1:3A = Up release (kitty keyboard protocol)
 _XTERM_MODIFIED_KEY_RE = re.compile(r"^1;(\d+)(?::(\d+))?([A-HPS])$")
 _XTERM_MODIFIED_KEY_MAP: dict[str, str] = {
-    "A": "up", "B": "down", "C": "right", "D": "left",
-    "H": "home", "F": "end",
-    "P": "f1", "Q": "f2", "R": "f3", "S": "f4",
+    "A": "up",
+    "B": "down",
+    "C": "right",
+    "D": "left",
+    "H": "home",
+    "F": "end",
+    "P": "f1",
+    "Q": "f2",
+    "R": "f3",
+    "S": "f4",
 }
-# ANSI escape stripping for paste text (equivalent to Bun.stripANSI)
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\].*?(?:\x1b\\|\x07)|\x1b[^[\]()]")
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-9;?]*[A-Za-z]"  # CSI sequences (including private params like \x1b[?...)
+    r"|\x1b\].*?(?:\x1b\\|\x07)"  # OSC sequences
+    r"|\x1bP[^\x1b]*(?:\x1b\\|\x9c)"  # DCS sequences
+    r"|\x1b_[^\x1b]*(?:\x1b\\|\x9c)"  # APC sequences
+    r"|\x1b[^[\]()]"  # Other two-byte escape sequences
+    r"|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]"  # C0/C1 control chars (except \t, \n, \r)
+)
 
-# Kitty functional key range (57344–57454) — matches upstream kittyKeyMap
+# XTVersion response content: ">|name(version)" or ">|name version"
+_XTVERSION_RE = re.compile(r"^>\|(.+)$")
+# Kitty graphics response content: "Gi=N;payload"
+_KITTY_GRAPHICS_RE = re.compile(r"^Gi=(\d+);(.*)$")
+# DECRPM response: "?mode;value$y" (CSI body after ESC[)
+_DECRPM_RE = re.compile(r"^\?(\d+);(\d+)\$y$")
+# DA1 response: "?params c" (CSI body after ESC[)
+_DA1_RE = re.compile(r"^\?([0-9;]*)c$")
+# Kitty keyboard query response: "?Nu" (CSI body after ESC[)
+_KITTY_KB_QUERY_RE = re.compile(r"^\?(\d+)u$")
+# CPR (Cursor Position Report): "row;colR" (CSI body after ESC[)
+_CPR_RE = re.compile(r"^(\d+);(\d+)R$")
+
+# Kitty functional key range (57344–57454)
 _KITTY_KEY_MAP: dict[int, str] = {
-    57344: "escape", 57345: "return", 57346: "tab", 57347: "backspace",
-    57348: "insert", 57349: "delete", 57350: "left", 57351: "right",
-    57352: "up", 57353: "down", 57354: "pageup", 57355: "pagedown",
-    57356: "home", 57357: "end", 57358: "capslock", 57359: "scrolllock",
-    57360: "numlock", 57361: "printscreen", 57362: "pause",
+    57344: "escape",
+    57345: "return",
+    57346: "tab",
+    57347: "backspace",
+    57348: "insert",
+    57349: "delete",
+    57350: "left",
+    57351: "right",
+    57352: "up",
+    57353: "down",
+    57354: "pageup",
+    57355: "pagedown",
+    57356: "home",
+    57357: "end",
+    57358: "capslock",
+    57359: "scrolllock",
+    57360: "numlock",
+    57361: "printscreen",
+    57362: "pause",
     57363: "menu",
     # F1–F35
-    57364: "f1", 57365: "f2", 57366: "f3", 57367: "f4", 57368: "f5",
-    57369: "f6", 57370: "f7", 57371: "f8", 57372: "f9", 57373: "f10",
-    57374: "f11", 57375: "f12", 57376: "f13", 57377: "f14", 57378: "f15",
-    57379: "f16", 57380: "f17", 57381: "f18", 57382: "f19", 57383: "f20",
-    57384: "f21", 57385: "f22", 57386: "f23", 57387: "f24", 57388: "f25",
-    57389: "f26", 57390: "f27", 57391: "f28", 57392: "f29", 57393: "f30",
-    57394: "f31", 57395: "f32", 57396: "f33", 57397: "f34", 57398: "f35",
+    57364: "f1",
+    57365: "f2",
+    57366: "f3",
+    57367: "f4",
+    57368: "f5",
+    57369: "f6",
+    57370: "f7",
+    57371: "f8",
+    57372: "f9",
+    57373: "f10",
+    57374: "f11",
+    57375: "f12",
+    57376: "f13",
+    57377: "f14",
+    57378: "f15",
+    57379: "f16",
+    57380: "f17",
+    57381: "f18",
+    57382: "f19",
+    57383: "f20",
+    57384: "f21",
+    57385: "f22",
+    57386: "f23",
+    57387: "f24",
+    57388: "f25",
+    57389: "f26",
+    57390: "f27",
+    57391: "f28",
+    57392: "f29",
+    57393: "f30",
+    57394: "f31",
+    57395: "f32",
+    57396: "f33",
+    57397: "f34",
+    57398: "f35",
     # Keypad
-    57399: "kp0", 57400: "kp1", 57401: "kp2", 57402: "kp3", 57403: "kp4",
-    57404: "kp5", 57405: "kp6", 57406: "kp7", 57407: "kp8", 57408: "kp9",
-    57409: "kpdecimal", 57410: "kpdivide", 57411: "kpmultiply",
-    57412: "kpsubtract", 57413: "kpadd", 57414: "kpenter",
-    57415: "kpequal", 57416: "kpseparator",
-    57417: "kpleft", 57418: "kpright", 57419: "kpup", 57420: "kpdown",
-    57421: "kppageup", 57422: "kppagedown", 57423: "kphome", 57424: "kpend",
-    57425: "kpinsert", 57426: "kpdelete", 57427: "kpbegin",
+    57399: "kp0",
+    57400: "kp1",
+    57401: "kp2",
+    57402: "kp3",
+    57403: "kp4",
+    57404: "kp5",
+    57405: "kp6",
+    57406: "kp7",
+    57407: "kp8",
+    57408: "kp9",
+    57409: "kpdecimal",
+    57410: "kpdivide",
+    57411: "kpmultiply",
+    57412: "kpsubtract",
+    57413: "kpadd",
+    57414: "kpenter",
+    57415: "kpequal",
+    57416: "kpseparator",
+    57417: "kpleft",
+    57418: "kpright",
+    57419: "kpup",
+    57420: "kpdown",
+    57421: "kppageup",
+    57422: "kppagedown",
+    57423: "kphome",
+    57424: "kpend",
+    57425: "kpinsert",
+    57426: "kpdelete",
+    57427: "kpbegin",
     # Media
-    57428: "mediaplay", 57429: "mediapause", 57430: "mediaplaypause",
-    57431: "mediareverse", 57432: "mediastop", 57433: "mediafastforward",
-    57434: "mediarewind", 57435: "mediatracknext", 57436: "mediatrackprevious",
+    57428: "mediaplay",
+    57429: "mediapause",
+    57430: "mediaplaypause",
+    57431: "mediareverse",
+    57432: "mediastop",
+    57433: "mediafastforward",
+    57434: "mediarewind",
+    57435: "mediatracknext",
+    57436: "mediatrackprevious",
     57437: "mediarecord",
     # Volume
-    57438: "lowervolume", 57439: "raisevolume", 57440: "mutevolume",
+    57438: "lowervolume",
+    57439: "raisevolume",
+    57440: "mutevolume",
     # Modifier keys as keys
-    57441: "leftshift", 57442: "leftcontrol", 57443: "leftalt",
-    57444: "leftsuper", 57445: "lefthyper", 57446: "leftmeta",
-    57447: "rightshift", 57448: "rightcontrol", 57449: "rightalt",
-    57450: "rightsuper", 57451: "righthyper", 57452: "rightmeta",
+    57441: "leftshift",
+    57442: "leftcontrol",
+    57443: "leftalt",
+    57444: "leftsuper",
+    57445: "lefthyper",
+    57446: "leftmeta",
+    57447: "rightshift",
+    57448: "rightcontrol",
+    57449: "rightalt",
+    57450: "rightsuper",
+    57451: "righthyper",
+    57452: "rightmeta",
     # ISO
-    57453: "isolevel3shift", 57454: "isolevel5shift",
+    57453: "isolevel3shift",
+    57454: "isolevel5shift",
 }
 
 # CSI tilde key map — num~ sequences for navigation and function keys
 _TILDE_KEY_MAP: dict[int, str] = {
-    1: "home", 2: "insert", 3: "delete", 4: "end",
-    5: "pageup", 6: "pagedown", 7: "home", 8: "end",
-    11: "f1", 12: "f2", 13: "f3", 14: "f4",
-    15: "f5", 17: "f6", 18: "f7", 19: "f8",
-    20: "f9", 21: "f10", 23: "f11", 24: "f12",
+    1: "home",
+    2: "insert",
+    3: "delete",
+    4: "end",
+    5: "pageup",
+    6: "pagedown",
+    7: "home",
+    8: "end",
+    11: "f1",
+    12: "f2",
+    13: "f3",
+    14: "f4",
+    15: "f5",
+    17: "f6",
+    18: "f7",
+    19: "f8",
+    20: "f9",
+    21: "f10",
+    23: "f11",
+    24: "f12",
 }
 
 # SS3 key map — ESC O letter
 _SS3_KEY_MAP: dict[str, str] = {
-    "A": "up", "B": "down", "C": "right", "D": "left", "E": "clear",
-    "H": "home", "F": "end",
-    "P": "f1", "Q": "f2", "R": "f3", "S": "f4",
+    "A": "up",
+    "B": "down",
+    "C": "right",
+    "D": "left",
+    "E": "clear",
+    "H": "home",
+    "F": "end",
+    "P": "f1",
+    "Q": "f2",
+    "R": "f3",
+    "S": "f4",
 }
 
 # Meta key map for ESC+letter — special motion keys in Meta mode
 _META_KEY_MAP: dict[str, str] = {
-    "f": "right", "b": "left", "p": "up", "n": "down",
+    "f": "right",
+    "b": "left",
+    "p": "up",
+    "n": "down",
 }
 
 # rxvt shifted key suffixes (CSI code a/b/c/d/e or CSI num$)
 _SHIFT_CODES: dict[str, str] = {
-    "a": "up", "b": "down", "c": "right", "d": "left", "e": "clear",
+    "a": "up",
+    "b": "down",
+    "c": "right",
+    "d": "left",
+    "e": "clear",
 }
 
 # rxvt ctrl key suffixes (ESC O a/b/c/d/e or CSI num^)
 _CTRL_CODES: dict[str, str] = {
-    "a": "up", "b": "down", "c": "right", "d": "left", "e": "clear",
+    "a": "up",
+    "b": "down",
+    "c": "right",
+    "d": "left",
+    "e": "clear",
 }
+
+# Exported set of all non-alphanumeric key names.
+NON_ALPHANUMERIC_KEYS: list[str] = sorted(
+    set(
+        list(_TILDE_KEY_MAP.values())
+        + list(_SS3_KEY_MAP.values())
+        + list(_META_KEY_MAP.values())
+        + list(_SHIFT_CODES.values())
+        + list(_CTRL_CODES.values())
+        + ["backspace", "tab"]
+    )
+)
 
 
 def _decode_wheel(button_code: int) -> tuple[int, int, str] | None:
@@ -124,16 +281,18 @@ def _decode_wheel(button_code: int) -> tuple[int, int, str] | None:
 class InputHandler:
     """Handles terminal input events."""
 
-    def __init__(self):
+    def __init__(self, *, use_kitty_keyboard: bool = True):
         self._old_settings: Any = None
         self._fd: int = -1  # raw fd for unbuffered reads
         self._key_handlers: list[Callable[[KeyEvent], None]] = []
         self._mouse_handlers: list[Callable[[MouseEvent], None]] = []
         self._paste_handlers: list[Callable[[PasteEvent], None]] = []
         self._focus_handlers: list[Callable[[str], None]] = []
+        self._capability_handlers: list[Callable[[dict[str, Any]], None]] = []
         self._in_bracketed_paste = False
         self._bracketed_paste_buffer = ""
         self._running = False
+        self._use_kitty_keyboard = use_kitty_keyboard
 
     def _read_char(self) -> str:
         """Read a single UTF-8 character from the terminal fd.
@@ -157,9 +316,8 @@ class InputHandler:
 
         b = data[0]
         if b < 0x80:
-            return chr(b)  # Fast path: ASCII
+            return chr(b)
 
-        # Determine how many continuation bytes this UTF-8 sequence needs.
         if b < 0xC0:
             remaining = 0  # Stray continuation byte
         elif b < 0xE0:
@@ -172,8 +330,6 @@ class InputHandler:
             remaining = 0  # Invalid leading byte
 
         for _ in range(remaining):
-            # Continuation bytes arrive essentially instantly (same
-            # keystroke), so a short timeout is sufficient.
             if not select.select([self._fd], [], [], 0.05)[0]:
                 break
             extra = os.read(self._fd, 1)
@@ -198,6 +354,15 @@ class InputHandler:
         new_settings[0] &= ~termios.ICRNL  # iflag: don't translate CR→NL
         new_settings[3] &= ~(termios.ISIG | termios.IEXTEN)  # lflags
         termios.tcsetattr(self._fd, termios.TCSANOW, new_settings)
+        # Ensure terminal is restored even on unhandled crash / exit.
+        atexit.register(self._atexit_restore)
+
+    def _atexit_restore(self) -> None:
+        """Restore terminal settings on interpreter exit (atexit handler)."""
+        with contextlib.suppress(Exception):
+            if self._old_settings:
+                termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old_settings)
+                self._old_settings = None
 
     def stop(self) -> None:
         """Stop reading input and restore terminal."""
@@ -227,6 +392,19 @@ class InputHandler:
         """
         self._focus_handlers.append(handler)
 
+    def on_capability(self, handler: Callable[[dict[str, Any]], None]) -> None:
+        """Register a capability response handler.
+
+        Handler receives a dict describing the capability response, e.g.:
+        ``{"type": "decrpm", "mode": 1016, "value": 2}``
+        ``{"type": "xtversion", "name": "kitty", "version": "0.40.1"}``
+        ``{"type": "kitty_graphics", "supported": True}``
+        ``{"type": "da1", "params": [62]}``
+        ``{"type": "kitty_keyboard", "flags": 0}``
+        ``{"type": "cpr", "row": 1, "col": 2}``
+        """
+        self._capability_handlers.append(handler)
+
     def poll(self) -> bool:
         """Poll for input. Returns True if input was processed."""
         if not self._running:
@@ -243,18 +421,19 @@ class InputHandler:
                 self._consume_bracketed_paste_char(char)
                 return True
 
-            # Check for escape sequences
-            if char == "\x1b":  # ESC
+            if char == "\x1b":
                 return self._handle_escape()
             elif char == "\r":
                 self._emit_key("return", char, sequence=char)
             elif char == "\n":
                 # LF is "linefeed" — distinct from CR ("return"), matching
-                # upstream parseKeypress.ts which maps \n → key "linefeed".
+                # OpenTUI core key parsing which maps LF to key "linefeed".
                 self._emit_key("linefeed", char, sequence=char)
             elif char == "\t":
                 self._emit_key("tab", char, sequence=char)
-            elif char == "\x7f":  # DEL
+            elif char == "\x00":  # NUL = Ctrl+Space
+                self._emit_key("space", char, ctrl=True, sequence=char)
+            elif char in {"\x7f", "\x08"}:  # DEL
                 self._emit_key("backspace", char, sequence=char)
             elif "\x01" <= char <= "\x1a":  # Ctrl+A through Ctrl+Z
                 letter = chr(ord("a") + ord(char) - 1)
@@ -275,30 +454,49 @@ class InputHandler:
         - Meta+Ctrl+letter: ESC followed by a control char → alt=True, ctrl=True
         """
         if not select.select([self._fd], [], [], 0)[0]:
-            # Just ESC pressed
             self._emit_key("escape", "\x1b", sequence="\x1b")
             return True
 
         char = self._read_char()
         if char == "[":
-            # CSI sequence
             return self._handle_csi()
         elif char == "O":
-            # SS3 sequence
             return self._handle_ss3()
         elif char == "P":
-            # DCS (Device Control String) — e.g. Ghostty's `\x1bP>|ghostty 1.3.0\x1b\\`
-            # Consume until ST (String Terminator: \x1b\\ or \x9c)
-            self._consume_until_st()
+            # DCS (Device Control String) — e.g. XTVersion `\x1bP>|kitty(0.40.1)\x1b\\`
+            # Only consume as DCS if content follows; otherwise treat as meta+P
+            # so ESC+P is treated as a keystroke.
+            if select.select([self._fd], [], [], 0)[0]:
+                content = self._consume_until_st()
+                if content:
+                    self._handle_dcs_content(content)
+                    return True
+            self._emit_key("p", f"\x1b{char}", alt=True, shift=True, sequence=char)
             return True
         elif char == "_":
             # APC (Application Program Command) — Kitty graphics replies use
-            # `\x1b_Gi=...;OK\x1b\\` and should be consumed silently.
-            self._consume_until_st()
+            # `\x1b_Gi=...;OK\x1b\\`
+            content = self._consume_until_st()
+            self._handle_apc_content(content)
             return True
         elif char == "]":
             # OSC (Operating System Command) — consume until ST
             self._consume_until_st()
+            return True
+
+        # ESC+ESC — meta+escape
+        if char == "\x1b":
+            self._emit_key("escape", "\x1b", alt=True, sequence="\x1b")
+            return True
+
+        # ESC+CR — meta+return
+        if char == "\r":
+            self._emit_key("return", f"\x1b{char}", alt=True)
+            return True
+
+        # ESC+LF — meta+linefeed
+        if char == "\n":
+            self._emit_key("linefeed", f"\x1b{char}", alt=True)
             return True
 
         # Meta+Ctrl+letter: ESC followed by a control character (0x01-0x1A)
@@ -311,28 +509,53 @@ class InputHandler:
         # Meta+char: ESC followed by a printable character
         if ord(char) >= 32 and ord(char) != 127:
             lower = char.lower()
-            key = _META_KEY_MAP.get(lower, lower)
-            shift = char != lower and char.isalpha()
+            is_upper = char != lower and char.isalpha()
+            # Only apply readline motion mapping (_META_KEY_MAP) for lowercase
+            # chars. Uppercase letters are plain meta+shift+letter (no special
+            # motion mapping for ESC+N or ESC+F).
+            mapped = _META_KEY_MAP.get(lower) if not is_upper else None
+            key = mapped if mapped else lower
+            shift = is_upper and mapped is None
             self._emit_key(key, f"\x1b{char}", alt=True, shift=shift, sequence=char)
             return True
 
         self._emit_key("escape", "\x1b", sequence="\x1b")
         return True
 
-    def _consume_until_st(self) -> None:
+    def _consume_until_st(self) -> str:
         """Consume bytes until String Terminator (ESC \\ or 0x9c).
 
-        Used to silently discard DCS, OSC, and other escape sequences
-        that the terminal sends as responses to capability queries.
+        Returns the content collected between the introducer and the ST,
+        excluding the ST itself.  Previously this discarded the content;
+        now callers can inspect it (e.g. to parse XTVersion or Kitty
+        graphics responses).
+
+        The buffer is bounded to ``_MAX_ST_BUFFER`` bytes to prevent
+        memory exhaustion from a malicious input stream.
         """
+        buf: list[str] = []
+        buf_len = 0
         prev = ""
         while select.select([self._fd], [], [], 0.05)[0]:
             ch = self._read_char()
             if ch == "\x9c":
-                return  # 8-bit ST
+                return "".join(buf)  # 8-bit ST
             if prev == "\x1b" and ch == "\\":
-                return  # 7-bit ST (ESC \\)
+                # Remove trailing ESC that was already appended
+                if buf and buf[-1] == "\x1b":
+                    buf.pop()
+                return "".join(buf)  # 7-bit ST (ESC \\)
+            buf.append(ch)
+            buf_len += len(ch)
+            if buf_len > _MAX_ST_BUFFER:
+                _log.warning(
+                    "DCS/APC/OSC buffer exceeded %d bytes, aborting sequence",
+                    _MAX_ST_BUFFER,
+                )
+                buf.clear()
+                return ""
             prev = ch
+        return "".join(buf)
 
     def _handle_csi(self) -> bool:
         """Handle CSI (Control Sequence Introducer) escape sequences."""
@@ -342,11 +565,32 @@ class InputHandler:
 
         seq = ""
         while True:
+            if len(seq) >= _MAX_CSI_BUFFER:
+                _log.warning("CSI buffer exceeded %d bytes, resetting", _MAX_CSI_BUFFER)
+                seq = ""
+                return True
             char = self._read_char()
             seq += char
             # SGR mouse ends with 'M' or 'm'; normal CSI ends with alpha,
-            # '~', '$' (rxvt shifted), or '^' (rxvt ctrl).
-            if char.isalpha() or char in ("~", "$", "^"):
+            # '~', '$' (rxvt shifted/DECRPM), or '^' (rxvt ctrl).
+            if char == "$":
+                # DECRPM responses end with "$y" — peek at next byte.
+                # If it's 'y', include it as part of the sequence.
+                if select.select([self._fd], [], [], 0.01)[0]:
+                    next_char = self._read_char()
+                    if next_char == "y":
+                        seq += next_char
+                    # Not DECRPM — put the peeked char back by
+                    # writing to pipe (TestInputHandler) or handling
+                    # the leftover.  For now, treat '$' as the
+                    # terminator and process leftover separately.
+                    # Write back to pipe for test mode.
+                    else:
+                        pipe_w = getattr(self, "_pipe_w", None)
+                        if pipe_w is not None:
+                            os.write(pipe_w, next_char.encode("utf-8"))
+                break
+            if char.isalpha() or char in ("~", "^"):
                 break
 
         return self._dispatch_csi_sequence(seq)
@@ -357,7 +601,26 @@ class InputHandler:
             self._begin_bracketed_paste()
             return True
 
-        # Focus events — filter silently (matching upstream parseKeypress.ts)
+        # --- Capability responses (DECRPM, DA1, kitty keyboard query, CPR) ---
+        if self._try_dispatch_capability_csi(seq):
+            return True
+
+        # X10/normal mouse protocol: \x1b[M<cb><cx><cy>
+        # seq == "M" means the CSI body was just "M" — the 3 raw bytes follow.
+        if seq == "M":
+            try:
+                cb = self._read_char()
+                cx = self._read_char()
+                cy = self._read_char()
+                button_byte = ord(cb) - 32
+                x = ord(cx) - 33  # 0-based
+                y = ord(cy) - 33
+                _log.debug("input csi x10 mouse button=%s x=%s y=%s", button_byte, x, y)
+                return self._handle_x10_mouse(button_byte, x, y)
+            except Exception:
+                return True
+
+        # Focus events — filter silently
         if seq == "I":
             _log.debug("input focus-in event (filtered)")
             self._emit_focus("focus")
@@ -386,7 +649,7 @@ class InputHandler:
 
         if self._handle_modify_other_keys(seq):
             return True
-        if self._handle_kitty_keyboard(seq):
+        if self._use_kitty_keyboard and self._handle_kitty_keyboard(seq):
             return True
 
         # xterm-style modified keys: CSI 1;modifier[:event_type] letter
@@ -447,9 +710,17 @@ class InputHandler:
 
         # Single-letter CSI sequences (unmodified)
         _SINGLE_LETTER: dict[str, str] = {
-            "A": "up", "B": "down", "C": "right", "D": "left",
-            "H": "home", "F": "end", "E": "clear",
-            "P": "f1", "Q": "f2", "R": "f3", "S": "f4",
+            "A": "up",
+            "B": "down",
+            "C": "right",
+            "D": "left",
+            "H": "home",
+            "F": "end",
+            "E": "clear",
+            "P": "f1",
+            "Q": "f2",
+            "R": "f3",
+            "S": "f4",
         }
         if len(seq) == 1 and seq in _SINGLE_LETTER:
             self._emit_key(_SINGLE_LETTER[seq], f"\x1b[{seq}")
@@ -523,10 +794,29 @@ class InputHandler:
     def _consume_bracketed_paste_char(self, char: str) -> None:
         """Accumulate bracketed paste bytes until the terminator arrives."""
         self._bracketed_paste_buffer += char
+        # Abort immediately if the buffer exceeds the limit — don't wait
+        # for the end marker, which may never arrive.
+        if len(self._bracketed_paste_buffer) > MAX_PASTE_SIZE + len(_BRACKETED_PASTE_END):
+            _log.warning(
+                "Paste buffer exceeded %d bytes during accumulation, aborting",
+                MAX_PASTE_SIZE,
+            )
+            text = self._bracketed_paste_buffer[:MAX_PASTE_SIZE]
+            self._bracketed_paste_buffer = ""
+            self._in_bracketed_paste = False
+            self._emit_paste(text)
+            return
         if self._bracketed_paste_buffer.endswith(_BRACKETED_PASTE_END):
             text = self._bracketed_paste_buffer[: -len(_BRACKETED_PASTE_END)]
             self._bracketed_paste_buffer = ""
             self._in_bracketed_paste = False
+            if len(text) > MAX_PASTE_SIZE:
+                _log.warning(
+                    "Paste content truncated from %d to %d bytes",
+                    len(text),
+                    MAX_PASTE_SIZE,
+                )
+                text = text[:MAX_PASTE_SIZE]
             self._emit_paste(text)
 
     def _handle_modify_other_keys(self, seq: str) -> bool:
@@ -544,7 +834,9 @@ class InputHandler:
 
         key = _char_code_to_key(char_code)
         sequence = chr(char_code) if char_code >= 32 and char_code != 127 else ""
-        self._emit_key(key, f"\x1b[{seq}", ctrl=ctrl, shift=shift, alt=alt, meta=meta, sequence=sequence)
+        self._emit_key(
+            key, f"\x1b[{seq}", ctrl=ctrl, shift=shift, alt=alt, meta=meta, sequence=sequence
+        )
         return True
 
     def _handle_kitty_keyboard(self, seq: str) -> bool:
@@ -565,6 +857,15 @@ class InputHandler:
         # Field 1: key_code[:shifted_codepoint[:base_layout_codepoint]]
         field1 = match.group(1).split(":")
         key_code = int(field1[0])
+
+        # Reject invalid codepoints — if the key_code is not a known kitty
+        # functional key and is outside the valid Unicode range, return False
+        # so the dispatcher falls back to regular CSI parsing (matching
+        # OpenTUI core behaviour which returns null on invalid codepoints).
+        if key_code not in _KITTY_KEY_MAP and not (0 < key_code <= 0x10FFFF):
+            return False
+
+        base_layout_cp = int(field1[2]) if len(field1) > 2 and field1[2] else 0
 
         # Field 2: modifier_mask[:event_type]
         field2 = match.group(2)
@@ -603,7 +904,7 @@ class InputHandler:
         key = _char_code_to_key(key_code)
 
         # Fallback: if terminal didn't send associated text, synthesize from
-        # field 1 — matching the upstream TypeScript behaviour.
+        # field 1.
         if not sequence:
             if key == "space":
                 sequence = " "
@@ -620,7 +921,12 @@ class InputHandler:
         event_kind = "release" if event_type_code == "3" else "press"
         _log.debug(
             "input kitty key=%r code=%d mod=%d type=%s seq=%r text=%r",
-            key, key_code, modifier, event_kind, seq, sequence,
+            key,
+            key_code,
+            modifier,
+            event_kind,
+            seq,
+            sequence,
         )
 
         is_digit = len(key) == 1 and key.isdigit()
@@ -639,6 +945,7 @@ class InputHandler:
             sequence=sequence,
             source="kitty",
             number=is_digit,
+            base_code=base_layout_cp,
         )
 
         for handler in self._key_handlers:
@@ -657,7 +964,6 @@ class InputHandler:
         M = press, m = release
         """
         is_release = seq.endswith("m")
-        # Strip leading '<' and trailing 'M'/'m'
         params = seq[1:-1]
         try:
             parts = params.split(";")
@@ -667,12 +973,10 @@ class InputHandler:
         except (ValueError, IndexError):
             return True
 
-        # Decode modifiers from button code
         shift = bool(button_code & 4)
         alt = bool(button_code & 8)
         ctrl = bool(button_code & 16)
 
-        # Check for scroll wheel (bit 6 set = 64)
         if button_code & 64:
             decoded = _decode_wheel(button_code)
             if decoded is None:
@@ -680,31 +984,47 @@ class InputHandler:
             button, scroll_delta, scroll_direction = decoded
             _log.debug(
                 "input sgr scroll button=%s x=%s y=%s delta=%s direction=%s ctrl=%s alt=%s shift=%s",
-                button_code, x, y, scroll_delta, scroll_direction, ctrl, alt, shift
+                button_code,
+                x,
+                y,
+                scroll_delta,
+                scroll_direction,
+                ctrl,
+                alt,
+                shift,
             )
-            self._emit_mouse(MouseEvent(
-                type="scroll",
-                x=x, y=y,
-                button=button,
-                scroll_delta=scroll_delta,
-                scroll_direction=scroll_direction,
-                shift=shift, ctrl=ctrl, alt=alt,
-            ))
+            self._emit_mouse(
+                MouseEvent(
+                    type="scroll",
+                    x=x,
+                    y=y,
+                    button=button,
+                    scroll_delta=scroll_delta,
+                    scroll_direction=scroll_direction,
+                    shift=shift,
+                    ctrl=ctrl,
+                    alt=alt,
+                )
+            )
         else:
-            # Regular button
-            button = button_code & 3  # 0=left, 1=middle, 2=right
+            button = button_code & 3
             if button_code & 32:
                 event_type = "drag"
             elif is_release:
                 event_type = "up"
             else:
                 event_type = "down"
-            self._emit_mouse(MouseEvent(
-                type=event_type,
-                x=x, y=y,
-                button=button,
-                shift=shift, ctrl=ctrl, alt=alt,
-            ))
+            self._emit_mouse(
+                MouseEvent(
+                    type=event_type,
+                    x=x,
+                    y=y,
+                    button=button,
+                    shift=shift,
+                    ctrl=ctrl,
+                    alt=alt,
+                )
+            )
 
         return True
 
@@ -736,16 +1056,28 @@ class InputHandler:
             button, scroll_delta, scroll_direction = decoded
             _log.debug(
                 "input rxvt scroll button=%s x=%s y=%s delta=%s direction=%s ctrl=%s alt=%s shift=%s",
-                button_code, x, y, scroll_delta, scroll_direction, ctrl, alt, shift
+                button_code,
+                x,
+                y,
+                scroll_delta,
+                scroll_direction,
+                ctrl,
+                alt,
+                shift,
             )
-            self._emit_mouse(MouseEvent(
-                type="scroll",
-                x=x, y=y,
-                button=button,
-                scroll_delta=scroll_delta,
-                scroll_direction=scroll_direction,
-                shift=shift, ctrl=ctrl, alt=alt,
-            ))
+            self._emit_mouse(
+                MouseEvent(
+                    type="scroll",
+                    x=x,
+                    y=y,
+                    button=button,
+                    scroll_delta=scroll_delta,
+                    scroll_direction=scroll_direction,
+                    shift=shift,
+                    ctrl=ctrl,
+                    alt=alt,
+                )
+            )
         else:
             button = button_code & 3
             if button_code & 32:
@@ -754,12 +1086,83 @@ class InputHandler:
                 event_type = "up"
             else:
                 event_type = "down"
-            self._emit_mouse(MouseEvent(
-                type=event_type,
-                x=x, y=y,
-                button=button,
-                shift=shift, ctrl=ctrl, alt=alt,
-            ))
+            self._emit_mouse(
+                MouseEvent(
+                    type=event_type,
+                    x=x,
+                    y=y,
+                    button=button,
+                    shift=shift,
+                    ctrl=ctrl,
+                    alt=alt,
+                )
+            )
+
+        return True
+
+    def _handle_x10_mouse(self, button_byte: int, x: int, y: int) -> bool:
+        """Handle X10/normal mouse protocol.
+
+        button_byte is the decoded button code (raw byte - 32).
+        x, y are 0-based coordinates (raw byte - 33).
+
+        Button encoding (same as SGR):
+            Bits 0-1: button (0=left, 1=middle, 2=right, 3=release)
+            Bit 2: shift, Bit 3: alt, Bit 4: ctrl
+            Bit 5: motion (32), Bit 6: scroll wheel (64)
+        """
+        shift = bool(button_byte & 4)
+        alt = bool(button_byte & 8)
+        ctrl = bool(button_byte & 16)
+
+        if button_byte & 64:
+            # Scroll wheel
+            decoded = _decode_wheel(button_byte)
+            if decoded is None:
+                return True
+            button, scroll_delta, scroll_direction = decoded
+            self._emit_mouse(
+                MouseEvent(
+                    type="scroll",
+                    x=x,
+                    y=y,
+                    button=button,
+                    scroll_delta=scroll_delta,
+                    scroll_direction=scroll_direction,
+                    shift=shift,
+                    ctrl=ctrl,
+                    alt=alt,
+                )
+            )
+        elif button_byte & 32:
+            # Motion event
+            button = button_byte & 3
+            event_type = "move" if button == 3 else "drag"
+            self._emit_mouse(
+                MouseEvent(
+                    type=event_type,
+                    x=x,
+                    y=y,
+                    button=button,
+                    shift=shift,
+                    ctrl=ctrl,
+                    alt=alt,
+                )
+            )
+        else:
+            button = button_byte & 3
+            event_type = "up" if button == 3 else "down"
+            self._emit_mouse(
+                MouseEvent(
+                    type=event_type,
+                    x=x,
+                    y=y,
+                    button=button,
+                    shift=shift,
+                    ctrl=ctrl,
+                    alt=alt,
+                )
+            )
 
         return True
 
@@ -767,7 +1170,7 @@ class InputHandler:
         """Handle SS3 (Single Shift 3) escape sequences.
 
         Covers function keys (P-S), navigation (H, F), arrow keys
-        (A/B/C/D), and clear (E) — matching upstream parseKeypress.ts.
+        (A/B/C/D), and clear (E).
         """
         if not select.select([self._fd], [], [], 0)[0]:
             self._emit_key("O", "\x1bO")
@@ -831,16 +1234,122 @@ class InputHandler:
         registered focus handlers and should not reach key handlers.
         """
         for handler in self._focus_handlers:
-            try:
+            with contextlib.suppress(Exception):
                 handler(focus_type)
-            except Exception:
-                pass
+
+    def _emit_capability(self, cap: dict[str, Any]) -> None:
+        """Emit a capability response event.
+
+        Called when the terminal sends a response to a capability query
+        (DECRPM, XTVersion, Kitty graphics, DA1, Kitty keyboard, CPR).
+        """
+        for handler in self._capability_handlers:
+            with contextlib.suppress(Exception):
+                handler(cap)
+
+    def _try_dispatch_capability_csi(self, seq: str) -> bool:
+        """Try to dispatch a CSI sequence as a capability response.
+
+        Returns True if the sequence was recognized as a capability
+        response and dispatched, False otherwise (fall through to
+        normal CSI handling).
+        """
+        # DECRPM: ?mode;value$y
+        m = _DECRPM_RE.match(seq)
+        if m:
+            mode = int(m.group(1))
+            value = int(m.group(2))
+            _log.debug("input capability DECRPM mode=%d value=%d", mode, value)
+            self._emit_capability({"type": "decrpm", "mode": mode, "value": value})
+            return True
+
+        # DA1 (Device Attributes): ?params c
+        m = _DA1_RE.match(seq)
+        if m:
+            params_str = m.group(1)
+            params = [int(p) for p in params_str.split(";") if p] if params_str else []
+            _log.debug("input capability DA1 params=%s", params)
+            self._emit_capability({"type": "da1", "params": params})
+            return True
+
+        # Kitty keyboard query: ?Nu
+        m = _KITTY_KB_QUERY_RE.match(seq)
+        if m:
+            flags = int(m.group(1))
+            _log.debug("input capability kitty keyboard flags=%d", flags)
+            self._emit_capability({"type": "kitty_keyboard", "flags": flags})
+            return True
+
+        # CPR (Cursor Position Report) for width detection: row;colR
+        # Only treat as capability response when row==1 (used for width
+        # detection queries); other CPR responses are not capabilities.
+        m = _CPR_RE.match(seq)
+        if m:
+            row = int(m.group(1))
+            col = int(m.group(2))
+            if row == 1:
+                _log.debug("input capability CPR row=%d col=%d", row, col)
+                self._emit_capability({"type": "cpr", "row": row, "col": col})
+                return True
+
+        return False
+
+    def _handle_dcs_content(self, content: str) -> None:
+        """Process DCS (Device Control String) content.
+
+        Parses XTVersion responses of the form ``>|name(version)`` or
+        ``>|name version`` and emits a capability event.
+        """
+        m = _XTVERSION_RE.match(content)
+        if m:
+            raw = m.group(1)
+            # Parse "name(version)" or "name version" formats
+            paren = raw.find("(")
+            if paren >= 0:
+                name = raw[:paren].strip()
+                version = raw[paren + 1 :].rstrip(")")
+            else:
+                parts = raw.split(None, 1)
+                name = parts[0] if parts else raw
+                version = parts[1] if len(parts) > 1 else ""
+            _log.debug("input capability XTVersion name=%s version=%s", name, version)
+            self._emit_capability(
+                {
+                    "type": "xtversion",
+                    "name": name,
+                    "version": version,
+                }
+            )
+            return
+        # Unknown DCS — ignore silently
+
+    def _handle_apc_content(self, content: str) -> None:
+        """Process APC (Application Program Command) content.
+
+        Parses Kitty graphics responses of the form ``Gi=N;payload``
+        and emits a capability event.
+        """
+        m = _KITTY_GRAPHICS_RE.match(content)
+        if m:
+            image_id = int(m.group(1))
+            payload = m.group(2)
+            supported = payload == "OK" or not payload.startswith("ENOTSUPPORTED")
+            _log.debug("input capability kitty_graphics id=%d payload=%s", image_id, payload)
+            self._emit_capability(
+                {
+                    "type": "kitty_graphics",
+                    "supported": supported,
+                    "image_id": image_id,
+                    "payload": payload,
+                }
+            )
+            return
+        # Unknown APC — ignore silently
 
     def _emit_paste(self, text: str) -> None:
         """Emit a paste event, stripping ANSI escape sequences first.
 
-        Matches upstream KeyHandler.processPaste() which calls
-        Bun.stripANSI() before emitting.
+        Strips ANSI escape sequences before emitting.
         """
         text = _ANSI_RE.sub("", text)
         event = normalize_paste_payload(text)
@@ -850,24 +1359,30 @@ class InputHandler:
                 break
 
 
+_CHAR_CODE_SPECIAL: dict[int, str] = {
+    8: "backspace",
+    9: "tab",
+    13: "return",
+    27: "escape",
+    32: "space",
+    127: "backspace",
+}
+
+
 def _char_code_to_key(char_code: int) -> str:
     """Convert a character code (raw or kitty) into an OpenTUI key name."""
     # Kitty functional key range (57344+)
     if char_code in _KITTY_KEY_MAP:
         return _KITTY_KEY_MAP[char_code]
     # Standard control/special keys
-    _SPECIAL: dict[int, str] = {
-        8: "backspace", 9: "tab", 13: "return", 27: "escape",
-        32: "space", 127: "backspace",
-    }
-    if char_code in _SPECIAL:
-        return _SPECIAL[char_code]
+    if char_code in _CHAR_CODE_SPECIAL:
+        return _CHAR_CODE_SPECIAL[char_code]
     if 0 < char_code < 0x10FFFF:
         return chr(char_code)
     return f"unknown-{char_code}"
 
 
-_RESIZE_DEBOUNCE = 0.10  # seconds — matches OpenCode's resizeDebounceDelay
+_RESIZE_DEBOUNCE = 0.10  # seconds — default resize debounce delay
 
 
 class EventLoop:
@@ -902,19 +1417,15 @@ class EventLoop:
         # The handler sets a flag; the main loop checks it each frame
         # to avoid calling resize from a signal context.
         prev_handler = None
-        try:
+        with contextlib.suppress(AttributeError, OSError):
             prev_handler = signal.getsignal(signal.SIGWINCH)
-        except (AttributeError, OSError):
-            pass  # SIGWINCH not available on this platform
 
         def _on_sigwinch(signum: int, frame: Any) -> None:
             self._resize_pending = True
             self._last_resize_time = time.perf_counter()
 
-        try:
+        with contextlib.suppress(AttributeError, OSError):
             signal.signal(signal.SIGWINCH, _on_sigwinch)
-        except (AttributeError, OSError):
-            pass
 
         try:
             while self._running:
@@ -944,16 +1455,12 @@ class EventLoop:
 
                 # ALWAYS render — block SIGWINCH during render so it
                 # can't fire mid-flush and cause a dimension mismatch.
-                try:
+                with contextlib.suppress(AttributeError, OSError):
                     signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGWINCH})
-                except (AttributeError, OSError):
-                    pass
                 for callback in self._render_callbacks:
                     callback(self._frame_time)
-                try:
+                with contextlib.suppress(AttributeError, OSError):
                     signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGWINCH})
-                except (AttributeError, OSError):
-                    pass
 
                 # Sleep to maintain target FPS
                 elapsed = time.perf_counter() - start_time
@@ -963,12 +1470,9 @@ class EventLoop:
 
         finally:
             self._input_handler.stop()
-            # Restore previous SIGWINCH handler
             if prev_handler is not None:
-                try:
+                with contextlib.suppress(AttributeError, OSError):
                     signal.signal(signal.SIGWINCH, prev_handler)
-                except (AttributeError, OSError):
-                    pass
 
     def _handle_resize(self) -> None:
         """Process a pending terminal resize.
@@ -1002,19 +1506,71 @@ class EventLoop:
 
         hooks._set_terminal_dimensions(cols, lines)
 
-        # Notify resize handlers
         for handler in hooks.get_resize_handlers():
-            try:
+            with contextlib.suppress(Exception):
                 handler(cols, lines)
-            except Exception:
-                pass
 
     def stop(self) -> None:
         """Stop the event loop."""
         self._running = False
 
 
+class TestInputHandler(InputHandler):
+    """InputHandler for test mode — reads from a pipe instead of real stdin.
+
+    Allows injecting raw terminal sequences in tests, which flow through
+    the same parsing pipeline as production input (escape sequences, mouse
+    events, bracketed paste, etc.).
+
+    Usage::
+
+        handler = TestInputHandler()
+        handler.start()
+        handler.on_key(my_key_handler)
+        handler.on_mouse(my_mouse_handler)
+        handler.feed("\\x1b[A")  # Simulates pressing Up arrow
+    """
+
+    __test__ = False  # Not a pytest test class
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._pipe_r, self._pipe_w = os.pipe()
+
+    def start(self) -> None:
+        """Start the handler using the pipe read fd (no terminal setup)."""
+        if self._running:
+            return
+        self._running = True
+        self._fd = self._pipe_r
+
+    def stop(self) -> None:
+        """Stop the handler (no terminal teardown)."""
+        self._running = False
+
+    def feed(self, data: str) -> None:
+        """Feed raw terminal data and process it immediately.
+
+        Data is written to the pipe and parsed through the same pipeline
+        as real terminal input.  Events are dispatched synchronously
+        before this method returns.
+        """
+        if not data:
+            return
+        os.write(self._pipe_w, data.encode("utf-8"))
+        while self.poll():
+            pass
+
+    def destroy(self) -> None:
+        """Close pipe file descriptors."""
+        self._running = False
+        for fd in (self._pipe_r, self._pipe_w):
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
+
 __all__ = [
     "InputHandler",
+    "TestInputHandler",
     "EventLoop",
 ]

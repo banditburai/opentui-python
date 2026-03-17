@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
 from ..text_utils import measure_text, wrap_text
@@ -41,13 +41,19 @@ class Text(Renderable):
         # Content (can be positional or keyword)
         **kwargs,
     ):
-        # Handle both positional and keyword content
-        text_content = content
-        if text_content is None and children:
-            # Get text from first child if it's a string
-            if isinstance(children[0], str):
-                text_content = children[0]
-                children = children[1:]
+        text_content: str | None = None
+        all_children: tuple[Any, ...]
+        if isinstance(content, TextModifier):
+            all_children = (content, *children)
+        elif isinstance(content, str):
+            text_content = content
+            all_children = children
+        elif content is None and children and isinstance(children[0], str):
+            text_content = children[0]
+            all_children = children[1:]
+        else:
+            text_content = str(content) if content is not None else None
+            all_children = children
 
         super().__init__(
             fg=fg,
@@ -67,18 +73,16 @@ class Text(Renderable):
         )
         self._wrap_mode = wrap_mode if wrap_mode in ("none", "char", "word") else "word"
 
-        # Set yoga measure function (closure reads self._content dynamically)
+        # Closure reads self._content dynamically for yoga measure
         self._setup_measure_func()
 
-        # Process children as text modifiers
         self._text_modifiers: list[TextModifier] = []
-        for child in children:
+        for child in all_children:
             if isinstance(child, TextModifier):
                 self._text_modifiers.append(child)
             elif isinstance(child, str):
                 self._content += child
             else:
-                # Try to convert to string
                 self._content += str(child)
 
     @property
@@ -105,19 +109,13 @@ class Text(Renderable):
                 self._yoga_node.mark_dirty()
 
     def _setup_measure_func(self) -> None:
-        """Set up yoga measure function for text layout."""
-
         def measure(yoga_node, width, width_mode, height, height_mode):
             import yoga
 
             total_padding = self._padding_left + self._padding_right
             vertical_padding = self._padding_top + self._padding_bottom
 
-            # Undefined = max-content (no wrapping)
-            if width_mode == yoga.MeasureMode.Undefined:
-                effective_width = 0
-            else:
-                effective_width = int(width)
+            effective_width = 0 if width_mode == yoga.MeasureMode.Undefined else int(width)
 
             content_width = max(0, effective_width - total_padding)
             w, h = measure_text(self._content, content_width, self._wrap_mode)
@@ -125,7 +123,6 @@ class Text(Renderable):
             measured_w = w + total_padding
             measured_h = h + vertical_padding
 
-            # AtMost mode: return min of available and measured
             if width_mode == yoga.MeasureMode.AtMost:
                 measured_w = min(width, measured_w)
 
@@ -134,7 +131,6 @@ class Text(Renderable):
         self._yoga_node.set_measure_func(measure)
 
     def _get_attributes(self) -> int:
-        """Get text attribute flags."""
         attrs = 0
         if self._bold:
             attrs |= s.TEXT_ATTRIBUTE_BOLD
@@ -147,24 +143,19 @@ class Text(Renderable):
         return attrs
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the text with word wrapping."""
         if not self._visible or not self._content:
             return
 
         x = self._x + self._padding_left
         y = self._y + self._padding_top
 
-        # Compute available width for wrapping from yoga layout
         available_width = 0
         if self._layout_width:
             available_width = int(self._layout_width) - self._padding_left - self._padding_right
-        if available_width <= 0:
-            available_width = 0  # unlimited
+        available_width = max(0, available_width)
 
-        # Get wrapped lines
         lines = wrap_text(self._content, available_width, self._wrap_mode)
 
-        # Draw selection highlight if there's a valid selection
         if (
             self._selection_start is not None
             and self._selection_end is not None
@@ -173,7 +164,6 @@ class Text(Renderable):
             start_pos = max(0, self._selection_start)
             end_pos = min(len(self._content), self._selection_end)
 
-            # For selection, compute positions on the unwrapped line
             before_width, _ = measure_text(self._content[:start_pos], 0, "none")
             sel_width, _ = measure_text(self._content[start_pos:end_pos], 0, "none")
 
@@ -206,18 +196,14 @@ class TextModifier(Renderable):
         self._bold = bold
         self._italic = italic
         self._underline = underline
-        self._fg = fg
-        self._bg = bg
+        self._fg = self._parse_color(fg) if isinstance(fg, str) else fg
+        self._bg = self._parse_color(bg) if isinstance(bg, str) else bg
 
-        # Process children
         for child in children:
             if isinstance(child, str):
-                # Strings are added as Text nodes
                 self.add(Text(child, bold=bold, italic=italic, underline=underline, fg=fg, bg=bg))
             elif isinstance(child, Renderable):
-                # For nested modifiers, pass along the combined style
                 if hasattr(child, "_bold") or hasattr(child, "_italic"):
-                    # This is another modifier, apply our style to it
                     self._apply_style_to_child(child)
                 self.add(child)
             else:
@@ -226,7 +212,6 @@ class TextModifier(Renderable):
                 )
 
     def _apply_style_to_child(self, child: Renderable) -> None:
-        """Apply this modifier's style to a child renderable."""
         if hasattr(child, "_bold") and self._bold:
             child._bold = True  # type: ignore[attr-defined]
         if hasattr(child, "_italic") and self._italic:
@@ -235,13 +220,11 @@ class TextModifier(Renderable):
             child._underline = True  # type: ignore[attr-defined]
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render children with this modifier's styling applied."""
         if not self._visible:
             return
 
         for child in self._children:
             if isinstance(child, Renderable):
-                # Temporarily apply our style to the child if it's Text
                 if isinstance(child, Text):
                     original_bold = child._bold
                     original_italic = child._italic

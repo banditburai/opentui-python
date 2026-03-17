@@ -17,17 +17,14 @@ class EditBuffer:
 
     def insert_text(self, text: str) -> None:
         """Insert text at cursor position."""
-        if isinstance(text, str):
-            text_bytes = text.encode("utf-8")
-        else:
-            text_bytes = text
+        text_bytes = text.encode("utf-8") if isinstance(text, str) else text
         self._native.edit_buffer.insert_text(self._ptr, text_bytes, len(text_bytes))
 
     def get_text(self) -> str:
         """Get the current text content."""
         buf_size = 4096
         while True:
-            buf = b"\x00" * buf_size
+            buf = bytearray(buf_size)
             length = self._native.edit_buffer.get_text(self._ptr, buf, len(buf))
             if length < buf_size:
                 return buf[:length].decode("utf-8", errors="replace")
@@ -36,10 +33,7 @@ class EditBuffer:
 
     def set_text(self, text: str) -> None:
         """Set the text content."""
-        if isinstance(text, str):
-            text_bytes = text.encode("utf-8")
-        else:
-            text_bytes = text
+        text_bytes = text.encode("utf-8") if isinstance(text, str) else text
         self._native.edit_buffer.set_text(self._ptr, text_bytes, len(text_bytes))
 
     def delete_char(self) -> None:
@@ -97,13 +91,13 @@ class EditBuffer:
 
     def undo(self) -> bool:
         """Undo last action."""
-        buf = b"\x00" * 1024
+        buf = bytearray(1024)
         length = self._native.edit_buffer.undo(self._ptr, buf, len(buf))
         return length > 0
 
     def redo(self) -> bool:
         """Redo last undone action."""
-        buf = b"\x00" * 1024
+        buf = bytearray(1024)
         length = self._native.edit_buffer.redo(self._ptr, buf, len(buf))
         return length > 0
 

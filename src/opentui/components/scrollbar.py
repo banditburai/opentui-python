@@ -215,7 +215,6 @@ class ScrollBar(Renderable):
                 self.scroll_by(1)
                 event.stop_propagation()
                 return
-            track_length = height - 2
         else:
             width = self._layout_width or 1
             if width < 3:
@@ -228,7 +227,6 @@ class ScrollBar(Renderable):
                 self.scroll_by(1)
                 event.stop_propagation()
                 return
-            track_length = width - 2
 
         hit = self._track_hit_info(event)
         if hit is None:
@@ -275,7 +273,6 @@ class ScrollBar(Renderable):
             event.stop_propagation()
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the scrollbar to the buffer."""
         if not self._visible:
             return
         if self._auto_hide and not self.should_show:
@@ -293,19 +290,15 @@ class ScrollBar(Renderable):
             self._render_horizontal(buffer, w, h)
 
     def _render_vertical(self, buffer: Buffer, w: int, h: int) -> None:
-        """Render a vertical scrollbar."""
         x = self._x
         y = self._y
 
         if h < 3:
             return
 
-        # Up arrow
         buffer.draw_text(self._arrow_up, x, y, fg=self._fg)
-        # Down arrow
         buffer.draw_text(self._arrow_down, x, y + h - 1, fg=self._fg)
 
-        # Track
         track_length = h - 2
         slider_start, slider_size = self._get_slider_info(track_length)
 
@@ -317,19 +310,15 @@ class ScrollBar(Renderable):
                 buffer.draw_text(self._track_char, x, ty, fg=self._fg)
 
     def _render_horizontal(self, buffer: Buffer, w: int, h: int) -> None:
-        """Render a horizontal scrollbar."""
         x = self._x
         y = self._y
 
         if w < 3:
             return
 
-        # Left arrow
         buffer.draw_text(self._arrow_left, x, y, fg=self._fg)
-        # Right arrow
         buffer.draw_text(self._arrow_right, x + w - 1, y, fg=self._fg)
 
-        # Track
         track_length = w - 2
         slider_start, slider_size = self._get_slider_info(track_length)
 
@@ -341,7 +330,6 @@ class ScrollBar(Renderable):
                 buffer.draw_text(self._track_char, tx, y, fg=self._fg)
 
     def handle_key(self, key: str) -> bool:
-        """Handle keyboard navigation. Returns True if key was consumed."""
         if self._orientation == "vertical":
             if key in ("up", "k"):
                 self.scroll_by(-1)
@@ -349,13 +337,12 @@ class ScrollBar(Renderable):
             elif key in ("down", "j"):
                 self.scroll_by(1)
                 return True
-        else:
-            if key in ("left", "h"):
-                self.scroll_by(-1)
-                return True
-            elif key in ("right", "l"):
-                self.scroll_by(1)
-                return True
+        elif key in ("left", "h"):
+            self.scroll_by(-1)
+            return True
+        elif key in ("right", "l"):
+            self.scroll_by(1)
+            return True
 
         if key == "pageup":
             self.scroll_page_up()

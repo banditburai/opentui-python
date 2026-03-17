@@ -22,8 +22,15 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Callable
+from importlib.metadata import version as _pkg_version
+from typing import Any
 
-# Re-export for convenience
+try:
+    __version__ = _pkg_version("opentui")
+except Exception:
+    __version__ = "0.1.0"
+
+from . import hooks as hooks
 from . import signals as signals_module
 
 # Components
@@ -34,13 +41,20 @@ from .components import (
     Box,
     Code,
     Diff,
+    DiffRenderable,
     FrameBuffer,
+    GutterRenderable,
     Image,
     Input,
     Italic,
     LayoutOptions,
     LineBreak,
+    LineColorConfig,
+    LineInfo,
+    LineInfoProvider,
     LineNumber,
+    LineNumberRenderable,
+    LineSign,
     Link,
     LinearScrollAccel,
     MacOSScrollAccel,
@@ -59,6 +73,10 @@ from .components import (
     Textarea,
     TextModifier,
     TextNode,
+    InputRenderable,
+    SelectRenderable,
+    TextareaRenderable,
+    TextRenderable,
     TextStyle,
     TextTable,
     Underline,
@@ -108,6 +126,14 @@ from .image import (
 from .image_loader import load_image, load_svg
 from .attachments import detect_dropped_paths, normalize_paste_payload
 
+# Selection
+from .selection import (
+    LocalSelectionBounds,
+    Selection,
+    SelectionAnchor,
+    convert_global_to_local_selection,
+)
+
 # Hooks
 from .hooks import (
     Animation,
@@ -134,6 +160,7 @@ from .renderer import (
     Buffer,
     CliRenderer,
     CliRendererConfig,
+    RendererControlState,
     RootRenderable,
     TerminalCapabilities,
     create_cli_renderer,
@@ -144,6 +171,7 @@ from .testing import MockInput, MockMouse
 
 # Signals
 from .signals import (
+    Batch,
     ReadableSignal,
     Signal,
     computed,
@@ -165,7 +193,6 @@ from .expr import (
     match,
 )
 
-# Component catalogue for extensibility
 _component_catalogue: dict[str, type] = {
     "box": Box,
     "scrollbox": ScrollBox,
@@ -338,13 +365,74 @@ async def test_render(
     return TestSetup(renderer)
 
 
+async def create_test_renderer(
+    width: int = 80,
+    height: int = 24,
+    **options,
+) -> TestSetup:
+    """Create a test renderer without an initial component.
+
+    Unlike ``test_render()``, this does not create a component tree.
+    Callers add renderables directly to ``setup.renderer.root``.
+
+    Args:
+        width: Terminal width
+        height: Terminal height
+        use_mouse: If True/False, explicitly set mouse tracking state.
+        auto_focus: If False, disable click-to-focus behaviour.
+
+    Returns:
+        TestSetup with renderer and utilities
+
+    Example:
+        setup = await create_test_renderer(40, 10)
+        text = TextRenderable(content="Hello")
+        setup.renderer.root.add(text)
+        frame = setup.capture_char_frame()
+    """
+    split_height = options.get("experimental_split_height")
+    config = CliRendererConfig(
+        width=width,
+        height=height,
+        testing=True,
+        exit_on_ctrl_c=False,
+        use_mouse=options.get("use_mouse"),
+        auto_focus=options.get("auto_focus", True),
+        experimental_split_height=split_height,
+    )
+
+    renderer = await create_cli_renderer(config)
+    renderer.setup()
+
+    from .hooks import set_renderer
+
+    set_renderer(renderer)
+    clear_keyboard_handlers()
+    clear_paste_handlers()
+    clear_resize_handlers()
+    clear_selection_handlers()
+
+    from .signals import _SignalState
+
+    signal_state = _SignalState.get_instance()
+    signal_state.reset()
+
+    return TestSetup(renderer)
+
+
 class TestSetup:
     """Test setup for testing components."""
+
+    __test__ = False  # Not a pytest test class
 
     def __init__(self, renderer: CliRenderer):
         self._renderer = renderer
         self._mock_input: MockInput | None = None
         self._mock_mouse: MockMouse | None = None
+        self._test_input_handler: Any = None
+        self._stdin_bridge: Any = None
+        self._stdin_input: Any = None
+        self._stdin_mouse: Any = None
 
     @property
     def renderer(self) -> CliRenderer:
@@ -352,19 +440,130 @@ class TestSetup:
 
     @property
     def mock_input(self) -> MockInput:
-        """Lazy-created MockInput instance."""
+        """Lazy-created MockInput instance (high-level, bypasses input parser)."""
         if self._mock_input is None:
-            from .testing import MockInput as _MI
-            self._mock_input = _MI(self)
+            from .testing import MockInput
+
+            self._mock_input = MockInput(self)
         return self._mock_input
 
     @property
     def mock_mouse(self) -> MockMouse:
-        """Lazy-created MockMouse instance."""
+        """Lazy-created MockMouse instance (high-level, bypasses input parser)."""
         if self._mock_mouse is None:
-            from .testing import MockMouse as _MM
-            self._mock_mouse = _MM(self)
+            from .testing import MockMouse
+
+            self._mock_mouse = MockMouse(self)
         return self._mock_mouse
+
+    # -- stdin-level mock input (raw escape sequences through full parser) ---
+
+    def _ensure_stdin_input(self) -> None:
+        """Lazily create the stdin-level TestInputHandler and wire up
+        the same event handlers that ``CliRenderer.run()`` would register."""
+        if self._test_input_handler is not None:
+            return
+
+        from .input import TestInputHandler
+        from .testing import _TestStdinBridge
+
+        handler = TestInputHandler()
+        handler.start()
+
+        # Use dynamic dispatchers so handlers registered *after* setup
+        # (e.g. by components during mount) are picked up at event time.
+        def _key_dispatcher(event: Any) -> None:
+            # Renderable-tree key handlers (same as _get_event_forwarding in run())
+            for h in self._renderer._get_event_forwarding().get("key", []):
+                if event.propagation_stopped:
+                    break
+                h(event)
+            # Global hooks keyboard handlers
+            for h in list(hooks.get_keyboard_handlers()):
+                if event.propagation_stopped:
+                    break
+                h(event)
+
+        def _paste_dispatcher(event: Any) -> None:
+            for h in self._renderer._get_event_forwarding().get("paste", []):
+                if event.propagation_stopped:
+                    break
+                h(event)
+            for h in list(hooks.get_paste_handlers()):
+                if event.propagation_stopped:
+                    break
+                h(event)
+
+        handler.on_key(_key_dispatcher)
+        handler.on_paste(_paste_dispatcher)
+        handler.on_mouse(self._renderer._dispatch_mouse_event)
+
+        # Wire focus restore logic matching CliRenderer.run() — track blur/focus
+        # cycle so restoreTerminalModes is called once per blur/focus cycle.
+        renderer = self._renderer
+        renderer._should_restore_modes = False
+
+        def _on_focus(focus_type: str) -> None:
+            if focus_type == "blur":
+                renderer._should_restore_modes = True
+                renderer.emit_event("blur")
+            elif focus_type == "focus":
+                if renderer._should_restore_modes:
+                    renderer._should_restore_modes = False
+                    renderer._restore_terminal_modes()
+                renderer.emit_event("focus")
+            # Forward to registered focus handlers
+            for h in hooks.get_focus_handlers():
+                h(focus_type)
+
+        handler.on_focus(_on_focus)
+
+        # Wire capability response handling — emit "capabilities" event
+        # on the renderer when the input handler parses a terminal
+        # capability response (DECRPM, XTVersion, Kitty graphics, DA1, etc.).
+        def _on_capability(cap: dict) -> None:
+            renderer.emit_event("capabilities", cap)
+
+        handler.on_capability(_on_capability)
+
+        self._test_input_handler = handler
+        self._stdin_bridge = _TestStdinBridge(handler)
+
+    @property
+    def stdin_input(self) -> Any:
+        """Stdin-level mock keyboard (raw escape sequences through full parser).
+
+        Returns a :class:`MockKeys` instance wired to a ``TestInputHandler``
+        that parses raw bytes through the same pipeline as production input.
+        """
+        self._ensure_stdin_input()
+        if self._stdin_input is None:
+            from .testing import MockKeys
+
+            self._stdin_input = MockKeys(self._stdin_bridge)
+        return self._stdin_input
+
+    @property
+    def stdin_mouse(self) -> Any:
+        """Stdin-level mock mouse (SGR escape sequences through full parser).
+
+        Returns an :class:`SGRMockMouse` instance wired to a ``TestInputHandler``
+        that parses raw mouse sequences through the same pipeline as production.
+        """
+        self._ensure_stdin_input()
+        if self._stdin_mouse is None:
+            from .testing import SGRMockMouse
+
+            self._stdin_mouse = SGRMockMouse(self._stdin_bridge)
+        return self._stdin_mouse
+
+    @property
+    def stdin(self) -> Any:
+        """Raw stdin bridge — call ``setup.stdin.emit("data", bytes)`` to feed
+        raw escape sequences through the full parser pipeline.
+        """
+        self._ensure_stdin_input()
+        return self._stdin_bridge
 
     def get_buffer(self) -> Buffer:
         """Get the current buffer for inspection."""
@@ -386,24 +585,39 @@ class TestSetup:
         if self._renderer._root is not None:
             self._renderer._root._width = width
             self._renderer._root._height = height
-        from . import hooks
         hooks._set_terminal_dimensions(width, height)
         for handler in hooks.get_resize_handlers():
             handler(width, height)
 
+    def capture_spans(self) -> Any:
+        """Capture the current buffer as styled spans.
+
+        Returns a :class:`CapturedFrame` with cols, rows, lines, and cursor.
+        """
+        from .testing import capture_spans as _capture_spans
+
+        return _capture_spans(self._renderer)
+
     def destroy(self) -> None:
         """Clean up the test."""
         self._renderer.destroy()
+        if self._test_input_handler is not None:
+            self._test_input_handler.destroy()
+            self._test_input_handler = None
 
 
 __all__ = [
+    # Version
+    "__version__",
     # Core
     "render",
     "test_render",
+    "create_test_renderer",
     "TestSetup",
     # Renderer
     "CliRenderer",
     "CliRendererConfig",
+    "RendererControlState",
     "TerminalCapabilities",
     "Buffer",
     "RootRenderable",
@@ -437,8 +651,18 @@ __all__ = [
     "FrameBuffer",
     "Image",
     "TextNode",
+    "InputRenderable",
+    "SelectRenderable",
+    "TextareaRenderable",
+    "TextRenderable",
     "TextStyle",
     "StyledChunk",
+    "GutterRenderable",
+    "LineColorConfig",
+    "LineInfo",
+    "LineInfoProvider",
+    "LineNumberRenderable",
+    "LineSign",
     "VRenderable",
     # Signals
     "Signal",

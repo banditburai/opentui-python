@@ -1,18 +1,19 @@
 """Expression system for composable value expressions.
 
 Provides an AST of expressions that can evaluate in Python and
-optionally compile to JavaScript for web compatibility.
+optionally serialize for external use.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from typing import Any
 
 
 class Expr(ABC):
     """Base class for expressions that can evaluate in Python."""
+
+    __hash__ = None  # type: ignore[assignment]  # Mutable; __eq__ returns BinaryOp
 
     @abstractmethod
     def evaluate(self) -> Any:
@@ -20,7 +21,7 @@ class Expr(ABC):
         pass
 
     def to_js(self) -> str:
-        """Convert to JavaScript (for web compatibility)."""
+        """Convert to external format string."""
         return repr(self.evaluate())
 
     def __str__(self) -> str:
@@ -29,7 +30,6 @@ class Expr(ABC):
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.evaluate()!r})"
 
-    # Operator overloading for expressions
     def __eq__(self, other: Any) -> BinaryOp:
         return BinaryOp(self, "==", other)
 
@@ -96,7 +96,6 @@ class Expr(ABC):
     def __bool__(self) -> bool:
         return bool(self.evaluate())
 
-    # String methods
     def upper(self) -> MethodCall:
         return MethodCall(self, "upper", [])
 
@@ -112,7 +111,6 @@ class Expr(ABC):
     def length(self) -> PropertyAccess:
         return PropertyAccess(self, "len")
 
-    # Assignment methods (for setting values)
     def set(self, value: Any) -> Assignment:
         return Assignment(self, _ensure_expr(value))
 
@@ -326,8 +324,7 @@ def _ensure_expr(value: Any) -> Expr:
     return Literal(value)
 
 
-# Helper functions similar to StarHTML
-def all_(*signals) -> BinaryOp:
+def all_(*signals) -> Expr:
     """Logical AND of all values."""
     if not signals:
         return BinaryOp(Literal(True), "and", Literal(True))
@@ -338,7 +335,7 @@ def all_(*signals) -> BinaryOp:
     return result
 
 
-def any_(*signals) -> BinaryOp:
+def any_(*signals) -> Expr:
     """Logical OR of all values."""
     if not signals:
         return BinaryOp(Literal(False), "or", Literal(False))
@@ -349,7 +346,7 @@ def any_(*signals) -> BinaryOp:
     return result
 
 
-def match(subject: Any, /, **patterns: Any) -> Conditional:
+def match(subject: Any, /, **patterns: Any) -> Expr:
     """Pattern match: match(value, case1=result1, case2=result2, default=result3)."""
     default = patterns.pop("default", None)
     subject_expr = _ensure_expr(subject)

@@ -2,21 +2,37 @@
 
 from __future__ import annotations
 
+import asyncio
+import enum
 import logging
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+from .structs import char_width as _char_width
+from .structs import display_width as _display_width
 
 _log = logging.getLogger(__name__)
+
+
+# Mouse event type → handler attribute name (hoisted from _dispatch_mouse_to_tree
+# to avoid per-call dict allocation during recursive tree walks).
+_MOUSE_HANDLER_MAP = {
+    "down": "_on_mouse_down",
+    "up": "_on_mouse_up",
+    "move": "_on_mouse_move",
+    "drag": "_on_mouse_drag",
+    "scroll": "_on_mouse_scroll",
+}
+
+import contextlib
 
 from . import hooks
 from . import structs as s
 from .components.base import BaseRenderable
+from .console import TerminalConsole
 from .ffi import get_native, is_native_available
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass
@@ -40,6 +56,16 @@ class CliRendererConfig:
     # syllable in field 3 instead of raw key codes, so Korean/Chinese/
     # Japanese input works correctly.
     kitty_keyboard_flags: int = 19  # 1 + 2 + 16
+    # Whether mouse tracking should be enabled on startup.
+    # None means auto-detect (enable when tree has mouse handlers).
+    use_mouse: bool | None = None
+    # Whether left-click automatically focuses focusable elements.
+    auto_focus: bool = True
+    # Experimental split-panel rendering: only the bottom N rows of the
+    # terminal are used for rendering.  Mouse events above the render area
+    # are ignored and y-coordinates are offset so that y=0 corresponds to
+    # the top of the rendered region.
+    experimental_split_height: int | None = None
 
 
 @dataclass
@@ -68,13 +94,15 @@ class TerminalCapabilities:
 class Buffer:
     """Wrapper around native buffer using nanobind."""
 
-    def __init__(self, ptr: Any, native: Any):
+    def __init__(self, ptr: Any, native: Any, graphics: Any = None):
         self._ptr = ptr
         self._native = native
+        self._graphics = graphics
         self._width: int | None = None
         self._height: int | None = None
         self._scissor_stack: list[tuple[int, int, int, int]] = []
         self._opacity_stack: list[float] = []
+        self._cached_opacity: float = 1.0
         self._offset_stack: list[tuple[int, int]] = []
 
     @property
@@ -90,7 +118,6 @@ class Buffer:
         return self._height  # type: ignore[return-value]
 
     def clear(self, bg: s.RGBA | None = None) -> None:
-        # Native buffer_clear takes (buffer, alpha)
         alpha = bg.a if bg else 0.0
         self._native.buffer_clear(self._ptr, alpha)
 
@@ -136,42 +163,55 @@ class Buffer:
         bg: s.RGBA | None = None,
         attributes: int = 0,
     ) -> None:
-        # Apply drawing offset (render-time translation, like OpenCode translateY)
         if self._offset_stack:
             dx, dy = self._offset_stack[-1]
             x += dx
             y += dy
 
-        # Scissor clipping: skip if entirely outside clip rect
+        if x < 0 or y < 0 or x >= self.width or y >= self.height:
+            return
+
         if self._scissor_stack:
             sx, sy, sw, sh = self._scissor_stack[-1]
             if sw <= 0 or sh <= 0:
                 return
             if y < sy or y >= sy + sh:
                 return
-            # Clip text horizontally
-            text_len = len(text)
-            if x + text_len <= sx or x >= sx + sw:
+            text_dw = _display_width(text)
+            if x + text_dw <= sx or x >= sx + sw:
                 return
-            # Trim characters outside scissor rect
             if x < sx:
-                trim = sx - x
-                text = text[trim:]
+                # Trim characters from the left until we reach the scissor edge.
+                trim_cols = sx - x
+                trimmed = 0
+                i = 0
+                while i < len(text) and trimmed < trim_cols:
+                    trimmed += _char_width(text[i])
+                    i += 1
+                text = text[i:]
                 x = sx
             end = sx + sw
-            if x + len(text) > end:
-                text = text[: end - x]
+            remaining_dw = _display_width(text)
+            if x + remaining_dw > end:
+                # Trim characters from the right to fit within the scissor.
+                max_cols = end - x
+                kept = 0
+                i = 0
+                while i < len(text) and kept + _char_width(text[i]) <= max_cols:
+                    kept += _char_width(text[i])
+                    i += 1
+                text = text[:i]
             if not text:
                 return
 
-        # Apply opacity
+        # Guard against negative x after scissor clipping (off-screen left).
+        if x < 0:
+            return
+
         fg = self._apply_opacity_to_color(fg)
         bg = self._apply_opacity_to_color(bg)
 
-        if isinstance(text, str):
-            text_bytes = text.encode("utf-8")
-        else:
-            text_bytes = text
+        text_bytes = text.encode("utf-8") if isinstance(text, str) else text
 
         fg_tuple = (fg.r, fg.g, fg.b, fg.a) if fg else None
         bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
@@ -188,13 +228,20 @@ class Buffer:
         height: int,
         bg: s.RGBA | None = None,
     ) -> None:
-        # Apply drawing offset
         if self._offset_stack:
             dx, dy = self._offset_stack[-1]
             x += dx
             y += dy
 
-        # Scissor clipping: intersect fill rect with scissor rect
+        if x < 0:
+            width += x
+            x = 0
+        if y < 0:
+            height += y
+            y = 0
+        if width <= 0 or height <= 0:
+            return
+
         if self._scissor_stack:
             sx, sy, sw, sh = self._scissor_stack[-1]
             if sw <= 0 or sh <= 0:
@@ -213,13 +260,105 @@ class Buffer:
         bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
         self._native.buffer_fill_rect(self._ptr, x, y, width, height, bg_tuple)
 
+    def _check_bounds(self, x: int, y: int) -> None:
+        """Validate (x, y) is within buffer dimensions."""
+        if x < 0 or x >= self.width or y < 0 or y >= self.height:
+            raise IndexError(f"cell ({x}, {y}) out of bounds for {self.width}x{self.height} buffer")
+
+    def get_bg_color(self, x: int, y: int) -> s.RGBA:
+        """Read the background color at (x, y) from the native buffer.
+
+        Returns an RGBA tuple with values in [0.0, 1.0].
+        Used for testing line color rendering.
+        """
+        import ctypes
+
+        self._check_bounds(x, y)
+        bg_ptr = self._native.buffer_get_bg_ptr(self._ptr)
+        w = self.width
+        offset = (y * w + x) * 4
+        arr_type = ctypes.c_float * 4
+        arr = arr_type.from_address(bg_ptr + offset * ctypes.sizeof(ctypes.c_float))
+        return s.RGBA(arr[0], arr[1], arr[2], arr[3])
+
+    def get_fg_color(self, x: int, y: int) -> s.RGBA:
+        """Read the foreground color at (x, y) from the native buffer.
+
+        Returns an RGBA tuple with values in [0.0, 1.0].
+        Used for testing sign color rendering.
+        """
+        import ctypes
+
+        self._check_bounds(x, y)
+        fg_ptr = self._native.buffer_get_fg_ptr(self._ptr)
+        w = self.width
+        offset = (y * w + x) * 4
+        arr_type = ctypes.c_float * 4
+        arr = arr_type.from_address(fg_ptr + offset * ctypes.sizeof(ctypes.c_float))
+        return s.RGBA(arr[0], arr[1], arr[2], arr[3])
+
+    def draw_editor_view(self, editor_view: Any, x: int = 0, y: int = 0) -> None:
+        """Render an EditorView into this buffer using native drawEditorView.
+
+        This delegates to the native C++ implementation which handles wrapping,
+        scrolling, syntax highlighting, and cursor rendering correctly.
+
+        Args:
+            editor_view: A NativeEditorView instance (must have a .ptr attribute).
+            x: X offset in the buffer.
+            y: Y offset in the buffer.
+        """
+        from .native import _nb
+
+        if self._offset_stack:
+            dx, dy = self._offset_stack[-1]
+            x += dx
+            y += dy
+        _nb.editor_view.buffer_draw_editor_view(self._ptr, editor_view.ptr, x, y)
+
     def get_plain_text(self) -> str:
-        """Get buffer contents as plain text string."""
+        """Get buffer contents as plain text string.
+
+        Uses native writeResolvedChars to decode the buffer (including
+        grapheme clusters and box-drawing characters) into UTF-8 text.
+        Returns newline-separated lines with trailing spaces stripped.
+        """
         try:
-            resolved = self._native.buffer_write_resolved_chars(self._ptr, True)
-            return resolved if resolved else ""
+            raw: bytes = self._native.buffer_write_resolved_chars(self._ptr, True)
+            if not raw:
+                return ""
+            text = raw.decode("utf-8", errors="replace")
         except Exception:
             return ""
+
+        lines = [line.rstrip() for line in text.split("\n")]
+
+        while lines and not lines[-1]:
+            lines.pop()
+
+        return "\n".join(lines)
+
+    def get_attributes(self, x: int, y: int) -> int:
+        """Read the attributes bitmask at (x, y) from the native buffer."""
+        import ctypes
+
+        self._check_bounds(x, y)
+        attr_ptr = self._native.buffer_get_attributes_ptr(self._ptr)
+        w = self.width
+        offset = y * w + x
+        arr = (ctypes.c_uint32 * 1).from_address(attr_ptr + offset * ctypes.sizeof(ctypes.c_uint32))
+        return arr[0]
+
+    def get_char_code(self, x: int, y: int) -> int:
+        """Read the character codepoint at (x, y) from the native buffer."""
+        import ctypes
+
+        self._check_bounds(x, y)
+        char_ptr = self._native.buffer_get_char_ptr(self._ptr)
+        w = self.width
+        offset = y * w + x
+        arr = (ctypes.c_uint32 * 1).from_address(char_ptr + offset * ctypes.sizeof(ctypes.c_uint32))
+        return arr[0]
 
     def get_span_lines(self) -> list[dict]:
         """Get span lines for diff testing."""
@@ -230,8 +369,8 @@ class Buffer:
             return []
 
         try:
-            resolved = self._native.buffer_write_resolved_chars(self._ptr, True)
-            real_text = resolved if resolved else ""
+            raw: bytes = self._native.buffer_write_resolved_chars(self._ptr, True)
+            real_text = raw.decode("utf-8", errors="replace") if raw else ""
         except Exception:
             return []
 
@@ -265,10 +404,24 @@ class Buffer:
         else:
             self._scissor_stack.append((x, y, width, height))
 
+        # Sync with the native Zig buffer's scissor stack so that native
+        # draw calls (e.g. bufferDrawTextBufferView) are clipped too.
+        if self._graphics is not None:
+            final = self._scissor_stack[-1]
+            self._graphics.buffer_push_scissor_rect(
+                self._ptr,
+                final[0],
+                final[1],
+                max(0, final[2]),
+                max(0, final[3]),
+            )
+
     def pop_scissor_rect(self) -> None:
         """Pop the most recent scissor rectangle."""
         if self._scissor_stack:
             self._scissor_stack.pop()
+            if self._graphics is not None:
+                self._graphics.buffer_pop_scissor_rect(self._ptr)
 
     def get_scissor_rect(self) -> tuple[int, int, int, int] | None:
         """Get the current scissor rectangle, or None if no clipping."""
@@ -281,24 +434,30 @@ class Buffer:
         sx, sy, sw, sh = self._scissor_stack[-1]
         return sx <= x < sx + sw and sy <= y < sy + sh
 
-    # Opacity stack
+    # Opacity stack (cached product avoids O(n) recomputation per draw call)
     def push_opacity(self, opacity: float) -> None:
         """Push an opacity value. Combined multiplicatively with the stack."""
         self._opacity_stack.append(opacity)
+        self._cached_opacity = max(0.0, min(1.0, self._cached_opacity * opacity))
 
     def pop_opacity(self) -> None:
         """Pop the most recent opacity value."""
         if self._opacity_stack:
-            self._opacity_stack.pop()
+            removed = self._opacity_stack.pop()
+            if not self._opacity_stack:
+                self._cached_opacity = 1.0
+            elif removed != 0.0:
+                self._cached_opacity = max(0.0, min(1.0, self._cached_opacity / removed))
+            else:
+                # Recompute from scratch if we divided by zero
+                self._cached_opacity = 1.0
+                for o in self._opacity_stack:
+                    self._cached_opacity *= o
+                self._cached_opacity = max(0.0, min(1.0, self._cached_opacity))
 
     def get_current_opacity(self) -> float:
         """Get the current combined opacity (product of all values in the stack)."""
-        if not self._opacity_stack:
-            return 1.0
-        result = 1.0
-        for o in self._opacity_stack:
-            result *= o
-        return result
+        return self._cached_opacity
 
     # Additional drawing methods
     def draw_rectangle(
@@ -374,16 +533,29 @@ class Buffer:
             self.draw_text(title_text, tx, y, fg=border_color, bg=bg)
 
 
+_BORDER_CHARS = {
+    "single": ("┌", "┐", "└", "┘", "─", "│"),
+    "double": ("╔", "╗", "╚", "╝", "═", "║"),
+    "round": ("╭", "╮", "╰", "╯", "─", "│"),
+    "bold": ("┏", "┓", "┗", "┛", "━", "┃"),
+    "block": ("█", "█", "█", "█", "█", "█"),
+}
+
+
 def _get_border_chars(style: str) -> tuple[str, str, str, str, str, str]:
     """Get border characters for a style. Returns (tl, tr, bl, br, horizontal, vertical)."""
-    borders = {
-        "single": ("┌", "┐", "└", "┘", "─", "│"),
-        "double": ("╔", "╗", "╚", "╝", "═", "║"),
-        "round": ("╭", "╮", "╰", "╯", "─", "│"),
-        "bold": ("┏", "┓", "┗", "┛", "━", "┃"),
-        "block": ("█", "█", "█", "█", "█", "█"),
-    }
-    return borders.get(style, borders["single"])
+    return _BORDER_CHARS.get(style, _BORDER_CHARS["single"])
+
+
+class RendererControlState(enum.Enum):
+    """Renderer control state for the render loop lifecycle."""
+
+    IDLE = "idle"
+    AUTO_STARTED = "auto_started"
+    EXPLICIT_STARTED = "explicit_started"
+    EXPLICIT_PAUSED = "explicit_paused"
+    EXPLICIT_SUSPENDED = "explicit_suspended"
+    EXPLICIT_STOPPED = "explicit_stopped"
 
 
 class CliRenderer:
@@ -394,6 +566,13 @@ class CliRenderer:
         self._config = config
         self._native = native
         self._running = False
+        # Control state machine for render loop lifecycle
+        self._control_state: RendererControlState = RendererControlState.IDLE
+        self._rendering: bool = False
+        self._update_scheduled: bool = False
+        self._immediate_rerender_requested: bool = False
+        self._live_request_counter: int = 0
+        self._idle_futures: list[asyncio.Future[None]] = []
         self._root: RootRenderable | None = None
         self._event_callbacks: list[Callable] = []
         self._component_fn: Callable | None = None
@@ -402,6 +581,13 @@ class CliRenderer:
         # Handler cache
         self._handlers_dirty = True
         self._cached_handlers: dict[str, list[Callable]] = {"key": [], "mouse": [], "paste": []}
+        # Auto-focus: whether left-click should automatically focus focusable elements.
+        # Set to False to prevent click-driven focus changes.
+        self._auto_focus: bool = config.auto_focus
+        # Currently focused renderable (for auto-focus tracking).
+        self._focused_renderable: Any = None
+        # Whether a drag operation is in progress (prevents auto-focus during drag).
+        self._is_dragging: bool = False
         # Post-processing and frame callbacks
         self._post_process_fns: list[Callable] = []
         self._frame_callbacks: list[Callable] = []
@@ -433,6 +619,41 @@ class CliRenderer:
         # removes them automatically.  Overlays set this to hide graphics
         # that would otherwise bleed through the text layer.
         self._graphics_suppressed: bool = False
+        # Mouse pointer (cursor) style — set via set_mouse_pointer().
+        # Tracks the OS-level mouse cursor shape (e.g. "pointer", "text").
+        self._current_mouse_pointer_style: str = "default"
+        # Hover tracking — last renderable the pointer was over, used to
+        # dispatch _on_mouse_over / _on_mouse_out events when the element
+        # under the pointer changes.
+        self._last_over_renderable: Any = None
+        # Pointer tracking — last known mouse position and whether the pointer
+        # has ever been inside the terminal.  Used by _recheck_hover_state()
+        # to fire synthetic over/out events after render even without new
+        # mouse movement for hover recheck after render.
+        self._latest_pointer: dict[str, int] = {"x": 0, "y": 0}
+        self._has_pointer: bool = False
+        self._last_pointer_modifiers: dict[str, bool] = {
+            "shift": False,
+            "alt": False,
+            "ctrl": False,
+        }
+        # Event emitter — listeners for renderer-level events like "focus"/"blur".
+        # Event listeners for terminal focus/blur tracking.
+        self._event_listeners: dict[str, list[Callable]] = {}
+        # Palette detection state
+        self._palette_detector: Any = None
+        self._cached_palette: Any = None
+        self._palette_detection_promise: asyncio.Task | asyncio.Future | None = None
+        # Selection state — current text selection model.
+        # Current text selection and its container hierarchy.
+        self._current_selection: Any = None
+        self._selection_containers: list[Any] = []
+        # Split-height rendering — when > 0, only the bottom N rows of the
+        # terminal are used.  _render_offset is ``terminal_height - split_height``
+        # and mouse y-coordinates below that threshold are ignored / offset.
+        self._split_height: int = 0
+        self._render_offset: int = 0
+        self._terminal_height: int = 0  # full terminal height before split
 
         if config.testing:
             self._width = config.width
@@ -450,6 +671,25 @@ class CliRenderer:
                 self._width = config.width
                 self._height = config.height
 
+        # Apply experimental split-height (must happen after _width/_height are set).
+        self._terminal_height = self._height
+        sh = config.experimental_split_height or 0
+        if sh > 0:
+            self._split_height = sh
+            self._render_offset = self._height - sh
+            self._height = sh
+
+        # Console overlay — intercepts mouse events inside its bounds.
+        # Must happen after _width/_height are set so dimension computation works.
+        self._console: TerminalConsole = TerminalConsole(self, config.console_options)
+        self._use_console: bool = True
+
+        # If use_mouse is explicitly configured, apply it now.
+        if config.use_mouse is True:
+            self._mouse_enabled = True
+        elif config.use_mouse is False:
+            self._mouse_enabled = False
+
     @staticmethod
     def _parse_clear_color(color: s.RGBA | str | None) -> s.RGBA | None:
         if color is None:
@@ -457,7 +697,7 @@ class CliRenderer:
         if isinstance(color, s.RGBA):
             return color
         if isinstance(color, str):
-            return s.RGBA.from_hex(color)
+            return s.parse_color(color)
         return None
 
     def set_clear_color(self, color: s.RGBA | str | None) -> None:
@@ -475,6 +715,41 @@ class CliRenderer:
     @property
     def height(self) -> int:
         return self._height
+
+    @property
+    def split_height(self) -> int:
+        """Return the current experimental split height (0 = disabled)."""
+        return self._split_height
+
+    @split_height.setter
+    def split_height(self, value: int) -> None:
+        """Set the experimental split height.
+
+        When > 0, only the bottom *value* rows of the terminal are used for
+        rendering.  Mouse events with y < render_offset are ignored and
+        y-coordinates are shifted so that y=0 is the top of the rendered
+        region.
+        """
+        value = max(value, 0)
+        self._split_height = value
+        if value > 0:
+            self._render_offset = self._terminal_height - value
+            self._height = value
+        else:
+            self._render_offset = 0
+            self._height = self._terminal_height
+
+    @property
+    def use_console(self) -> bool:
+        return self._use_console
+
+    @use_console.setter
+    def use_console(self, value: bool) -> None:
+        self._use_console = value
+
+    @property
+    def console(self) -> TerminalConsole:
+        return self._console
 
     @property
     def root(self) -> RootRenderable:
@@ -504,6 +779,19 @@ class CliRenderer:
     def set_title(self, title: str) -> None:
         """Set the terminal title."""
         self._native.renderer.set_terminal_title(self._ptr, title)
+
+    @property
+    def use_mouse(self) -> bool:
+        """Whether mouse tracking is currently enabled."""
+        return self._mouse_enabled
+
+    @use_mouse.setter
+    def use_mouse(self, value: bool) -> None:
+        """Enable or disable mouse tracking."""
+        if value:
+            self.enable_mouse()
+        else:
+            self.disable_mouse()
 
     def enable_mouse(self, enable_movement: bool = False) -> None:
         """Enable mouse tracking."""
@@ -554,8 +842,12 @@ class CliRenderer:
         self._cursor_color_request = color
 
     _DECSCUSR = {
-        "block": 1, "underline": 3, "bar": 5,
-        "steady_block": 2, "steady_underline": 4, "steady_bar": 6,
+        "block": 1,
+        "underline": 3,
+        "bar": 5,
+        "steady_block": 2,
+        "steady_underline": 4,
+        "steady_bar": 6,
     }
 
     def _apply_cursor(self) -> None:
@@ -614,8 +906,12 @@ class CliRenderer:
                 style = style_req or "block"
                 # Steady DECSCUSR — shape only; blink handled by our timer.
                 _STEADY = {
-                    "block": 2, "underline": 4, "bar": 6,
-                    "steady_block": 2, "steady_underline": 4, "steady_bar": 6,
+                    "block": 2,
+                    "underline": 4,
+                    "bar": 6,
+                    "steady_block": 2,
+                    "steady_underline": 4,
+                    "steady_bar": 6,
                 }
                 code = _STEADY.get(style, 2)
                 self._cursor_style = style
@@ -631,6 +927,7 @@ class CliRenderer:
                     esc += "\x1b]112\x07"
 
                 import sys as _sys
+
                 _sys.stdout.write(esc)
                 _sys.stdout.flush()
             # blink_off: render()'s \x1b[?25l keeps cursor hidden.
@@ -673,7 +970,9 @@ class CliRenderer:
         stale = self._prev_frame_graphics - self._frame_graphics
         if stale:
             import sys as _sys
+
             from .filters import _clear_kitty_graphics
+
             for gid in stale:
                 _sys.stdout.buffer.write(_clear_kitty_graphics(gid))
             _sys.stdout.buffer.flush()
@@ -685,11 +984,23 @@ class CliRenderer:
         return self._native.renderer.get_cursor_state(self._ptr)
 
     def copy_to_clipboard(self, clipboard_type: int, text: str) -> bool:
-        """Copy text to clipboard via OSC 52."""
+        """Copy text to clipboard via OSC 52.
+
+        Returns False without writing if the terminal does not support OSC 52.
+        """
+        caps = self.get_capabilities()
+        if not caps.osc52:
+            return False
         return self._native.renderer.copy_to_clipboard_osc52(self._ptr, clipboard_type, text)
 
     def clear_clipboard(self, clipboard_type: int) -> bool:
-        """Clear clipboard via OSC 52."""
+        """Clear clipboard via OSC 52.
+
+        Returns False without writing if the terminal does not support OSC 52.
+        """
+        caps = self.get_capabilities()
+        if not caps.osc52:
+            return False
         return self._native.renderer.clear_clipboard_osc52(self._ptr, clipboard_type)
 
     def set_debug_overlay(self, enable: bool, flags: int = 0) -> None:
@@ -750,12 +1061,12 @@ class CliRenderer:
     def get_next_buffer(self) -> Buffer:
         """Get the next buffer."""
         ptr = self._native.renderer.get_next_buffer(self._ptr)
-        return Buffer(ptr, self._native.buffer)
+        return Buffer(ptr, self._native.buffer, self._native.graphics)
 
     def get_current_buffer(self) -> Buffer:
         """Get the current buffer."""
         ptr = self._native.renderer.get_current_buffer(self._ptr)
-        return Buffer(ptr, self._native.buffer)
+        return Buffer(ptr, self._native.buffer, self._native.graphics)
 
     def render(self, force: bool = False) -> None:
         """Render the current frame."""
@@ -773,12 +1084,53 @@ class CliRenderer:
         self._native.renderer.clear_terminal(self._ptr)
 
     def request_render(self) -> None:
-        """Request a render on the next frame."""
-        pass
+        """Request a render on the next frame.
+
+        In test mode this is a no-op (tests drive rendering via
+        ``render_frame()``).  In production the control-state machine
+        determines whether a frame is scheduled.
+        """
+        if self._control_state == RendererControlState.EXPLICIT_SUSPENDED:
+            return
+        if self._running:
+            return
+        if self._rendering:
+            self._immediate_rerender_requested = True
+            return
+        # In test mode, just mark scheduled (resolved by next render_frame).
+        self._update_scheduled = True
 
     def set_event_callback(self, callback: Callable) -> None:
         """Set callback for terminal events."""
         self._event_callbacks.append(callback)
+
+    def on(self, event: str, handler: Callable) -> Callable[[], None]:
+        """Register an event listener on the renderer.
+
+        Supported events: ``"focus"``, ``"blur"``.
+
+        Registers handlers for terminal focus/blur events.
+
+        Returns an unsubscribe function.
+        """
+        listeners = self._event_listeners.setdefault(event, [])
+        listeners.append(handler)
+
+        def _unsub() -> None:
+            with contextlib.suppress(ValueError):
+                listeners.remove(handler)
+
+        return _unsub
+
+    def emit_event(self, event: str, *args: Any) -> None:
+        """Emit a renderer-level event to all registered listeners.
+
+        Called internally when the input handler detects focus-in / focus-out
+        sequences.
+        """
+        for handler in list(self._event_listeners.get(event, [])):
+            with contextlib.suppress(Exception):
+                handler(*args)
 
     def run(self) -> None:
         """Run the renderer main loop with event handling."""
@@ -809,16 +1161,14 @@ class CliRenderer:
         # Enable the kitty keyboard protocol for structured modifier reporting
         # and associated text (flag 16) for CJK IME composition.
         if not self._config.testing and self._config.kitty_keyboard_flags:
-            try:
+            with contextlib.suppress(Exception):
                 self.enable_keyboard(self._config.kitty_keyboard_flags)
-            except Exception:
-                pass
 
         # Drain capability responses from stdin so they don't get
         # misinterpreted as user input by the InputHandler.
         # Poll with a deadline; stop early after idle silence.
         _DRAIN_DEADLINE = 0.4  # max seconds to wait for responses
-        _DRAIN_IDLE = 0.08     # seconds of silence before declaring done
+        _DRAIN_IDLE = 0.08  # seconds of silence before declaring done
 
         deadline = _time.perf_counter() + _DRAIN_DEADLINE
         last_data = _time.perf_counter()
@@ -829,17 +1179,14 @@ class CliRenderer:
             if _sel.select([fd], [], [], remaining)[0]:
                 _os.read(fd, 4096)
                 last_data = _time.perf_counter()
-            else:
-                if _time.perf_counter() - last_data >= _DRAIN_IDLE:
-                    break
+            elif _time.perf_counter() - last_data >= _DRAIN_IDLE:
+                break
 
         # Restore original terminal attrs (InputHandler.start() will
         # set its own cbreak mode shortly).
         if _pre_attrs is not None:
-            try:
+            with contextlib.suppress(OSError, _termios.error):
                 _termios.tcsetattr(fd, _termios.TCSANOW, _pre_attrs)
-            except (OSError, _termios.error):
-                pass
 
         from .input import EventLoop
 
@@ -861,16 +1208,18 @@ class CliRenderer:
         for handler in hooks.get_paste_handlers():
             input_handler.on_paste(handler)
 
-        # Focus event handling — restore terminal modes on focus-in
-        # (matching upstream renderer.ts restoreTerminalModes pattern).
+        # Focus event handling — restore terminal modes on focus-in.
         self._should_restore_modes = False
 
         def _on_focus(focus_type: str) -> None:
             if focus_type == "blur":
                 self._should_restore_modes = True
-            elif focus_type == "focus" and self._should_restore_modes:
-                self._should_restore_modes = False
-                self._restore_terminal_modes()
+                self.emit_event("blur")
+            elif focus_type == "focus":
+                if self._should_restore_modes:
+                    self._should_restore_modes = False
+                    self._restore_terminal_modes()
+                self.emit_event("focus")
 
         input_handler.on_focus(_on_focus)
 
@@ -885,7 +1234,7 @@ class CliRenderer:
 
         self._refresh_mouse_tracking()
 
-        event_loop.on_frame(lambda dt: self._render_frame(dt))
+        event_loop.on_frame(self._render_frame)
 
         try:
             event_loop.run()
@@ -897,15 +1246,14 @@ class CliRenderer:
         finally:
             # Disable kitty keyboard protocol before tearing down the
             # terminal so the shell doesn't receive extended key reports.
-            try:
+            with contextlib.suppress(Exception):
                 self.disable_keyboard()
-            except Exception:
-                pass
 
             # Restore terminal default cursor style (DECSCUSR 0) and color
             # (OSC 112) so the shell cursor returns to its normal appearance.
             try:
                 import sys as _csys
+
                 _csys.stdout.write("\x1b[0 q\x1b]112\x07")
                 _csys.stdout.flush()
             except Exception:
@@ -935,63 +1283,105 @@ class CliRenderer:
 
     def _render_frame(self, delta_time: float) -> None:
         """Render a single frame."""
-        # Run frame callbacks before render
-        for cb in self._frame_callbacks:
-            cb(delta_time)
-
-        # Run one-shot animation frame callbacks
-        if self._animation_frame_callbacks:
-            pending = dict(self._animation_frame_callbacks)
-            self._animation_frame_callbacks.clear()
-            for cb in pending.values():
+        self._rendering = True
+        self._update_scheduled = False
+        self._immediate_rerender_requested = False
+        try:
+            # Run frame callbacks before render
+            for cb in self._frame_callbacks:
                 cb(delta_time)
 
-        if (
-            self._component_fn is not None
-            and self._signal_state is not None
-            and self._signal_state.has_changes()
-        ):
-            self._signal_state.reset()
-            self._rebuild_component_tree()
+            # Run one-shot animation frame callbacks
+            if self._animation_frame_callbacks:
+                pending = dict(self._animation_frame_callbacks)
+                self._animation_frame_callbacks.clear()
+                for cb in pending.values():
+                    cb(delta_time)
 
-        self._refresh_mouse_tracking()
+            if (
+                self._component_fn is not None
+                and self._signal_state is not None
+                and self._signal_state.has_changes()
+            ):
+                self._signal_state.reset()
+                self._rebuild_component_tree()
 
-        if self._root:
-            try:
-                self._update_layout(self._root, delta_time)
-            except Exception:
-                _log.exception("Error updating layout")
+            self._refresh_mouse_tracking()
 
-        buffer = self.get_next_buffer()
-        buffer.clear()
+            # Guard: a frame callback or RAF callback may have destroyed the renderer.
+            if self._ptr is None:
+                return
 
-        # Fill entire buffer with clear color so every cell has an explicit
-        # background.  Without this, transparent cells show the terminal's
-        # native background color (e.g. Ghostty's gray).
-        if self._clear_color:
-            buffer.fill_rect(0, 0, self._width, self._height, self._clear_color)
+            if self._root:
+                try:
+                    self._update_layout(self._root, delta_time)
+                except Exception:
+                    _log.exception("Error updating layout")
+                    # Force a full layout recomputation on the next frame so
+                    # yoga node state left dirty by the failed pass is reset.
+                    self._force_next_render = True
+                    if self._root is not None:
+                        self._root.mark_dirty()
 
-        if self._root:
-            try:
-                self._root.render(buffer, delta_time)
-            except Exception:
-                _log.exception("Error rendering root")
+            buffer = self.get_next_buffer()
+            buffer.clear()
 
-        # Run post-processing functions after render
-        for fn in self._post_process_fns:
-            fn(buffer)
+            # Fill entire buffer with clear color so every cell has an explicit
+            # background.  Without this, transparent cells show the terminal's
+            # native background color (e.g. Ghostty's gray).
+            if self._clear_color:
+                buffer.fill_rect(0, 0, self._width, self._height, self._clear_color)
 
-        # Force a full repaint (bypass diff) after resize or on first frame.
-        force = self._force_next_render
-        if force:
-            self._force_next_render = False
-        self.render(force=force)
+            if self._root:
+                try:
+                    self._root.render(buffer, delta_time)
+                except Exception:
+                    _log.exception("Error rendering root")
+                    # Ensure yoga state is re-evaluated on the next frame.
+                    self._force_next_render = True
+                    if self._root is not None:
+                        self._root.mark_dirty()
 
-        # Clear Kitty graphics that were active last frame but not this one.
-        self._clear_stale_graphics()
+            # Run post-processing functions after render
+            for fn in self._post_process_fns:
+                fn(buffer)
+                # Guard: post-process may have destroyed the renderer.
+                if self._ptr is None:
+                    return
 
-        # Position (or hide) the terminal cursor after the frame is flushed.
-        self._apply_cursor()
+            # Guard: if the renderer was destroyed during one of the callbacks
+            # above, skip the native render/flush calls to avoid use-after-free.
+            if self._ptr is None:
+                return
+
+            # Force a full repaint (bypass diff) after resize or on first frame.
+            force = self._force_next_render
+            if force:
+                self._force_next_render = False
+            self.render(force=force)
+
+            # Guard again: destroy() may have been called inside post_process or
+            # root.render(), and render() above would then use a live ptr, so we
+            # only proceed with cursor/graphics if still alive.
+            if self._ptr is None:
+                return
+
+            # Clear Kitty graphics that were active last frame but not this one.
+            self._clear_stale_graphics()
+
+            # Position (or hide) the terminal cursor after the frame is flushed.
+            self._apply_cursor()
+
+            # Recheck hover state: if the pointer hasn't moved but the tree
+            # changed (e.g. scroll offset changed), fire synthetic over/out.
+            # Recheck hover state when hit-grid
+            # is dirty after render.  The guard is _has_pointer (not
+            # _mouse_enabled) so that hover recheck fires even when mouse
+            # tracking is auto-disabled.
+            self._recheck_hover_state()
+        finally:
+            self._rendering = False
+            self._resolve_idle_if_needed()
 
     def _rebuild_component_tree(self) -> None:
         """Rebuild the component tree from the component function."""
@@ -999,6 +1389,7 @@ class CliRenderer:
             return
 
         import time as _time
+
         from .reconciler import reconcile
 
         t0 = _time.perf_counter_ns()
@@ -1008,15 +1399,19 @@ class CliRenderer:
             t1 = _time.perf_counter_ns()
             new_children = [component]
             self._root._children.clear()
+            self._root._children_tuple = None
             reconcile(self._root, old_children, new_children)
             t2 = _time.perf_counter_ns()
             _log.debug(
                 "rebuild: component_fn=%.2fms reconcile=%.2fms total=%.2fms",
-                (t1 - t0) / 1e6, (t2 - t1) / 1e6, (t2 - t0) / 1e6,
+                (t1 - t0) / 1e6,
+                (t2 - t1) / 1e6,
+                (t2 - t0) / 1e6,
             )
         except Exception:
             _log.exception("Error rebuilding component tree, restoring previous")
             self._root._children = old_children
+            self._root._children_tuple = None
             for child in old_children:
                 child._parent = self._root
             # Restore yoga children to match restored _children
@@ -1046,14 +1441,23 @@ class CliRenderer:
 
             from . import layout as yoga_layout
 
-            yoga_layout.compute_layout(self._root._yoga_node, float(self._width), float(self._height))
+            yoga_layout.compute_layout(
+                self._root._yoga_node, float(self._width), float(self._height)
+            )
 
             self._apply_yoga_layout_recursive(self._root)
 
         if hasattr(renderable, "update_layout"):
             renderable.update_layout(delta_time)
 
-    def _apply_yoga_layout_recursive(self, renderable, offset_x: int = 0, offset_y: int = 0) -> None:
+        # Recurse into children (snapshot to guard against mid-update mutations)
+        for child in list(getattr(renderable, "_children", [])):
+            if not getattr(child, "_destroyed", False):
+                self._update_layout(child, delta_time)
+
+    def _apply_yoga_layout_recursive(
+        self, renderable, offset_x: int = 0, offset_y: int = 0
+    ) -> None:
         """Apply yoga layout to renderable and all descendants.
 
         Yoga computes positions relative to the parent. This method converts
@@ -1093,10 +1497,8 @@ class CliRenderer:
 
     def _collect_handlers(self, renderable, handlers: dict) -> None:
         """Recursively collect event handlers."""
-        try:
+        with contextlib.suppress(AttributeError):
             handlers["key"].append(renderable._key_handler)
-        except AttributeError:
-            pass
 
         try:
             handler = renderable._on_key_down
@@ -1157,12 +1559,49 @@ class CliRenderer:
 
         Implements mouse capture: when a drag begins on a renderable, that
         element receives ALL subsequent drag events directly (skipping tree
-        traversal) until the mouse button is released.  This matches the
-        OpenCode TypeScript reference and is required for click-and-drag
+        traversal) until the mouse button is released.          This is required for click-and-drag
         operations like text selection to work correctly.
+
+        Also integrates text selection:
+        - left-button down on a selectable renderable starts selection
+        - drag while selection active updates selection focus
+        - up while selection active finishes selection (stops dragging)
+        - ctrl+click extends an existing selection
+        - right click does NOT start selection
+        - click without drag clears selection (unless prevented)
         """
         if self._root is None:
             return
+
+        # --- Split-height coordinate adjustment ---
+        # When split-height is active, ignore events above the render area
+        # and offset y so that y=0 corresponds to the top of the rendered region.
+        if self._split_height > 0:
+            if event.y < self._render_offset:
+                return
+            event.y -= self._render_offset
+
+        # Track latest pointer position and modifiers for hover recheck after render.
+        self._latest_pointer["x"] = event.x
+        self._latest_pointer["y"] = event.y
+        self._has_pointer = True
+        self._last_pointer_modifiers = {
+            "shift": getattr(event, "shift", False),
+            "alt": getattr(event, "alt", False),
+            "ctrl": getattr(event, "ctrl", False),
+        }
+
+        # Console overlay intercept — if visible, check if the event falls
+        # inside the console bounds.  If the console handles it, stop here.
+        if self._use_console and self._console.visible:
+            cb = self._console.bounds
+            if (
+                cb.x <= event.x < cb.x + cb.width
+                and cb.y <= event.y < cb.y + cb.height
+                and self._console.handle_mouse(event)
+            ):
+                return
+
         if event.type == "scroll":
             self._dispatch_scroll_event(event)
             return
@@ -1172,10 +1611,99 @@ class CliRenderer:
         if event.type in ("down", "drag", "up"):
             _log.debug(
                 "mouse dispatch type=%s x=%s y=%s button=%s captured=%s",
-                event.type, event.x, event.y,
+                event.type,
+                event.x,
+                event.y,
                 getattr(event, "button", None),
                 type(captured).__name__ if captured is not None else None,
             )
+
+        # --- Selection handling (before normal capture) ---
+        # Find the hit target for selection checks.
+        hit_renderable = self._find_deepest_hit(self._root, event.x, event.y)
+        is_ctrl = getattr(event, "ctrl", False)
+        button = getattr(event, "button", 0)
+
+        # 1. left-button down: start selection if target is selectable
+        if (
+            event.type == "down"
+            and button == 0  # left button only
+            and not (self._current_selection is not None and self._current_selection.is_dragging)
+            and not is_ctrl
+        ):
+            can_start = bool(
+                hit_renderable is not None
+                and getattr(hit_renderable, "selectable", False)
+                and not getattr(hit_renderable, "_destroyed", False)
+                and hit_renderable.should_start_selection(event.x, event.y)
+            )
+            if can_start:
+                self.start_selection(hit_renderable, event.x, event.y)
+                # Still dispatch the mouse-down event to the renderable
+                self._dispatch_mouse_to_tree(self._root, event)
+                return
+
+        # 2. drag while selection isDragging: update selection focus
+        if (
+            event.type == "drag"
+            and self._current_selection is not None
+            and self._current_selection.is_dragging
+        ):
+            self.update_selection(hit_renderable, event.x, event.y)
+
+            # Dispatch drag event with isDragging=True to the hit renderable
+            if hit_renderable is not None:
+                from .events import MouseEvent
+
+                drag_ev = MouseEvent(
+                    type="drag",
+                    x=event.x,
+                    y=event.y,
+                    button=button,
+                    is_dragging=True,
+                    shift=getattr(event, "shift", False),
+                    ctrl=is_ctrl,
+                    alt=getattr(event, "alt", False),
+                )
+                drag_ev.target = hit_renderable
+                handler = getattr(hit_renderable, "_on_mouse_drag", None)
+                if handler is not None:
+                    handler(drag_ev)
+            return
+
+        # 3. up while selection isDragging: dispatch up with isDragging, then finish
+        if (
+            event.type == "up"
+            and self._current_selection is not None
+            and self._current_selection.is_dragging
+        ):
+            if hit_renderable is not None:
+                from .events import MouseEvent
+
+                up_ev = MouseEvent(
+                    type="up",
+                    x=event.x,
+                    y=event.y,
+                    button=button,
+                    is_dragging=True,
+                    shift=getattr(event, "shift", False),
+                    ctrl=is_ctrl,
+                    alt=getattr(event, "alt", False),
+                )
+                up_ev.target = hit_renderable
+                handler = getattr(hit_renderable, "_on_mouse_up", None)
+                if handler is not None:
+                    handler(up_ev)
+            self._finish_selection()
+            return
+
+        # 4. ctrl+click with existing selection: extend selection
+        if event.type == "down" and button == 0 and self._current_selection is not None and is_ctrl:
+            self._current_selection.is_dragging = True
+            self.update_selection(hit_renderable, event.x, event.y)
+            return
+
+        # --- Normal capture-based dispatch ---
 
         # Route drag/move events directly to captured element (skip tree walk).
         if captured is not None and event.type not in ("up", "down"):
@@ -1185,7 +1713,9 @@ class CliRenderer:
                 handler(event)
                 _log.debug("mouse capture→drag handler fired on %s", type(captured).__name__)
             else:
-                _log.debug("mouse capture active but no _on_mouse_drag on %s", type(captured).__name__)
+                _log.debug(
+                    "mouse capture active but no _on_mouse_drag on %s", type(captured).__name__
+                )
             return
 
         # On mouse-up: send drag-end + up to captured element, then release.
@@ -1202,6 +1732,14 @@ class CliRenderer:
             _log.debug("mouse capture released on up")
             return
 
+        # Track drag state so that auto-focus is suppressed during drag operations.
+        if event.type == "down":
+            self._is_dragging = False
+        elif event.type == "drag":
+            self._is_dragging = True
+        elif event.type == "up":
+            self._is_dragging = False
+
         # Normal tree dispatch for down/other events.
         self._dispatch_mouse_to_tree(self._root, event)
 
@@ -1212,6 +1750,49 @@ class CliRenderer:
             type(target).__name__ if target is not None else None,
             getattr(target, "_on_mouse_drag", None) is not None if target else False,
         )
+
+        # Hover tracking: fire _on_mouse_out / _on_mouse_over when the
+        # element under the pointer changes.
+        if event.type in ("move", "drag"):
+            hit = self._find_deepest_hit(self._root, event.x, event.y)
+            last_over = self._last_over_renderable
+            if hit is not last_over:
+                if last_over is not None and not getattr(last_over, "_destroyed", False):
+                    out_handler = getattr(last_over, "_on_mouse_out", None)
+                    if out_handler is not None:
+                        from .events import MouseEvent
+
+                        out_ev = MouseEvent(type="out", x=event.x, y=event.y)
+                        out_ev.target = last_over
+                        out_handler(out_ev)
+                self._last_over_renderable = hit
+                if hit is not None:
+                    over_handler = getattr(hit, "_on_mouse_over", None)
+                    if over_handler is not None:
+                        from .events import MouseEvent
+
+                        over_ev = MouseEvent(type="over", x=event.x, y=event.y)
+                        over_ev.target = hit
+                        over_handler(over_ev)
+
+        # Auto-focus: on left-button mousedown, find the deepest element under
+        # the click position and walk up to its nearest focusable ancestor.
+        # preventDefault() on the mousedown event (or any ancestor's handler)
+        # blocks auto-focus, as does a button other than left (button 0).
+        if (
+            event.type == "down"
+            and getattr(event, "button", 0) == 0  # left button only
+            and not event.default_prevented
+            and self._auto_focus
+        ):
+            # Use the event's target if a handler fired and set it;
+            # otherwise fall back to finding the deepest hit element.
+            hit = target
+            if hit is None:
+                hit = self._find_deepest_hit(self._root, event.x, event.y)
+            focusable = self._find_focusable_ancestor(hit)
+            if focusable is not None:
+                self._do_auto_focus(focusable)
 
         # After dispatching a drag event, capture the target element so
         # subsequent drags bypass the tree walk.
@@ -1225,23 +1806,399 @@ class CliRenderer:
                 self._captured_renderable = target
                 _log.debug("mouse captured %s on down (has drag handler)", type(target).__name__)
 
+        # After normal dispatch: if down event and defaultPrevented is not set
+        # and there is a current selection, clear it.
+        if (
+            event.type == "down"
+            and not event.default_prevented
+            and self._current_selection is not None
+        ):
+            self.clear_selection()
+
     def _dispatch_scroll_event(self, event) -> None:
-        """Route wheel input to the deepest scroll target under the pointer."""
+        """Route wheel input through the render tree with parent propagation.
+
+        The deepest
+        renderable under the pointer receives the event first, then the
+        event bubbles up through parents until something calls
+        ``stop_propagation()`` (typically a ScrollBox).
+
+        When nothing in the tree handles the event, falls back to the
+        currently focused renderable.
+        """
         if self._root is None:
             return
 
-        target = self._find_scroll_target(self._root, event.x, event.y)
-        if target is not None:
-            event.target = target
-            handler = getattr(target, "handle_scroll_event", None)
-            if handler is not None:
-                handler(event)
-            else:
-                fallback = getattr(target, "_on_mouse_scroll", None)
-                if fallback is not None:
-                    fallback(event)
+        # Dispatch through the normal tree (propagates from deepest to root).
+        self._dispatch_mouse_to_tree(self._root, event)
 
-    def _find_scroll_target(self, renderable, x: int, y: int, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0):
+        if event.propagation_stopped:
+            return
+
+        # Fall back to the focused renderable when nothing handled it.
+        if self._focused_renderable is not None:
+            focused = self._focused_renderable
+            if not getattr(focused, "_destroyed", False):
+                scroll_handler = getattr(focused, "_on_mouse_scroll", None)
+                handle_scroll = getattr(focused, "handle_scroll_event", None)
+                if scroll_handler is not None:
+                    event.target = focused
+                    scroll_handler(event)
+                elif handle_scroll is not None:
+                    event.target = focused
+                    handle_scroll(event)
+
+    # ---- Selection API ----
+
+    @property
+    def has_selection(self) -> bool:
+        """Return True if there is an active selection."""
+        return self._current_selection is not None
+
+    def get_selection(self):
+        """Return the current Selection object, or None."""
+        return self._current_selection
+
+    def start_selection(self, renderable, x: int, y: int) -> None:
+        """Start a new selection at the given coordinates.
+
+        Used by both mouse and keyboard selection.
+        """
+        if not getattr(renderable, "selectable", False):
+            return
+
+        self.clear_selection()
+
+        from .selection import Selection
+
+        parent = getattr(renderable, "_parent", None)
+        self._selection_containers.append(parent if parent is not None else self._root)
+        self._current_selection = Selection(renderable, {"x": x, "y": y}, {"x": x, "y": y})
+        self._current_selection.is_start = True
+
+        self._notify_selectables_of_selection_change()
+
+    def update_selection(
+        self, current_renderable, x: int, y: int, *, finish_dragging: bool = False
+    ) -> None:
+        """Update the focus of the current selection."""
+        if self._current_selection is None:
+            return
+
+        self._current_selection.is_start = False
+        self._current_selection.focus = {"x": x, "y": y}
+
+        if finish_dragging:
+            self._current_selection.is_dragging = False
+
+        # Update selection containers based on where the cursor is now
+        if self._selection_containers:
+            current_container = self._selection_containers[-1]
+
+            if current_renderable is None or not self._is_within_container(
+                current_renderable, current_container
+            ):
+                parent_container = getattr(current_container, "_parent", None)
+                if parent_container is None:
+                    parent_container = self._root
+                self._selection_containers.append(parent_container)
+            elif current_renderable is not None and len(self._selection_containers) > 1:
+                container_index = -1
+                try:
+                    container_index = self._selection_containers.index(current_renderable)
+                except ValueError:
+                    parent = getattr(current_renderable, "_parent", None)
+                    if parent is None:
+                        parent = self._root
+                    with contextlib.suppress(ValueError):
+                        container_index = self._selection_containers.index(parent)
+
+                if container_index != -1 and container_index < len(self._selection_containers) - 1:
+                    self._selection_containers = self._selection_containers[: container_index + 1]
+
+        self._notify_selectables_of_selection_change()
+
+    def clear_selection(self) -> None:
+        """Clear the current selection."""
+        if self._current_selection is not None:
+            for renderable in self._current_selection.touched_renderables:
+                if getattr(renderable, "selectable", False) and not getattr(
+                    renderable, "_destroyed", False
+                ):
+                    renderable.on_selection_changed(None)
+            self._current_selection = None
+        self._selection_containers = []
+
+    def _finish_selection(self) -> None:
+        """Finish the current selection (stop dragging)."""
+        if self._current_selection is not None:
+            self._current_selection.is_dragging = False
+            self._notify_selectables_of_selection_change()
+
+    def _is_within_container(self, renderable, container) -> bool:
+        """Check if renderable is a descendant of container."""
+        current = renderable
+        while current is not None:
+            if current is container:
+                return True
+            current = getattr(current, "_parent", None)
+        return False
+
+    def _notify_selectables_of_selection_change(self) -> None:
+        """Walk the tree and notify selectable renderables of selection changes."""
+        selected_renderables: list = []
+        touched_renderables: list = []
+        current_container = (
+            self._selection_containers[-1] if self._selection_containers else self._root
+        )
+
+        if self._current_selection is not None and current_container is not None:
+            self._walk_selectable_renderables(
+                current_container,
+                self._current_selection.bounds,
+                selected_renderables,
+                touched_renderables,
+            )
+
+            # Notify previously-touched renderables that are no longer touched
+            for renderable in self._current_selection.touched_renderables:
+                if renderable not in touched_renderables and not getattr(
+                    renderable, "_destroyed", False
+                ):
+                    renderable.on_selection_changed(None)
+
+            self._current_selection.update_selected_renderables(selected_renderables)
+            self._current_selection.update_touched_renderables(touched_renderables)
+
+    def _walk_selectable_renderables(
+        self,
+        container,
+        selection_bounds: dict,
+        selected_renderables: list,
+        touched_renderables: list,
+    ) -> None:
+        """Walk the tree within container and check selectable renderables against bounds."""
+        try:
+            children = list(container.get_children())
+        except AttributeError:
+            return
+
+        for child in children:
+            # Check if child overlaps with selection bounds
+            cx = getattr(child, "_x", 0)
+            cy = getattr(child, "_y", 0)
+            cw = int(getattr(child, "_layout_width", 0) or 0)
+            ch = int(getattr(child, "_layout_height", 0) or 0)
+
+            sx = selection_bounds["x"]
+            sy = selection_bounds["y"]
+            sw = selection_bounds["width"]
+            sh = selection_bounds["height"]
+
+            # Check overlap
+            if cx + cw <= sx or cx >= sx + sw or cy + ch <= sy or cy >= sy + sh:
+                # No overlap — but still walk children
+                if getattr(child, "get_children_count", lambda: 0)() > 0:
+                    self._walk_selectable_renderables(
+                        child, selection_bounds, selected_renderables, touched_renderables
+                    )
+                continue
+
+            if getattr(child, "selectable", False):
+                has_sel = child.on_selection_changed(self._current_selection)
+                if has_sel:
+                    selected_renderables.append(child)
+                touched_renderables.append(child)
+
+            if getattr(child, "get_children_count", lambda: 0)() > 0:
+                self._walk_selectable_renderables(
+                    child, selection_bounds, selected_renderables, touched_renderables
+                )
+
+    def request_selection_update(self) -> None:
+        """Request a selection update using the latest pointer position."""
+        if self._current_selection is not None and self._current_selection.is_dragging:
+            px = self._latest_pointer["x"]
+            py = self._latest_pointer["y"]
+            hit = self._find_deepest_hit(self._root, px, py)
+            self.update_selection(hit, px, py)
+
+    def _recheck_hover_state(self) -> None:
+        """Recheck hover state after the hit-grid may have changed.
+
+        Called after render when the pointer is tracked.  Fires synthetic
+        ``_on_mouse_out`` / ``_on_mouse_over`` events when the element
+        under the cursor has changed (e.g. because a ScrollBox scrolled
+        and different content is now under the stationary pointer).
+
+        Fires synthetic over/out when the element under the cursor has changed.
+        """
+        if self.is_destroyed or not self._has_pointer:
+            return
+        # Skip recheck while a renderable is captured (drag in progress).
+        if self._captured_renderable is not None:
+            return
+
+        px = self._latest_pointer["x"]
+        py = self._latest_pointer["y"]
+        hit = self._find_deepest_hit(self._root, px, py)
+        last_over = self._last_over_renderable
+
+        # Compare by identity — same renderable means no change.
+        if hit is last_over:
+            return
+
+        from .events import MouseEvent
+
+        # Fire out on old element.
+        if last_over is not None and not getattr(last_over, "_destroyed", False):
+            out_handler = getattr(last_over, "_on_mouse_out", None)
+            if out_handler is not None:
+                out_ev = MouseEvent(
+                    type="out",
+                    x=px,
+                    y=py,
+                    button=0,
+                    shift=self._last_pointer_modifiers.get("shift", False),
+                    alt=self._last_pointer_modifiers.get("alt", False),
+                    ctrl=self._last_pointer_modifiers.get("ctrl", False),
+                )
+                out_ev.target = last_over
+                out_handler(out_ev)
+
+        self._last_over_renderable = hit
+
+        # Fire over on new element.
+        if hit is not None:
+            over_handler = getattr(hit, "_on_mouse_over", None)
+            if over_handler is not None:
+                over_ev = MouseEvent(
+                    type="over",
+                    x=px,
+                    y=py,
+                    button=0,
+                    shift=self._last_pointer_modifiers.get("shift", False),
+                    alt=self._last_pointer_modifiers.get("alt", False),
+                    ctrl=self._last_pointer_modifiers.get("ctrl", False),
+                )
+                over_ev.target = hit
+                over_handler(over_ev)
+
+    def _find_deepest_hit(
+        self,
+        renderable,
+        x: int,
+        y: int,
+        scroll_adjust_x: int = 0,
+        scroll_adjust_y: int = 0,
+    ) -> Any:
+        """Return the deepest renderable in the tree whose bounds contain (x, y).
+
+        *scroll_adjust_x/y* accumulate scroll offsets from ancestor
+        ScrollBoxes so that children are checked in content-space
+        coordinates (matching _dispatch_mouse_to_tree).
+
+        Also respects ``overflow == "hidden"`` by clipping hits to the
+        renderable's layout bounds.
+        """
+        if renderable is None:
+            return None
+
+        check_x = x + scroll_adjust_x
+        check_y = y + scroll_adjust_y
+
+        contains_point = getattr(renderable, "contains_point", None)
+        inside = True if contains_point is None else contains_point(check_x, check_y)
+
+        if not inside:
+            return None
+
+        # If overflow is hidden, further clip to this renderable's bounds
+        # using *screen* coordinates (the original x/y before scroll adjust).
+        overflow = getattr(renderable, "_overflow", "visible")
+        if overflow == "hidden":
+            rx = getattr(renderable, "_x", 0)
+            ry = getattr(renderable, "_y", 0)
+            rw = int(getattr(renderable, "_layout_width", 0) or 0)
+            rh = int(getattr(renderable, "_layout_height", 0) or 0)
+            if not (rx <= x < rx + rw and ry <= y < ry + rh):
+                return None
+
+        # Accumulate scroll offset for children.
+        child_sx = scroll_adjust_x
+        child_sy = scroll_adjust_y
+        if getattr(renderable, "_scroll_y", False):
+            fn = getattr(renderable, "_scroll_offset_y_fn", None)
+            child_sy += int(fn()) if fn else int(getattr(renderable, "_scroll_offset_y", 0))
+        if getattr(renderable, "_scroll_x", False):
+            child_sx += int(getattr(renderable, "_scroll_offset_x", 0))
+
+        # Check children first (deepest wins — children are "in front of" parent).
+        try:
+            children = list(renderable.get_children())
+        except AttributeError:
+            children = []
+
+        # Sort by z_index so higher z renders last / hits first
+        def _z(c):
+            return getattr(c, "_z_index", 0)
+
+        for child in sorted(children, key=_z, reverse=True):
+            hit = self._find_deepest_hit(child, x, y, child_sx, child_sy)
+            if hit is not None:
+                return hit
+
+        # This renderable contains the point.
+        return renderable
+
+    def hit_test(self, x: int, y: int) -> int:
+        """Return the ``num`` of the deepest renderable at screen *(x, y)*.
+
+        Returns 0 when nothing is hit (empty space).
+
+        Walks the render tree via ``_find_deepest_hit`` to find the
+        deepest renderable at the given coordinates.
+
+        The root renderable is excluded (returns 0) because it is a
+        layout container only and does not draw
+        pixels — the root is a layout container only.
+        """
+        hit = self._find_deepest_hit(self._root, x, y)
+        if hit is None or hit is self._root:
+            return 0
+        return hit._num
+
+    def _find_focusable_ancestor(self, renderable) -> Any:
+        """Walk up the tree from *renderable* to find the nearest focusable ancestor.
+
+        Returns the focusable renderable, or None if no focusable element is found.
+        Walks up the tree to find the nearest focusable ancestor.
+        """
+        node = renderable
+        while node is not None:
+            if getattr(node, "_focusable", False):
+                return node
+            node = getattr(node, "_parent", None)
+        return None
+
+    def _do_auto_focus(self, renderable) -> None:
+        """Give focus to *renderable*, blurring any previously focused element.
+
+        Only one element can be focused at a time.
+        """
+        if self._focused_renderable is renderable:
+            return
+        # Blur previous
+        if self._focused_renderable is not None:
+            with contextlib.suppress(Exception):
+                self._focused_renderable.blur()
+        self._focused_renderable = renderable
+        with contextlib.suppress(Exception):
+            renderable.focus()
+
+    def _find_scroll_target(
+        self, renderable, x: int, y: int, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0
+    ):
         """Return the deepest registered scroll target under *(x, y)*."""
         try:
             children = list(renderable.get_children())
@@ -1271,14 +2228,17 @@ class CliRenderer:
             return renderable
         return None
 
-    def _dispatch_mouse_to_tree(self, renderable, event, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0) -> None:
+    def _dispatch_mouse_to_tree(
+        self, renderable, event, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0
+    ) -> None:
         """Walk children front-to-back and dispatch to the deepest hit target.
 
         *scroll_adjust_x/y* accumulate scroll offsets from ancestor ScrollBoxes.
         Children inside a ScrollBox have layout coordinates in content space
         (not screen space), so we add the parent's scroll offset to the mouse
-        coordinates when checking ``contains_point``.  This mirrors how the
-        TypeScript reference adjusts child ``y`` for scroll position.
+        coordinates when checking ``contains_point``.  Children inside
+        a ScrollBox use content-space coordinates (parent scroll offset
+        is added to mouse coordinates).
         """
         if event.propagation_stopped:
             return
@@ -1317,14 +2277,7 @@ class CliRenderer:
         if not inside:
             return
 
-        handler_map = {
-            "down": "_on_mouse_down",
-            "up": "_on_mouse_up",
-            "move": "_on_mouse_move",
-            "drag": "_on_mouse_drag",
-            "scroll": "_on_mouse_scroll",
-        }
-        attr = handler_map.get(event.type)
+        attr = _MOUSE_HANDLER_MAP.get(event.type)
         if not attr:
             return
 
@@ -1371,8 +2324,12 @@ class CliRenderer:
           ``"steady_block"`` → 2, ``"steady_underline"`` → 4, ``"steady_bar"`` → 6
         """
         style_map = {
-            "block": 1, "underline": 3, "bar": 5,
-            "steady_block": 2, "steady_underline": 4, "steady_bar": 6,
+            "block": 1,
+            "underline": 3,
+            "bar": 5,
+            "steady_block": 2,
+            "steady_underline": 4,
+            "steady_bar": 6,
         }
         code = style_map.get(style, 1)
         if self._cursor_style == style:
@@ -1380,6 +2337,7 @@ class CliRenderer:
         self._cursor_style = style
         try:
             import sys
+
             sys.stdout.write(f"\x1b[{code} q")
             sys.stdout.flush()
         except Exception:
@@ -1392,16 +2350,30 @@ class CliRenderer:
         self._cursor_color = color
         try:
             import sys
+
             sys.stdout.write(f"\x1b]12;{color}\x07")
             sys.stdout.flush()
         except Exception:
             pass
+
+    def set_mouse_pointer(self, style: str) -> None:
+        """Set the OS-level mouse pointer (cursor) style.
+
+        Valid *style* values: ``"default"``, ``"pointer"``, ``"text"``,
+        ``"crosshair"``, ``"move"``, ``"not-allowed"``.
+
+        In testing mode this only updates ``_current_mouse_pointer_style``
+        (no terminal escape is emitted).  In live mode, the style is also
+        forwarded to the native renderer.
+        """
+        self._current_mouse_pointer_style = style
 
     def _reset_cursor_color(self) -> None:
         """Reset cursor color to terminal default via OSC 112."""
         self._cursor_color = None
         try:
             import sys
+
             sys.stdout.write("\x1b]112\x07")
             sys.stdout.flush()
         except Exception:
@@ -1412,6 +2384,7 @@ class CliRenderer:
         # Most terminals default to dark mode
         try:
             import os
+
             colorfgbg = os.environ.get("COLORFGBG", "")
             if colorfgbg:
                 parts = colorfgbg.split(";")
@@ -1422,6 +2395,95 @@ class CliRenderer:
             pass
         return None
 
+    # -- Palette detection ------------------
+
+    @property
+    def palette_detection_status(self) -> str:
+        """Return the current palette detection status.
+
+        Returns one of ``"idle"``, ``"detecting"``, or ``"cached"``.
+        """
+        if self._cached_palette is not None:
+            return "cached"
+        if self._palette_detection_promise is not None:
+            return "detecting"
+        return "idle"
+
+    def clear_palette_cache(self) -> None:
+        """Invalidate the cached palette so the next ``get_palette()`` re-detects."""
+        self._cached_palette = None
+
+    async def get_palette(
+        self,
+        timeout: float = 5000,
+        size: int = 16,
+        **kwargs,
+    ) -> Any:
+        """Detect the terminal's colour palette.
+
+        Args:
+            timeout: Timeout in milliseconds.
+            size: Number of indexed colours to query (default 16).
+
+        Returns:
+            A :class:`~opentui.palette.TerminalColors` object.
+
+        Raises:
+            RuntimeError: If the renderer is suspended.
+        """
+        # Accept keyword-style options dict
+        if kwargs:
+            timeout = kwargs.get("timeout", timeout)
+            size = kwargs.get("size", size)
+
+        if self._control_state == RendererControlState.EXPLICIT_SUSPENDED:
+            raise RuntimeError("Cannot detect palette while renderer is suspended")
+
+        requested_size = size
+
+        # Invalidate cache if the size changed
+        if self._cached_palette is not None and len(self._cached_palette.palette) != requested_size:
+            self._cached_palette = None
+
+        # Return cached result immediately
+        if self._cached_palette is not None:
+            return self._cached_palette
+
+        # Share an in-flight detection promise
+        if self._palette_detection_promise is not None:
+            return await self._palette_detection_promise
+
+        # Create detector lazily (singleton)
+        if self._palette_detector is None:
+            from .palette import TerminalPaletteDetector
+
+            # In test mode, use mock streams if no real stdin/stdout
+            if self._config.testing:
+                from .palette import MockPaletteStdin, MockPaletteStdout
+
+                stdin = MockPaletteStdin(is_tty=False)
+                stdout = MockPaletteStdout(is_tty=False)
+                self._palette_detector = TerminalPaletteDetector(stdin, stdout)
+            else:
+                import sys
+
+                self._palette_detector = TerminalPaletteDetector(
+                    sys.stdin,
+                    sys.stdout,
+                    write_fn=lambda data: self.write_out(
+                        data.encode() if isinstance(data, str) else data
+                    ),
+                )
+
+        async def _do_detect() -> Any:
+            result = await self._palette_detector.detect(timeout=timeout, size=requested_size)
+            self._cached_palette = result
+            self._palette_detection_promise = None
+            return result
+
+        self._palette_detection_promise = asyncio.ensure_future(_do_detect())
+        return await self._palette_detection_promise
+
     def _restore_terminal_modes(self) -> None:
         """Re-enable terminal modes after a focus-in event.
 
@@ -1429,12 +2491,12 @@ class CliRenderer:
         (particularly tmux, screen) may drop protocol state.  This
         re-sends the kitty keyboard flags, mouse tracking, and
         bracketed paste to ensure the application continues working.
-        Matches upstream renderer.ts restoreTerminalModes().
         """
         if self._config.testing:
             return
         try:
             import sys as _sys
+
             buf = ""
             # Re-enable kitty keyboard protocol
             if self._config.kitty_keyboard_flags:
@@ -1449,17 +2511,155 @@ class CliRenderer:
         except Exception:
             _log.debug("Failed to restore terminal modes on focus", exc_info=True)
 
-    def stop(self) -> None:
-        """Stop the renderer and event loop."""
+    # -- Control state machine ----------------
+
+    @property
+    def control_state(self) -> RendererControlState:
+        """Current control state of the renderer."""
+        return self._control_state
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the renderer is currently running (alias for _running)."""
+        return self._running
+
+    def _is_idle_now(self) -> bool:
+        """Return True when the renderer is completely idle."""
+        return (
+            not self._running
+            and not self._rendering
+            and not self._update_scheduled
+            and not self._immediate_rerender_requested
+        )
+
+    def _resolve_idle_if_needed(self) -> None:
+        """Resolve any pending idle() futures if the renderer is now idle."""
+        if not self._is_idle_now():
+            return
+        futures = self._idle_futures[:]
+        self._idle_futures.clear()
+        for fut in futures:
+            if not fut.done():
+                fut.set_result(None)
+
+    async def idle(self) -> None:
+        """Return a coroutine that resolves when the renderer becomes idle.
+
+        Resolves immediately if the
+        renderer is already idle or destroyed.  Otherwise, returns an
+        ``asyncio.Future`` that is resolved when the renderer transitions
+        to an idle state (via ``stop()``, ``pause()``, ``dropLive()``,
+        or ``destroy()``).
+        """
+        if self.is_destroyed:
+            return
+        if self._is_idle_now():
+            return
+        loop = asyncio.get_event_loop()
+        fut: asyncio.Future[None] = loop.create_future()
+        self._idle_futures.append(fut)
+        await fut
+
+    def _internal_start(self) -> None:
+        """Start the render loop (internal helper)."""
+        if not self._running and not self.is_destroyed:
+            self._running = True
+
+    def _internal_pause(self) -> None:
+        """Pause the render loop (internal helper)."""
         self._running = False
+        if not self._rendering:
+            self._resolve_idle_if_needed()
+
+    def _internal_stop(self) -> None:
+        """Stop the render loop (internal helper)."""
+        if self._running and not self.is_destroyed:
+            self._running = False
+            if not self._rendering:
+                self._resolve_idle_if_needed()
+
+    def start(self) -> None:
+        """Explicitly start the renderer.
+
+        Sets the control state to EXPLICIT_STARTED and starts the
+        internal render loop.
+        """
+        self._control_state = RendererControlState.EXPLICIT_STARTED
+        self._internal_start()
+
+    def pause(self) -> None:
+        """Explicitly pause the renderer.
+
+        Sets the control state to EXPLICIT_PAUSED and stops the
+        internal render loop, resolving any pending ``idle()`` futures.
+        """
+        self._control_state = RendererControlState.EXPLICIT_PAUSED
+        self._internal_pause()
+
+    def stop(self) -> None:
+        """Stop the renderer and event loop.
+
+        Sets the control state to EXPLICIT_STOPPED and stops the
+        internal render loop, resolving any pending ``idle()`` futures.
+        """
+        self._control_state = RendererControlState.EXPLICIT_STOPPED
+        self._internal_stop()
         if self._event_loop is not None:
             self._event_loop.stop()
 
+    def request_live(self) -> None:
+        """Request a live render session (auto-start if idle).
+
+        Each call increments the live request counter.  When the counter
+        transitions from 0 to 1 and the renderer is IDLE, the control
+        state changes to AUTO_STARTED and the render loop is started.
+        """
+        self._live_request_counter += 1
+        if self._control_state == RendererControlState.IDLE and self._live_request_counter > 0:
+            self._control_state = RendererControlState.AUTO_STARTED
+            self._internal_start()
+
+    def drop_live(self) -> None:
+        """Drop a live render session (auto-stop when counter reaches 0).
+
+        Each call decrements the live request counter.  When the counter
+        reaches 0 and the renderer is AUTO_STARTED, the control state
+        returns to IDLE and the render loop is paused.
+        """
+        self._live_request_counter = max(0, self._live_request_counter - 1)
+        if (
+            self._control_state == RendererControlState.AUTO_STARTED
+            and self._live_request_counter == 0
+        ):
+            self._control_state = RendererControlState.IDLE
+            self._internal_pause()
+
+    @property
+    def is_destroyed(self) -> bool:
+        """Whether this renderer has been destroyed."""
+        return self._ptr is None
+
     def destroy(self) -> None:
         """Destroy the renderer and free resources."""
+        # Reset mouse pointer style to default before teardown.
+        self._current_mouse_pointer_style = "default"
+        self._last_over_renderable = None
+        # Clean up palette detector
+        if self._palette_detector is not None:
+            self._palette_detector.cleanup()
+            self._palette_detector = None
+        self._palette_detection_promise = None
+        self._cached_palette = None
         if self._ptr:
             self._native.renderer.destroy_renderer(self._ptr)
             self._ptr = None
+        self._running = False
+        # Resolve any pending idle() futures unconditionally on destroy.
+        futures = self._idle_futures[:]
+        self._idle_futures.clear()
+        for fut in futures:
+            if not fut.done():
+                fut.set_result(None)
 
 
 class RootRenderable(BaseRenderable):
@@ -1479,8 +2679,9 @@ class RootRenderable(BaseRenderable):
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         """Render all children."""
         for child in self._children:
-            if hasattr(child, "render"):
-                child.render(buffer, delta_time)
+            render_fn = getattr(child, "render", None)
+            if render_fn is not None:
+                render_fn(buffer, delta_time)
 
 
 async def create_cli_renderer(config: CliRendererConfig | None = None) -> CliRenderer:
@@ -1510,11 +2711,55 @@ async def create_cli_renderer(config: CliRendererConfig | None = None) -> CliRen
     return renderer
 
 
+# ---------------------------------------------------------------------------
+# Kitty keyboard protocol flag constants
+# See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#progressive-enhancement
+# ---------------------------------------------------------------------------
+
+KITTY_FLAG_DISAMBIGUATE = 0b1  # bit 0: disambiguated escape codes
+KITTY_FLAG_EVENT_TYPES = 0b10  # bit 1: press/repeat/release event types
+KITTY_FLAG_ALTERNATE_KEYS = 0b100  # bit 2: alternate keys (numpad, shifted)
+KITTY_FLAG_ALL_KEYS_AS_ESCAPES = 0b1000  # bit 3: all keys as escape codes
+KITTY_FLAG_REPORT_TEXT = 0b10000  # bit 4: associated text with key events
+
+
+def build_kitty_keyboard_flags(options: dict[str, bool] | None = None) -> int:
+    """Build kitty keyboard protocol flags bitmask from options dict.
+
+    By default, ``disambiguate`` and ``alternate_keys`` are True.
+    Optional flags (``events``, ``all_keys_as_escapes``, ``report_text``)
+    default to False.
+
+    Returns 0 for *None* input (protocol disabled).
+    """
+    if options is None:
+        return 0
+    flags = 0
+    if options.get("disambiguate", True):
+        flags |= KITTY_FLAG_DISAMBIGUATE
+    if options.get("alternateKeys", True):
+        flags |= KITTY_FLAG_ALTERNATE_KEYS
+    if options.get("events", False):
+        flags |= KITTY_FLAG_EVENT_TYPES
+    if options.get("allKeysAsEscapes", False):
+        flags |= KITTY_FLAG_ALL_KEYS_AS_ESCAPES
+    if options.get("reportText", False):
+        flags |= KITTY_FLAG_REPORT_TEXT
+    return flags
+
+
 __all__ = [
     "CliRenderer",
     "CliRendererConfig",
+    "RendererControlState",
     "TerminalCapabilities",
     "Buffer",
     "RootRenderable",
     "create_cli_renderer",
+    "build_kitty_keyboard_flags",
+    "KITTY_FLAG_DISAMBIGUATE",
+    "KITTY_FLAG_EVENT_TYPES",
+    "KITTY_FLAG_ALTERNATE_KEYS",
+    "KITTY_FLAG_ALL_KEYS_AS_ESCAPES",
+    "KITTY_FLAG_REPORT_TEXT",
 ]

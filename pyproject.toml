@@ -5,12 +5,12 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "opentui"
 version = "0.1.0"
-description = "Python bindings for OpenTUI - Build terminal UIs with signals"
+description = "Python bindings for OpenTUI - Build terminal UIs in Python"
 readme = "README.md"
-requires-python = ">=3.12,<3.14"
-license = { text = "MIT" }
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
 authors = [
-    { name = "OpenTUI Team", email = "hello@opentui.com" }
+    { name = "firefly" }
 ]
 keywords = ["tui", "terminal", "ui", "cli", "opentui"]
 classifiers = [
@@ -20,38 +20,40 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Terminals",
+    "Typing :: Typed",
 ]
 
 dependencies = [
-    "httpx>=0.28.1",
-    "starhtml>=0.5.19",
-    "yoga-python==0.1.2",
+    "yoga-python>=0.1.2",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "pytest-asyncio>=1.3.0",
     "ruff>=0.1.0",
     "pyright>=1.1.0",
 ]
 images = [
     "Pillow>=10.0.0",
-]
-numpy = [
     "numpy>=1.24.0",
 ]
-serve = [
-    "starlette>=0.27.0",
-    "sse-starlette>=1.6.0",
-    "uvicorn>=0.23.0",
-]
-svg = [
-    "Pillow>=10.0.0",
-    "cairosvg>=2.7.0",
+highlighting = [
+    "tree-sitter>=0.23.0",
+    "tree-sitter-python>=0.23.0",
+    "tree-sitter-javascript>=0.23.0",
+    "tree-sitter-typescript>=0.23.0",
+    "tree-sitter-json>=0.23.0",
+    "tree-sitter-markdown>=0.3.2",
+    "tree-sitter-bash>=0.23.0",
 ]
 
-[project.scripts]
-opentui = "opentui.__main__:main"
+[project.urls]
+Homepage = "https://github.com/banditburai/opentui-python"
+Repository = "https://github.com/banditburai/opentui-python"
+Issues = "https://github.com/banditburai/opentui-python/issues"
 
 [tool.scikit-build]
 wheel.packages = ["src/opentui"]
@@ -61,19 +63,92 @@ cmake.args = ["-DCMAKE_BUILD_TYPE=Release"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501"]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # comprehensions
+    "SIM", # simplify
+    "PL",  # pylint
+]
+ignore = [
+    # -- Formatting (handled by ruff format) --
+    "E501",     # line length
+
+    # -- Architectural: lazy/conditional imports are deliberate --
+    "E402",     # module import not at top of file
+    "PLC0415",  # import outside top level
+
+    # -- Complexity: inherent to rendering/layout engine domain --
+    "PLR0911",  # too many return statements
+    "PLR0912",  # too many branches
+    "PLR0913",  # too many arguments
+    "PLR0915",  # too many statements
+    "PLR2004",  # magic value comparisons
+
+    # -- Upstream naming compatibility --
+    "N802",     # function name should be lowercase
+    "N806",     # variable in function should be lowercase
+]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*.py" = ["PLW0108", "PLW0603"]
+"tests/*.py" = ["F401", "I001", "E712", "E731", "N801", "N803", "PLW0108", "PLW1641", "F811", "PLW0177", "SIM105", "SIM201", "SIM202", "B905", "SIM108", "UP035", "UP038", "B007", "B017", "F841", "PLR0124", "E711", "C408"]
+"tests/**/*.py" = ["F401", "I001", "E712", "E731", "N801", "N803", "PLW0108", "PLW1641", "F811", "PLW0177", "SIM105", "SIM201", "SIM202", "B905", "SIM108", "UP035", "UP038", "B007", "B017", "F841", "PLR0124", "E711", "C408"]
+"src/opentui/__init__.py" = ["F401", "I001", "SIM105"]
+"src/opentui/filters.py" = ["F401"]
+"src/opentui/ffi.py" = ["PLW0603"]
+"src/opentui/native.py" = ["PLW0603"]
+"src/opentui/hooks.py" = ["PLW0603"]
+"src/opentui/layout.py" = ["PLW0603"]
+"src/opentui/signals.py" = ["PLW0603"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
 
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
+include = ["src"]
+exclude = ["tests", "examples"]
 reportMissingImports = true
 reportMissingTypeStubs = false
 
 [tool.pytest.ini_options]
+minversion = "7.0"
+addopts = ["--strict-markers", "--strict-config"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+asyncio_mode = "auto"
+filterwarnings = [
+    "error",
+    "ignore:Failed to load nanobind bindings:UserWarning",
+    "ignore:Invalid borderStyle:UserWarning",
+    "ignore:Invalid hex color:UserWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
+
+[tool.coverage.run]
+source = ["src/opentui"]
+omit = ["*/tests/*", "*/test_*.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "pass",
+    "except ImportError:",
+]

@@ -1,7 +1,7 @@
 """Structural control flow — For, Show, Switch.
 
 In-process equivalents of Datastar/idiomorph server-driven fragment patching
-and Solid.js structural control flow primitives.
+and structural control flow primitives for keyed lists and conditional rendering.
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .. import layout as yoga_layout
 from .base import BaseRenderable, Renderable
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # For — keyed list reconciliation
 # ---------------------------------------------------------------------------
+
 
 class For(Renderable):
     """Keyed list — only renders genuinely new items, preserves existing.
@@ -57,10 +58,14 @@ class For(Renderable):
         for genuinely new items.
         """
         source = self._each_source
-        raw = source() if callable(source) else source
+        raw: Any = source() if callable(source) else source
         items: list[Any] = list(raw)
 
         new_key_list = [self._key_fn(item) for item in items]
+        # Generate stable fallback keys for items with key=None
+        new_key_list = [
+            k if k is not None else f"__for_index_{i}" for i, k in enumerate(new_key_list)
+        ]
         old_key_list = [child.key for child in self._children]
 
         if new_key_list == old_key_list:
@@ -73,8 +78,10 @@ class For(Renderable):
         reused = 0
         created = 0
 
-        for item in items:
+        for idx, item in enumerate(items):
             k = self._key_fn(item)
+            if k is None:
+                k = f"__for_index_{idx}"
             existing = old_by_key.get(k)
             if existing is not None:
                 new_children.append(existing)  # Reuse — zero allocation
@@ -91,15 +98,14 @@ class For(Renderable):
         # while still in the parent's yoga child list, remove_all_children
         # would dereference freed memory.
         removed = [
-            child for child in self._children
-            if child.key is not None and child.key not in new_keys
+            child for child in self._children if child.key is not None and child.key not in new_keys
         ]
 
         self._children = new_children
+        self._children_tuple = None
         for child in new_children:
             child._parent = self
 
-        # Sync yoga tree BEFORE destroying removed nodes.
         if self._yoga_node is not None:
             self._yoga_node.remove_all_children()
             for child in new_children:
@@ -107,9 +113,7 @@ class For(Renderable):
                     owner = child._yoga_node.owner
                     if owner is not None:
                         owner.remove_child(child._yoga_node)
-                    self._yoga_node.insert_child(
-                        child._yoga_node, self._yoga_node.child_count
-                    )
+                    self._yoga_node.insert_child(child._yoga_node, self._yoga_node.child_count)
 
         # Now safe to destroy — yoga nodes are detached from parent.
         for child in removed:
@@ -118,7 +122,11 @@ class For(Renderable):
 
         _log.debug(
             "For[%s] reconcile: reused=%d created=%d destroyed=%d total=%d",
-            self.key, reused, created, len(removed), len(new_children),
+            self.key,
+            reused,
+            created,
+            len(removed),
+            len(new_children),
         )
 
     def _configure_yoga_node(self, node: Any) -> None:
@@ -137,6 +145,7 @@ class For(Renderable):
 # ---------------------------------------------------------------------------
 # Show — conditional rendering
 # ---------------------------------------------------------------------------
+
 
 class Show(Renderable):
     """Conditional rendering — shows children when condition is truthy.
@@ -172,18 +181,18 @@ class Show(Renderable):
         self._evaluate_and_populate()
 
     def _evaluate_and_populate(self):
-        """Evaluate condition and add the appropriate children."""
         condition = self._when()
-        self._is_active = bool(condition) or self._fallback_fn is not None
+        active = bool(condition)
+        has_fallback = self._fallback_fn is not None
+        self._is_active = active or has_fallback
 
-        if condition:
+        if active:
             result = self._render_fn()
         elif self._fallback_fn is not None:
             result = self._fallback_fn()
         else:
             return  # No children, _is_active=False
 
-        # Normalize to list and add
         if isinstance(result, BaseRenderable):
             result = [result]
         elif result is None:
@@ -192,7 +201,6 @@ class Show(Renderable):
             self.add(child)
 
     def _configure_yoga_node(self, node: Any) -> None:
-        """Toggle Display between Flex and None_ based on active state."""
         super()._configure_yoga_node(node)
         if not self._is_active:
             yoga_layout.configure_node(node, display="none")
@@ -211,9 +219,11 @@ class Show(Renderable):
 # Match + Switch — multi-branch conditional
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class Match:
     """A branch condition for Switch. Not a Renderable — just configuration."""
+
     when: Callable[[], Any]
     render: Callable[[], BaseRenderable | list[BaseRenderable]]
 
@@ -263,7 +273,6 @@ class Switch(Renderable):
         self._evaluate_and_populate()
 
     def _evaluate_and_populate(self):
-        """Find first matching branch and add its children."""
         render_fn = None
 
         if self._on_fn is not None:
@@ -305,4 +314,104 @@ class Switch(Renderable):
                 child.render(buffer, delta_time)
 
 
-__all__ = ["For", "Match", "Show", "Switch"]
+# ---------------------------------------------------------------------------
+# Portal — mount children at a different tree location
+# ---------------------------------------------------------------------------
+
+
+class Portal(Renderable):
+    """Render children at a different location in the component tree.
+
+    The Portal marker itself is invisible (display=none). It creates a Box
+    container at the mount point containing the actual children. This is
+    useful for modals, overlays, toasts, and command palettes that need to
+    escape their logical parent's layout constraints.
+
+    Usage:
+        Portal(
+            Text("Modal content"),
+            mount=overlay_box,     # or callable, or None for root
+            ref=lambda c: ...,     # optional callback receiving container
+            key="modal-portal",
+        )
+    """
+
+    __slots__ = ("_mount_source", "_container", "_ref_fn", "_current_mount", "_content_children")
+
+    def __init__(
+        self,
+        *children: BaseRenderable,
+        mount: BaseRenderable | Callable[[], BaseRenderable] | None = None,
+        ref: Callable[[BaseRenderable], None] | None = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._mount_source = mount
+        self._ref_fn = ref
+        self._container: BaseRenderable | None = None
+        self._current_mount: BaseRenderable | None = None
+        self._content_children: list[BaseRenderable] = list(children)
+
+    def _resolve_mount(self) -> BaseRenderable:
+        if self._mount_source is None:
+            from ..hooks import use_renderer
+
+            try:
+                return use_renderer().root
+            except RuntimeError:
+                raise RuntimeError(
+                    "Portal with mount=None requires an active renderer. "
+                    "Pass an explicit mount= target or ensure a renderer is running."
+                ) from None
+        if callable(self._mount_source):
+            return self._mount_source()
+        return self._mount_source
+
+    def _ensure_container(self) -> None:
+        from .box import Box
+
+        mount = self._resolve_mount()
+
+        # Mount point changed — remove from old mount
+        if self._container is not None and self._current_mount is not mount:
+            if self._current_mount is not None and not self._current_mount._destroyed:
+                self._current_mount.remove(self._container)
+            self._container.destroy_recursively()
+            self._container = None
+
+        if self._container is None:
+            self._container = Box(key=f"portal-container-{self.key}" if self.key else None)
+            self._container._host = self
+            for child in self._content_children:
+                self._container.add(child)
+            mount.add(self._container)
+            self._current_mount = mount
+            if self._ref_fn is not None:
+                self._ref_fn(self._container)
+
+    def _configure_yoga_node(self, node: Any) -> None:
+        self._ensure_container()
+        super()._configure_yoga_node(node)
+        yoga_layout.configure_node(node, display="none")
+
+    def render(self, buffer: Buffer, delta_time: float = 0) -> None:
+        """No-op — container is rendered by the mount point's tree traversal."""
+        pass
+
+    def destroy(self) -> None:
+        if self._destroyed:
+            return
+        if self._container is not None:
+            container = self._container
+            mount = self._current_mount
+            self._container = None
+            self._current_mount = None
+            if mount is not None and not mount._destroyed:
+                mount.remove(container)
+            if not container._destroyed:
+                container.destroy_recursively()
+        self._content_children.clear()
+        super().destroy()
+
+
+__all__ = ["For", "Match", "Portal", "Show", "Switch"]

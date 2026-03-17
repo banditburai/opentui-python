@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+import itertools
+from dataclasses import dataclass
+from typing import Any
 
 from .. import structs as s
 
-if TYPE_CHECKING:
-    from ..renderer import Buffer
+_textnode_id_counter = itertools.count(1)
 
 
 @dataclass
@@ -27,6 +27,214 @@ class StyledChunk:
 
     text: str
     style: TextStyle
+
+
+@dataclass
+class TextChunk:
+    """A single chunk of styled text."""
+
+    text: str
+    fg: s.RGBA | None = None
+    bg: s.RGBA | None = None
+    attributes: int = 0
+    link: str | None = None
+
+
+class StyledText:
+    """A collection of styled text chunks.
+
+    When added to a TextNode via ``add()`` or ``insert_before()``,
+    each chunk is decomposed into a child TextNode with the chunk's
+    style properties.
+    """
+
+    def __init__(self, chunks: list[TextChunk]) -> None:
+        self.chunks = chunks
+
+    def to_text_nodes(self) -> list[TextNode]:
+        nodes: list[TextNode] = []
+        for chunk in self.chunks:
+            node = TextNode(
+                "",
+                fg=chunk.fg,
+                bg=chunk.bg,
+                attributes=chunk.attributes,
+                link=chunk.link,
+            )
+            node.append(chunk.text)
+            nodes.append(node)
+        return nodes
+
+
+def is_styled_text(obj: Any) -> bool:
+    return isinstance(obj, StyledText)
+
+
+# ── Style helper functions ─────────────────────────────────────────
+
+TEXT_ATTR_BOLD = 1
+TEXT_ATTR_ITALIC = 2
+TEXT_ATTR_UNDERLINE = 4
+TEXT_ATTR_STRIKETHROUGH = 8
+TEXT_ATTR_DIM = 16
+TEXT_ATTR_REVERSE = 32
+TEXT_ATTR_BLINK = 64
+
+
+def _create_text_attributes(
+    bold: bool = False,
+    italic: bool = False,
+    underline: bool = False,
+    strikethrough: bool = False,
+    dim: bool = False,
+    reverse: bool = False,
+    blink: bool = False,
+) -> int:
+    attrs = 0
+    if bold:
+        attrs |= TEXT_ATTR_BOLD
+    if italic:
+        attrs |= TEXT_ATTR_ITALIC
+    if underline:
+        attrs |= TEXT_ATTR_UNDERLINE
+    if strikethrough:
+        attrs |= TEXT_ATTR_STRIKETHROUGH
+    if dim:
+        attrs |= TEXT_ATTR_DIM
+    if reverse:
+        attrs |= TEXT_ATTR_REVERSE
+    if blink:
+        attrs |= TEXT_ATTR_BLINK
+    return attrs
+
+
+def _apply_style(
+    input_val: str | int | bool | TextChunk,
+    *,
+    fg: s.RGBA | str | None = None,
+    bg: s.RGBA | str | None = None,
+    bold: bool = False,
+    italic: bool = False,
+    underline: bool = False,
+    strikethrough: bool = False,
+    dim: bool = False,
+    reverse: bool = False,
+    blink: bool = False,
+) -> TextChunk:
+    new_attrs = _create_text_attributes(
+        bold=bold,
+        italic=italic,
+        underline=underline,
+        strikethrough=strikethrough,
+        dim=dim,
+        reverse=reverse,
+        blink=blink,
+    )
+    parsed_fg = _parse_color(fg) if fg is not None else None
+    parsed_bg = _parse_color(bg) if bg is not None else None
+
+    if isinstance(input_val, TextChunk):
+        return TextChunk(
+            text=input_val.text,
+            fg=parsed_fg if parsed_fg is not None else input_val.fg,
+            bg=parsed_bg if parsed_bg is not None else input_val.bg,
+            attributes=input_val.attributes | new_attrs,
+            link=input_val.link,
+        )
+    else:
+        return TextChunk(
+            text=str(input_val),
+            fg=parsed_fg,
+            bg=parsed_bg,
+            attributes=new_attrs,
+        )
+
+
+# Color functions
+def styled_red(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, fg=s.RGBA(1.0, 0.0, 0.0, 1.0))
+
+
+def styled_green(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, fg=s.RGBA(0.0, 1.0, 0.0, 1.0))
+
+
+def styled_blue(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, fg=s.RGBA(0.0, 0.0, 1.0, 1.0))
+
+
+def styled_yellow(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, fg=s.RGBA(1.0, 1.0, 0.0, 1.0))
+
+
+def styled_magenta(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, fg=s.RGBA(1.0, 0.0, 1.0, 1.0))
+
+
+def styled_cyan(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, fg=s.RGBA(0.0, 1.0, 1.0, 1.0))
+
+
+def styled_white(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, fg=s.RGBA(1.0, 1.0, 1.0, 1.0))
+
+
+def styled_black(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, fg=s.RGBA(0.0, 0.0, 0.0, 1.0))
+
+
+# Style functions
+def styled_bold(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, bold=True)
+
+
+def styled_italic(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, italic=True)
+
+
+def styled_underline(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, underline=True)
+
+
+def styled_strikethrough(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, strikethrough=True)
+
+
+def styled_dim(input_val: str | int | bool | TextChunk) -> TextChunk:
+    return _apply_style(input_val, dim=True)
+
+
+# Custom color functions
+def styled_fg(color: s.RGBA | str):
+    def apply(input_val: str | int | bool | TextChunk) -> TextChunk:
+        return _apply_style(input_val, fg=color)
+
+    return apply
+
+
+def styled_bg(color: s.RGBA | str):
+    def apply(input_val: str | int | bool | TextChunk) -> TextChunk:
+        return _apply_style(input_val, bg=color)
+
+    return apply
+
+
+def styled_text(*parts: str | TextChunk) -> StyledText:
+    """Build a StyledText from a sequence of strings and TextChunks.
+
+    Template helper for building styled text.
+    Plain strings become unstyled chunks; TextChunk values retain their style.
+
+    Example:
+        st = styled_text("Hello ", styled_red("World"), " with ", styled_bold("bold"), " text!")
+    """
+    chunks: list[TextChunk] = []
+    for part in parts:
+        if isinstance(part, TextChunk):
+            chunks.append(part)
+        else:
+            chunks.append(TextChunk(text=str(part), attributes=0))
+    return StyledText(chunks)
 
 
 class TextNode:
@@ -53,7 +261,9 @@ class TextNode:
         attributes: int = 0,
         link: str | None = None,
         children: list[TextNode | str] | None = None,
+        id: str | None = None,
     ):
+        self._id: str = id if id is not None else f"textnode-{next(_textnode_id_counter)}"
         self._text = text
         self._fg = _parse_color(fg)
         self._bg = _parse_color(bg)
@@ -74,10 +284,123 @@ class TextNode:
         self._children.append(child)
         return self
 
+    def add(self, child: TextNode | str | StyledText, index: int | None = None) -> int:
+        """Add a child node, string, or StyledText, optionally at a specific index.
+
+        When a StyledText is added, its chunks are decomposed into individual
+        TextNode children.
+
+        Args:
+            child: A TextNode, string, or StyledText to add.
+            index: Optional insertion index. If None, appends to end.
+
+        Returns:
+            The index at which the child was inserted.
+
+        Raises:
+            TypeError: If child is not a TextNode, str, or StyledText.
+        """
+        if isinstance(child, StyledText):
+            nodes = child.to_text_nodes()
+            insert_idx = index if index is not None else len(self._children)
+            for i, node in enumerate(nodes):
+                self._children.insert(insert_idx + i, node)
+            return insert_idx
+
+        if not isinstance(child, TextNode | str):
+            raise TypeError(
+                f"TextNode only accepts strings, TextNode instances, "
+                f"or StyledText instances, got {type(child).__name__}"
+            )
+        if index is not None:
+            self._children.insert(index, child)
+            return index
+        else:
+            self._children.append(child)
+            return len(self._children) - 1
+
+    def insert_before(self, child: TextNode | str | StyledText, anchor: TextNode | str) -> TextNode:
+        """Insert a child before an anchor node.
+
+        When a StyledText is inserted, its chunks are decomposed into
+        individual TextNode children inserted before the anchor.
+
+        Args:
+            child: The child to insert (TextNode, str, or StyledText).
+            anchor: The existing child to insert before.
+
+        Returns:
+            Self for chaining.
+
+        Raises:
+            ValueError: If anchor is not found in children.
+        """
+        try:
+            idx = self._children.index(anchor)
+        except ValueError:
+            raise ValueError("Anchor node not found in children") from None
+
+        if isinstance(child, StyledText):
+            nodes = child.to_text_nodes()
+            for i, node in enumerate(nodes):
+                self._children.insert(idx + i, node)
+        else:
+            self._children.insert(idx, child)
+        return self
+
+    def remove(self, child: TextNode | str) -> TextNode:
+        """Remove a child from this node.
+
+        Args:
+            child: The child to remove.
+
+        Returns:
+            Self for chaining.
+
+        Raises:
+            ValueError: If child is not found in children.
+        """
+        try:
+            self._children.remove(child)
+        except ValueError:
+            raise ValueError("Child not found in children") from None
+        return self
+
+    def clear(self) -> TextNode:
+        """Remove all children.
+
+        Returns:
+            Self for chaining.
+        """
+        self._children.clear()
+        return self
+
     def extend(self, children: list[TextNode | str]) -> TextNode:
         """Append multiple children."""
         self._children.extend(children)
         return self
+
+    def get_children(self) -> list[TextNode | str]:
+        """Get a copy of the children list."""
+        return list(self._children)
+
+    def get_children_count(self) -> int:
+        """Get the number of children."""
+        return len(self._children)
+
+    def get_renderable(self, id: str) -> TextNode | None:
+        """Find a direct child TextNode by its id.
+
+        Args:
+            id: The id string to search for.
+
+        Returns:
+            The matching TextNode, or None if not found.
+        """
+        for child in self._children:
+            if isinstance(child, TextNode) and child._id == id:
+                return child
+        return None
 
     def get_style(self) -> TextStyle:
         """Get this node's own style."""
@@ -112,11 +435,9 @@ class TextNode:
         resolved = self.merge_styles(parent_style)
         chunks: list[StyledChunk] = []
 
-        # Add this node's text if any
         if self._text:
             chunks.append(StyledChunk(text=self._text, style=resolved))
 
-        # Process children
         for child in self._children:
             if isinstance(child, str):
                 if child:
@@ -136,14 +457,52 @@ class TextNode:
                 parts.append(child.to_plain_text())
         return "".join(parts)
 
+    @classmethod
+    def from_string(cls, text: str) -> TextNode:
+        """Create a TextNode from a plain string.
+
+        The string is added as a child of a new root TextNode.
+
+        Args:
+            text: The string content.
+
+        Returns:
+            A new TextNode with the string as a child.
+        """
+        node = cls("")
+        node.append(text)
+        return node
+
+    @classmethod
+    def from_nodes(cls, nodes: list[TextNode | str]) -> TextNode:
+        """Create a TextNode from a list of nodes and/or strings.
+
+        Args:
+            nodes: List of TextNode instances or strings.
+
+        Returns:
+            A new TextNode with the given nodes as children.
+        """
+        node = cls("")
+        for child in nodes:
+            node.append(child)
+        return node
+
     def __repr__(self) -> str:
         if self._children:
             return f"TextNode({self._text!r}, children={len(self._children)})"
         return f"TextNode({self._text!r})"
 
 
+def is_textnode_renderable(obj: Any) -> bool:
+    return isinstance(obj, TextNode)
+
+
 def _parse_color(color: s.RGBA | str | None) -> s.RGBA | None:
-    """Parse a color string or RGBA to RGBA."""
+    """Parse a color string or RGBA to RGBA.
+
+    Supports hex strings, CSS named colors, 'transparent', and 'none'.
+    """
     if color is None:
         return None
     if isinstance(color, s.RGBA):
@@ -151,8 +510,39 @@ def _parse_color(color: s.RGBA | str | None) -> s.RGBA | None:
     if isinstance(color, str):
         if color in ("transparent", "none"):
             return None
-        return s.RGBA.from_hex(color)
+        return s.parse_color(color)
     return None
 
 
-__all__ = ["TextNode", "TextStyle", "StyledChunk"]
+__all__ = [
+    "TextNode",
+    "TextStyle",
+    "StyledChunk",
+    "TextChunk",
+    "StyledText",
+    "is_textnode_renderable",
+    "is_styled_text",
+    "styled_text",
+    "styled_red",
+    "styled_green",
+    "styled_blue",
+    "styled_yellow",
+    "styled_magenta",
+    "styled_cyan",
+    "styled_white",
+    "styled_black",
+    "styled_bold",
+    "styled_italic",
+    "styled_underline",
+    "styled_strikethrough",
+    "styled_dim",
+    "styled_fg",
+    "styled_bg",
+    "TEXT_ATTR_BOLD",
+    "TEXT_ATTR_ITALIC",
+    "TEXT_ATTR_UNDERLINE",
+    "TEXT_ATTR_STRIKETHROUGH",
+    "TEXT_ATTR_DIM",
+    "TEXT_ATTR_REVERSE",
+    "TEXT_ATTR_BLINK",
+]

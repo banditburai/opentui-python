@@ -6,13 +6,13 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from .signals import Signal
+from .structs import RGBA
 
 if TYPE_CHECKING:
     from .events import KeyEvent, MouseEvent, PasteEvent
     from .renderer import CliRenderer
 
 
-# Global renderer context
 _current_renderer: CliRenderer | None = None
 _keyboard_handlers: list[Callable[[KeyEvent], None]] = []
 _mouse_handlers: list[Callable[[MouseEvent], None]] = []
@@ -90,6 +90,39 @@ def clear_focus_handlers() -> None:
     _focus_handlers.clear()
 
 
+def register_focus_handler(handler: Callable[[str], None]) -> None:
+    """Register a raw focus handler (not deduplicated, for testing)."""
+    _focus_handlers.append(handler)
+
+
+def unregister_focus_handler(handler: Callable[[str], None]) -> None:
+    """Unregister a previously registered focus handler."""
+    if handler in _focus_handlers:
+        _focus_handlers.remove(handler)
+
+
+def register_keyboard_handler(handler: Callable) -> None:
+    """Register a raw keyboard handler (not deduplicated, for testing)."""
+    _keyboard_handlers.append(handler)
+
+
+def unregister_keyboard_handler(handler: Callable) -> None:
+    """Unregister a previously registered keyboard handler."""
+    if handler in _keyboard_handlers:
+        _keyboard_handlers.remove(handler)
+
+
+def register_paste_handler(handler: Callable[[PasteEvent], None]) -> None:
+    """Register a paste handler (for components that need paste events)."""
+    _paste_handlers.append(handler)
+
+
+def unregister_paste_handler(handler: Callable[[PasteEvent], None]) -> None:
+    """Unregister a previously registered paste handler."""
+    if handler in _paste_handlers:
+        _paste_handlers.remove(handler)
+
+
 def use_focus(handler: Callable[[str], None]) -> None:
     """Subscribe to terminal focus/blur events.
 
@@ -155,6 +188,9 @@ def use_on_resize(callback: Callable[[int, int], None]) -> CliRenderer:
     return renderer
 
 
+_keyboard_handler_refs: dict[int, Callable] = {}
+
+
 def use_keyboard(
     handler: Callable[[KeyEvent], None],
     options: dict | None = None,
@@ -175,16 +211,23 @@ def use_keyboard(
         # With release events
         use_keyboard(on_key, {"release": True})
     """
+    # Remove the previous wrapper for this handler to prevent accumulation
+    handler_id = id(handler)
+    prev = _keyboard_handler_refs.pop(handler_id, None)
+    if prev is not None and prev in _keyboard_handlers:
+        _keyboard_handlers.remove(prev)
+
     if options and options.get("release"):
-        # Wrap handler to also receive release events
+
         def wrapper(event: KeyEvent) -> None:
             handler(event)
 
         wrapper._original_handler = handler  # type: ignore[attr-defined]
         wrapper._receive_release = True  # type: ignore[attr-defined]
         _keyboard_handlers.append(wrapper)
+        _keyboard_handler_refs[handler_id] = wrapper
     else:
-        # Wrap handler to filter out release events
+
         def press_only_wrapper(event: KeyEvent) -> None:
             if not hasattr(event, "event_type") or event.event_type == "press":
                 handler(event)
@@ -192,6 +235,10 @@ def use_keyboard(
         press_only_wrapper._original_handler = handler  # type: ignore[attr-defined]
         press_only_wrapper._receive_release = False  # type: ignore[attr-defined]
         _keyboard_handlers.append(press_only_wrapper)
+        _keyboard_handler_refs[handler_id] = press_only_wrapper
+
+
+_mouse_handler_refs: dict[int, Callable] = {}
 
 
 def use_mouse(handler: Callable[[MouseEvent], None]) -> None:
@@ -207,7 +254,14 @@ def use_mouse(handler: Callable[[MouseEvent], None]) -> None:
 
         use_mouse(on_mouse)
     """
+    # Remove the previous handler to prevent accumulation
+    handler_id = id(handler)
+    prev = _mouse_handler_refs.pop(handler_id, None)
+    if prev is not None and prev in _mouse_handlers:
+        _mouse_handlers.remove(prev)
+
     _mouse_handlers.append(handler)
+    _mouse_handler_refs[handler_id] = handler
 
 
 def get_mouse_handlers() -> list[Callable[[MouseEvent], None]]:
@@ -218,6 +272,9 @@ def get_mouse_handlers() -> list[Callable[[MouseEvent], None]]:
 def clear_mouse_handlers() -> None:
     """Clear all mouse handlers."""
     _mouse_handlers.clear()
+
+
+_paste_handler_refs: dict[int, Callable] = {}
 
 
 def use_paste(callback: Callable[[PasteEvent], None]) -> None:
@@ -232,7 +289,17 @@ def use_paste(callback: Callable[[PasteEvent], None]) -> None:
 
         use_paste(on_paste)
     """
+    # Remove the previous handler to prevent accumulation
+    handler_id = id(callback)
+    prev = _paste_handler_refs.pop(handler_id, None)
+    if prev is not None and prev in _paste_handlers:
+        _paste_handlers.remove(prev)
+
     _paste_handlers.append(callback)
+    _paste_handler_refs[handler_id] = callback
+
+
+_selection_handler_refs: dict[int, Callable] = {}
 
 
 def use_selection_handler(callback: Callable[[Any], None]) -> None:
@@ -247,7 +314,14 @@ def use_selection_handler(callback: Callable[[Any], None]) -> None:
 
         use_selection_handler(on_select)
     """
+    # Remove the previous handler to prevent accumulation
+    handler_id = id(callback)
+    prev = _selection_handler_refs.pop(handler_id, None)
+    if prev is not None and prev in _selection_handlers:
+        _selection_handlers.remove(prev)
+
     _selection_handlers.append(callback)
+    _selection_handler_refs[handler_id] = callback
 
 
 def use_cursor(x: int, y: int) -> None:
@@ -263,7 +337,7 @@ def use_cursor(x: int, y: int) -> None:
         renderer.request_cursor(x, y)
 
 
-def use_cursor_style(style: str = "block", color: str | None = None) -> None:
+def use_cursor_style(style: str = "block", color: str | RGBA | None = None) -> None:
     """Request a cursor style (and optional color) for this frame.
 
     Call alongside ``use_cursor`` from a ``render_after`` callback.
@@ -272,12 +346,13 @@ def use_cursor_style(style: str = "block", color: str | None = None) -> None:
     *style*: ``"block"``, ``"underline"``, ``"bar"`` (blinking variants),
     or ``"steady_block"``, ``"steady_underline"``, ``"steady_bar"``.
 
-    *color*: Optional hex color string (e.g. ``"#ff0000"``).
+    *color*: Optional hex color string (e.g. ``"#ff0000"``) or RGBA.
     Pass ``None`` to use the terminal default.
     """
     renderer = get_renderer()
     if renderer is not None:
-        renderer.request_cursor_style(style, color)
+        color_str = color.to_hex() if isinstance(color, RGBA) else color
+        renderer.request_cursor_style(style, color_str)
 
 
 def use_timeline(options: dict | None = None) -> Timeline:
@@ -447,4 +522,10 @@ __all__ = [
     "get_focus_handlers",
     "clear_focus_handlers",
     "use_focus",
+    "register_focus_handler",
+    "unregister_focus_handler",
+    "register_keyboard_handler",
+    "unregister_keyboard_handler",
+    "register_paste_handler",
+    "unregister_paste_handler",
 ]

@@ -43,14 +43,12 @@ class FrameBuffer(Renderable):
         if self._render_before:
             self._render_before(buffer, delta_time, self)
 
-        # If we have an internal buffer, render children there first
         target = self._internal_buffer if self._internal_buffer is not None else buffer
 
         for child in self._children:
             if isinstance(child, Renderable):
                 child.render(target, delta_time)
 
-        # If rendering to internal buffer, composite to parent
         if self._internal_buffer is not None and self._internal_buffer is not buffer:
             self._composite_to(buffer)
 
@@ -66,9 +64,7 @@ class FrameBuffer(Renderable):
         # Try native compositing first (draw_frame_buffer FFI)
         try:
             native = buffer._native
-            native.buffer_draw_frame_buffer(
-                buffer._ptr, ib._ptr, self._x, self._y
-            )
+            native.buffer_draw_frame_buffer(buffer._ptr, ib._ptr, self._x, self._y)
             return
         except (AttributeError, TypeError):
             pass

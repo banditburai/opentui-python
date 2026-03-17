@@ -76,9 +76,7 @@ def verify_integrity(data: bytes, integrity: str | None, shasum: str | None) -> 
     elif shasum:
         actual = hashlib.sha1(data).hexdigest()
         if actual != shasum:
-            raise RuntimeError(
-                f"SHA-1 check failed:\n  expected: {shasum}\n  got:      {actual}"
-            )
+            raise RuntimeError(f"SHA-1 check failed:\n  expected: {shasum}\n  got:      {actual}")
         print("  Integrity verified (sha1)")
     else:
         print("  Warning: no integrity data available, skipping verification")
@@ -129,8 +127,7 @@ def download_library(version: str, dest_dir: Path) -> Path:
                 return dest_path
 
     raise RuntimeError(
-        f"Shared library not found in {package}@{version}.\n"
-        f"  Searched for: {lib_names}"
+        f"Shared library not found in {package}@{version}.\n  Searched for: {lib_names}"
     )
 
 

@@ -18,7 +18,7 @@ def _import_pillow_image():
 
 def _import_cairosvg():
     try:
-        import cairosvg
+        import cairosvg  # type: ignore[import-not-found]
     except ImportError as exc:
         raise ImportError("cairosvg required for SVG rasterization") from exc
     return cairosvg
@@ -60,11 +60,10 @@ def _decode_raster(source: ImageSource, mime_type: str | None = None) -> Decoded
         raise ValueError("Image source must include path or data")
 
     with opened as img:
-        if img.mode != "RGBA":
-            img = img.convert("RGBA")
-        width, height = img.size
+        converted = img.convert("RGBA") if img.mode != "RGBA" else img
+        width, height = converted.size
         return DecodedImage(
-            data=img.tobytes(),
+            data=converted.tobytes(),
             width=width,
             height=height,
             mime_type=mime_type,

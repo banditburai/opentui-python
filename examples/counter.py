@@ -1,8 +1,7 @@
 """Example app demonstrating OpenTUI Python with signals."""
 
 import opentui
-from opentui import Box, Text, Signal, use_keyboard, use_renderer
-
+from opentui import Box, Signal, Text, use_keyboard, use_renderer
 
 count = Signal("count", 0)
 
@@ -28,7 +27,7 @@ def handle_key(event):
     if event.name == "q":
         renderer = use_renderer()
         renderer.stop()
-    elif event.name == "+" or event.name == "=":
+    elif event.name in {"+", "="}:
         count.add(1)
     elif event.name == "-":
         count.add(-1)

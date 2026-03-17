@@ -1,5 +1,7 @@
 """Event types for OpenTUI Python."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
@@ -65,6 +67,7 @@ class KeyEvent:
     sequence: str = ""
     source: str = "raw"
     number: bool = False
+    base_code: int = 0
     _propagation_stopped: bool = field(default=False, repr=False)
     _default_prevented: bool = field(default=False, repr=False)
 
@@ -86,7 +89,7 @@ class KeyEvent:
 
     @property
     def name(self) -> str:
-        """Alias for key - matches JS API."""
+        """Alias for key."""
         return self.key
 
     def __str__(self) -> str:
@@ -156,7 +159,7 @@ class MouseEvent:
 
     @property
     def name(self) -> str:
-        """Alias for type - matches JS API."""
+        """Alias for type."""
         return self.type
 
     def __str__(self) -> str:

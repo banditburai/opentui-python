@@ -42,6 +42,8 @@ class Code(Renderable):
         self._highlight_current_line = highlight_current_line
         self._syntax_style = None
 
+        self._setup_measure_func()
+
     @property
     def content(self) -> str:
         return self._content
@@ -49,6 +51,35 @@ class Code(Renderable):
     @content.setter
     def content(self, value: str) -> None:
         self._content = value
+        if self._yoga_node is not None:
+            self._yoga_node.mark_dirty()
+
+    def _setup_measure_func(self) -> None:
+        """Set up yoga measure function for code layout."""
+
+        def measure(yoga_node, width, width_mode, height, height_mode):
+            import yoga
+
+            total_padding = self._padding_left + self._padding_right
+            vertical_padding = self._padding_top + self._padding_bottom
+
+            lines = self._content.split("\n") if self._content else []
+            num_lines = len(lines)
+
+            # Gutter width: 4 chars (3 for number + 1 space) when showing line numbers
+            gutter = 4 if self._show_line_numbers else 0
+            max_line_width = max((len(line) for line in lines), default=0)
+            content_w = max_line_width + gutter
+
+            measured_w = content_w + total_padding
+            measured_h = num_lines + vertical_padding
+
+            if width_mode == yoga.MeasureMode.AtMost:
+                measured_w = min(width, measured_w)
+
+            return (measured_w, measured_h)
+
+        self._yoga_node.set_measure_func(measure)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         """Render the code block."""
@@ -71,14 +102,12 @@ class Code(Renderable):
             if line_y >= buffer.height:
                 break
 
-            # Line number
             if self._show_line_numbers:
                 line_num = str(i + 1).rjust(3)
                 buffer.draw_text(
                     line_num, x, line_y, s.RGBA(0.5, 0.5, 0.5, 1), self._background_color
                 )
 
-            # Code content
             code_x = x + 4 if self._show_line_numbers else x
             display_line = line[: width - 4] if self._show_line_numbers else line[:width]
             buffer.draw_text(display_line, code_x, line_y, self._fg, self._background_color)
@@ -113,62 +142,67 @@ class Diff(Renderable):
         self._mode = mode
         self._context_lines = context_lines
 
+        self._setup_measure_func()
+
+    def _setup_measure_func(self) -> None:
+        def measure(yoga_node, width, width_mode, height, height_mode):
+            import yoga
+
+            total_padding = self._padding_left + self._padding_right
+            vertical_padding = self._padding_top + self._padding_bottom
+
+            old_lines = self._old_text.split("\n") if self._old_text else []
+            new_lines = self._new_text.split("\n") if self._new_text else []
+            # Diff output can have at most old + new lines
+            num_lines = len(old_lines) + len(new_lines)
+            max_line_width = max(
+                max((len(line) for line in old_lines), default=0),
+                max((len(line) for line in new_lines), default=0),
+            )
+            # "+2" for the status prefix ("+ " or "- ")
+            content_w = max_line_width + 2
+
+            measured_w = content_w + total_padding
+            measured_h = num_lines + vertical_padding
+
+            if width_mode == yoga.MeasureMode.AtMost:
+                measured_w = min(width, measured_w)
+
+            return (measured_w, measured_h)
+
+        self._yoga_node.set_measure_func(measure)
+
     def _compute_diff(self) -> list[tuple[str, str, int]]:
-        """Compute diff using LCS algorithm.
+        """Compute diff using difflib.SequenceMatcher.
 
         Returns list of (status, line, line_num) tuples:
         - status: '-', '+', or ' '
         - line: the text content
         - line_num: line number in original/new
         """
+        import difflib
+
         old_lines = self._old_text.split("\n")
         new_lines = self._new_text.split("\n")
 
-        # LCS computation
-        m, n = len(old_lines), len(new_lines)
-        dp = [[0] * (n + 1) for _ in range(m + 1)]
+        diff_lines: list[tuple[str, str, int]] = []
+        matcher = difflib.SequenceMatcher(None, old_lines, new_lines)
 
-        for i in range(1, m + 1):
-            for j in range(1, n + 1):
-                if old_lines[i - 1] == new_lines[j - 1]:
-                    dp[i][j] = dp[i - 1][j - 1] + 1
-                else:
-                    dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
-
-        # Backtrack to find diff
-        result = []
-        i, j = m, n
-        additions = []
-        deletions = []
-
-        while i > 0 or j > 0:
-            if i > 0 and j > 0 and old_lines[i - 1] == new_lines[j - 1]:
-                result.append((" ", old_lines[i - 1], i - 1))
-                i -= 1
-                j -= 1
-            elif j > 0 and (i == 0 or dp[i][j - 1] >= dp[i - 1][j]):
-                additions.append(("+", new_lines[j - 1], j - 1))
-                j -= 1
-            else:
-                deletions.append(("-", old_lines[i - 1], i - 1))
-                i -= 1
-
-        additions.reverse()
-        deletions.reverse()
-        result.reverse()
-
-        diff_lines = []
-        old_idx = 0
-        new_idx = 0
-
-        for status, line, _ in result:
-            if status == " ":
-                diff_lines.append((status, line, old_idx))
-                old_idx += 1
-                new_idx += 1
-
-        for status, line, idx in deletions + additions:
-            diff_lines.append((status, line, idx if status == "-" else new_idx))
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                for i in range(i1, i2):
+                    diff_lines.append((" ", old_lines[i], i))
+            elif tag == "replace":
+                for i in range(i1, i2):
+                    diff_lines.append(("-", old_lines[i], i))
+                for j in range(j1, j2):
+                    diff_lines.append(("+", new_lines[j], j))
+            elif tag == "delete":
+                for i in range(i1, i2):
+                    diff_lines.append(("-", old_lines[i], i))
+            elif tag == "insert":
+                for j in range(j1, j2):
+                    diff_lines.append(("+", new_lines[j], j))
 
         return diff_lines
 
@@ -221,6 +255,31 @@ class Markdown(Renderable):
         self._enable_syntax_highlight = enable_syntax_highlight
         self._enable_math = enable_math
 
+        self._setup_measure_func()
+
+    def _setup_measure_func(self) -> None:
+        """Set up yoga measure function for markdown layout."""
+
+        def measure(yoga_node, width, width_mode, height, height_mode):
+            import yoga
+
+            total_padding = self._padding_left + self._padding_right
+            vertical_padding = self._padding_top + self._padding_bottom
+
+            lines = self._content.split("\n") if self._content else []
+            num_lines = len(lines)
+            max_line_width = max((len(line) for line in lines), default=0)
+
+            measured_w = max_line_width + total_padding
+            measured_h = num_lines + vertical_padding
+
+            if width_mode == yoga.MeasureMode.AtMost:
+                measured_w = min(width, measured_w)
+
+            return (measured_w, measured_h)
+
+        self._yoga_node.set_measure_func(measure)
+
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         """Render markdown (simplified - full implementation would parse markdown)."""
         if not self._visible or not self._content:
@@ -229,22 +288,16 @@ class Markdown(Renderable):
         x = self._x + self._padding_left
         y = self._y + self._padding_top
 
-        # Simple rendering - just show the raw content
-        # A full implementation would parse markdown and render properly
         lines = self._content.split("\n")
         for i, line in enumerate(lines):
             if y + i >= buffer.height:
                 break
 
-            # Check for headings
             if line.startswith("# "):
-                # H1
                 buffer.draw_text(line[2:], x, y + i, self._fg, self._background_color)
             elif line.startswith("## "):
-                # H2
                 buffer.draw_text(line[3:], x, y + i, self._fg, self._background_color)
             elif line.startswith("### "):
-                # H3
                 buffer.draw_text(line[4:], x, y + i, self._fg, self._background_color)
             else:
                 buffer.draw_text(line, x, y + i, self._fg, self._background_color)
@@ -271,10 +324,33 @@ class LineNumber(Renderable):
 
         self._content = content
         self._start = start
-        self._width = width
+        self._gutter_width = width
+
+        self._setup_measure_func()
+
+    def _setup_measure_func(self) -> None:
+        def measure(yoga_node, width, width_mode, height, height_mode):
+            import yoga
+
+            total_padding = self._padding_left + self._padding_right
+            vertical_padding = self._padding_top + self._padding_bottom
+
+            lines = self._content.split("\n") if self._content else []
+            num_lines = len(lines)
+            max_line_width = max((len(line) for line in lines), default=0)
+            content_w = max_line_width + self._gutter_width + 1
+
+            measured_w = content_w + total_padding
+            measured_h = num_lines + vertical_padding
+
+            if width_mode == yoga.MeasureMode.AtMost:
+                measured_w = min(width, measured_w)
+
+            return (measured_w, measured_h)
+
+        self._yoga_node.set_measure_func(measure)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render with line numbers."""
         if not self._visible or not self._content:
             return
 
@@ -288,13 +364,11 @@ class LineNumber(Renderable):
             if line_y >= buffer.height:
                 break
 
-            # Line number
-            num = str(self._start + i).rjust(self._width)
+            num = str(self._start + i).rjust(self._gutter_width)
             buffer.draw_text(num, x, line_y, s.RGBA(0.5, 0.5, 0.5, 1), self._background_color)
 
-            # Content
-            content_x = x + self._width + 1
-            display_line = line[: width - self._width - 1]
+            content_x = x + self._gutter_width + 1
+            display_line = line[: width - self._gutter_width - 1]
             buffer.draw_text(display_line, content_x, line_y, self._fg, self._background_color)
 
 
@@ -327,8 +401,6 @@ class AsciiFont(Renderable):
         x = self._x + self._padding_left
         y = self._y + self._padding_top
 
-        # Just render as regular text for now
-        # Full implementation would use figlet or similar
         buffer.draw_text(self._content, x, y, self._fg, self._background_color)
 
 
@@ -387,24 +459,17 @@ class TabSelect(Renderable):
         x = self._x + self._padding_left
         y = self._y + self._padding_top
 
-        # Draw each tab
         current_x = x
         for i, tab in enumerate(self._tabs):
             is_selected = i == self._selected
 
-            # Tab background
-            if is_selected:
-                bg = s.RGBA(0.2, 0.2, 0.4, 1)
-            else:
-                bg = self._background_color
+            bg = s.RGBA(0.2, 0.2, 0.4, 1) if is_selected else self._background_color
 
-            # Tab content
             text = f" {tab} "
             fg = s.RGBA(1, 1, 1, 1) if is_selected else self._fg
 
             buffer.draw_text(text, current_x, y, fg, bg)
 
-            # Move to next tab position
             current_x += len(text) + 1
 
 
@@ -453,10 +518,8 @@ class Slider(Renderable):
     @value.setter
     def value(self, v: float) -> None:
         clamped = v
-        if clamped < self._min:
-            clamped = self._min
-        if clamped > self._max:
-            clamped = self._max
+        clamped = max(clamped, self._min)
+        clamped = min(clamped, self._max)
         self._value = clamped
 
     def increment(self, amount: float = 1) -> None:
@@ -478,23 +541,19 @@ class Slider(Renderable):
         y = self._y + self._padding_top
         width = self._layout_width or 20
 
-        # Calculate position
         range_size = self._max - self._min
         if range_size > 0:
             position = int((self._value - self._min) / range_size * (width - 2))
         else:
             position = 0
 
-        # Draw track
         buffer.draw_text("[", x, y, self._fg, self._background_color)
         buffer.draw_text("-" * (width - 2), x + 1, y, self._fg, self._background_color)
         buffer.draw_text("]", x + width - 1, y, self._fg, self._background_color)
 
-        # Draw thumb
         thumb_x = x + 1 + position
         buffer.draw_text("●", thumb_x, y, s.RGBA(0.3, 0.7, 1, 1), self._background_color)
 
-        # Draw value
         value_text = f" {self._value:.1f} "
         buffer.draw_text(value_text, x, y + 1, self._fg, self._background_color)
 
@@ -542,31 +601,27 @@ class TextTable(Renderable):
         x = self._x + self._padding_left
         y = self._y + self._padding_top
 
-        # Calculate column widths
         col_widths = [len(c) for c in self._columns]
         for row in self._rows:
             for i, cell in enumerate(row):
                 if i < len(col_widths):
                     col_widths[i] = max(col_widths[i], len(cell))
 
-        # Render header
         current_x = x
         for i, col in enumerate(self._columns):
             w = col_widths[i] if i < len(col_widths) else 10
             buffer.draw_text(col.ljust(w), current_x, y, self._fg, self._background_color)
             current_x += w + 1
 
-        # Render separator
         y += 1
         current_x = x
-        for i, w in enumerate(col_widths):
+        for _i, w in enumerate(col_widths):
             buffer.draw_text(
                 "-" * (w + 1), current_x, y, s.RGBA(0.5, 0.5, 0.5, 1), self._background_color
             )
             current_x += w + 1
 
-        # Render rows
-        for row_idx, row in enumerate(self._rows):
+        for _row_idx, row in enumerate(self._rows):
             y += 1
             current_x = x
             for i, cell in enumerate(row):

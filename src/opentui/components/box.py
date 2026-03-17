@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import math
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
 from ..events import MouseButton
+from ..structs import display_width as _display_width
 from .base import Renderable
 
 if TYPE_CHECKING:
@@ -133,6 +134,7 @@ class Box(Renderable):
         *children: Any,
         # Identity
         key: str | int | None = None,
+        id: str | None = None,
         # Layout
         width: int | None = None,
         height: int | None = None,
@@ -169,7 +171,9 @@ class Box(Renderable):
         title: str | None = None,
         title_alignment: str = "left",
         # Focus
+        focusable: bool = False,
         focused: bool = False,
+        focused_border_color: s.RGBA | str | None = None,
         # Border sides
         border_top: bool = True,
         border_right: bool = True,
@@ -191,6 +195,7 @@ class Box(Renderable):
     ):
         super().__init__(
             key=key,
+            id=id,
             overflow=overflow,
             width=width,
             height=height,
@@ -224,7 +229,9 @@ class Box(Renderable):
             border_color=border_color,
             title=title,
             title_alignment=title_alignment,
+            focusable=focusable,
             focused=focused,
+            focused_border_color=focused_border_color,
             border_top=border_top,
             border_right=border_right,
             border_bottom=border_bottom,
@@ -240,7 +247,6 @@ class Box(Renderable):
             z_index=z_index,
         )
 
-        # Add children (both positional and keyword)
         all_children = list(children) if children else []
         for child in all_children:
             if isinstance(child, Renderable):
@@ -250,7 +256,6 @@ class Box(Renderable):
 
                 self.add(Text(child))
             else:
-                # Try to render as text
                 from .text import Text
 
                 self.add(Text(str(child)))
@@ -260,19 +265,16 @@ class Box(Renderable):
         if not self._visible:
             return
 
-        # Get dimensions (yoga-computed layout, not the original prop)
+        # Use yoga-computed layout dimensions, not the original prop
         width = self._layout_width or buffer.width
         height = self._layout_height or buffer.height
 
-        # Draw border if enabled
         if self._border and width > 0 and height > 0:
             self._draw_border(buffer, width, height)
 
-        # Draw focus ring if focused
         if self._focused and width > 0 and height > 0:
             self._draw_focus_ring(buffer, width, height)
 
-        # Draw background for the box
         if self._background_color:
             bg_x = self._x if not self._border else self._x + 1
             bg_y = self._y if not self._border else self._y + 1
@@ -281,12 +283,10 @@ class Box(Renderable):
             if bg_w > 0 and bg_h > 0:
                 buffer.fill_rect(bg_x, bg_y, bg_w, bg_h, self._background_color)
 
-        # Clip children to box bounds when overflow is hidden
         clip = self._overflow == "hidden"
         if clip:
             buffer.push_scissor_rect(self._x, self._y, width, height)
 
-        # Render children at their yoga-computed absolute positions
         for child in self._children:
             if isinstance(child, Renderable):
                 child.render(buffer, delta_time)
@@ -316,33 +316,29 @@ class Box(Renderable):
         """Draw the box border."""
         chars = self._get_border_chars()
 
-        border_color = self._border_color or self._fg
+        if self._focused and self._focused_border_color:
+            border_color = self._focused_border_color
+        else:
+            border_color = self._border_color or self._fg
         bg = self._background_color
 
-        # Top border
         if self._border_top and width > 2:
-            # Left corner
             if self._border_left:
                 buffer.draw_text(chars["top_left"], self._x, self._y, border_color, bg)
-            # Horizontal line
             start_x = self._x + (1 if self._border_left else 0)
             end_x = self._x + width - (1 if self._border_right else 0)
             if end_x > start_x:
                 buffer.draw_text(
                     chars["horizontal"] * (end_x - start_x), start_x, self._y, border_color, bg
                 )
-            # Right corner
             if self._border_right:
                 buffer.draw_text(chars["top_right"], self._x + width - 1, self._y, border_color, bg)
 
-        # Bottom border
         if self._border_bottom and height > 2:
-            # Left corner
             if self._border_left:
                 buffer.draw_text(
                     chars["bottom_left"], self._x, self._y + height - 1, border_color, bg
                 )
-            # Horizontal line
             start_x = self._x + (1 if self._border_left else 0)
             end_x = self._x + width - (1 if self._border_right else 0)
             if end_x > start_x:
@@ -353,7 +349,6 @@ class Box(Renderable):
                     border_color,
                     bg,
                 )
-            # Right corner
             if self._border_right:
                 buffer.draw_text(
                     chars["bottom_right"],
@@ -363,7 +358,6 @@ class Box(Renderable):
                     bg,
                 )
 
-        # Left and right borders
         if self._border_left or self._border_right:
             top_y = self._y + (1 if self._border_top else 0)
             bottom_y = self._y + height - (1 if self._border_bottom else 0)
@@ -373,13 +367,13 @@ class Box(Renderable):
                 if self._border_right:
                     buffer.draw_text(chars["vertical"], self._x + width - 1, y, border_color, bg)
 
-        # Title (only if top border is drawn)
         if self._title and self._border_top:
+            title_width = _display_width(self._title)
             title_x = self._x + 1
             if self._title_alignment == "center":
-                title_x = self._x + (width - len(self._title)) // 2
+                title_x = self._x + (width - title_width) // 2
             elif self._title_alignment == "right":
-                title_x = self._x + width - len(self._title) - 2
+                title_x = self._x + width - title_width - 2
 
             buffer.draw_text(self._title, title_x, self._y, border_color, bg)
 
@@ -387,33 +381,40 @@ class Box(Renderable):
         """Draw a focus ring around the box."""
         focus_color = s.RGBA(0.3, 0.5, 1.0, 1.0)
 
+        top_y = max(0, self._y - 1)
+        bottom_y = self._y + height
+        left_x = max(0, self._x - 1)
+        right_x = self._x + width
+
         # Top edge
-        for x in range(self._x, self._x + width):
-            buffer.draw_text("─", x, self._y - 1 if self._y > 0 else self._y, focus_color, None)
+        if self._y > 0:
+            for x in range(self._x, self._x + width):
+                buffer.draw_text("─", x, top_y, focus_color, None)
 
         # Bottom edge
-        for x in range(self._x, self._x + width):
-            buffer.draw_text("─", x, self._y + height, focus_color, None)
+        if bottom_y < buffer.height:
+            for x in range(self._x, self._x + width):
+                buffer.draw_text("─", x, bottom_y, focus_color, None)
 
         # Left edge
-        for y in range(self._y, self._y + height):
-            buffer.draw_text("│", self._x - 1 if self._x > 0 else self._x, y, focus_color, None)
+        if self._x > 0:
+            for y in range(self._y, self._y + height):
+                buffer.draw_text("│", left_x, y, focus_color, None)
 
         # Right edge
-        for y in range(self._y, self._y + height):
-            buffer.draw_text("│", self._x + width, y, focus_color, None)
+        if right_x < buffer.width:
+            for y in range(self._y, self._y + height):
+                buffer.draw_text("│", right_x, y, focus_color, None)
 
-        # Corners
-        if self._x > 0:
-            buffer.draw_text(
-                "┌", self._x - 1, self._y - 1 if self._y > 0 else self._y, focus_color, None
-            )
-            buffer.draw_text("└", self._x - 1, self._y + height, focus_color, None)
-        if self._x + width < buffer.width:
-            buffer.draw_text(
-                "┐", self._x + width, self._y - 1 if self._y > 0 else self._y, focus_color, None
-            )
-            buffer.draw_text("┘", self._x + width, self._y + height, focus_color, None)
+        # Corners — only draw when both edges are within bounds
+        if self._x > 0 and self._y > 0:
+            buffer.draw_text("┌", left_x, top_y, focus_color, None)
+        if self._x > 0 and bottom_y < buffer.height:
+            buffer.draw_text("└", left_x, bottom_y, focus_color, None)
+        if right_x < buffer.width and self._y > 0:
+            buffer.draw_text("┐", right_x, top_y, focus_color, None)
+        if right_x < buffer.width and bottom_y < buffer.height:
+            buffer.draw_text("┘", right_x, bottom_y, focus_color, None)
 
 
 class ScrollBox(Box):
@@ -475,6 +476,9 @@ class ScrollBox(Box):
         self._sticky_scroll_left = False
         self._sticky_scroll_right = False
         self._is_scroll_target = True
+        # Register _on_mouse_scroll so the tree-dispatch path can find us
+        # (matches OpenTUI core processMouseEvent propagation for scroll events).
+        self._on_mouse_scroll = self._handle_mouse_scroll
 
     @property
     def scroll_x(self) -> bool:
@@ -503,6 +507,29 @@ class ScrollBox(Box):
     @property
     def has_manual_scroll(self) -> bool:
         return self._has_manual_scroll
+
+    @property
+    def scroll_top(self) -> int:
+        """Alias for scroll_offset_y (scrollBox.scrollTop equivalent)."""
+        return self._scroll_offset_y
+
+    @scroll_top.setter
+    def scroll_top(self, value: int) -> None:
+        """Set scroll position (scrollBox.scrollTop equivalent).
+
+        Calls ``scroll_to`` which clamps and updates sticky state.
+        """
+        self.scroll_to(x=self._scroll_offset_x, y=value)
+
+    @property
+    def viewport(self) -> dict[str, int]:
+        """Return the scroll container's screen-space viewport rectangle.
+
+        Returns ``{ x, y, width, height }`` for the visible area.
+        """
+        width = int(self._layout_width or 0)
+        height = int(self._layout_height or 0)
+        return {"x": self._x, "y": self._y, "width": width, "height": height}
 
     def is_at_bottom(self) -> bool:
         return self._scroll_offset_y >= self._max_scroll_y()
@@ -553,7 +580,9 @@ class ScrollBox(Box):
     def _max_scroll_y(self) -> int:
         return max(0, self._scroll_height - self._viewport_height)
 
-    def _is_at_sticky_position(self, *, offset_x: int | None = None, offset_y: int | None = None) -> bool:
+    def _is_at_sticky_position(
+        self, *, offset_x: int | None = None, offset_y: int | None = None
+    ) -> bool:
         if not self._sticky_scroll or not self._sticky_start:
             return False
 
@@ -581,7 +610,8 @@ class ScrollBox(Box):
             self._sticky_scroll_top = True
             self._sticky_scroll_bottom = False
             if not self._is_applying_sticky_scroll and (
-                self._sticky_start == "top" or (self._sticky_start == "bottom" and max_scroll_y == 0)
+                self._sticky_start == "top"
+                or (self._sticky_start == "bottom" and max_scroll_y == 0)
             ):
                 self._has_manual_scroll = False
         elif self._scroll_offset_y >= max_scroll_y:
@@ -597,7 +627,8 @@ class ScrollBox(Box):
             self._sticky_scroll_left = True
             self._sticky_scroll_right = False
             if not self._is_applying_sticky_scroll and (
-                self._sticky_start == "left" or (self._sticky_start == "right" and max_scroll_x == 0)
+                self._sticky_start == "left"
+                or (self._sticky_start == "right" and max_scroll_x == 0)
             ):
                 self._has_manual_scroll = False
         elif self._scroll_offset_x >= max_scroll_x:
@@ -645,19 +676,24 @@ class ScrollBox(Box):
         self._scroll_offset_y = min(self._scroll_offset_y, self._max_scroll_y())
 
         if self._sticky_scroll:
+            new_max_y = self._max_scroll_y()
+            new_max_x = self._max_scroll_x()
             if self._sticky_start and not self._has_manual_scroll:
                 self._apply_sticky_start(self._sticky_start)
             else:
                 if self._sticky_scroll_top:
                     self._scroll_offset_y = 0
-                elif self._sticky_scroll_bottom:
-                    self._scroll_offset_y = self._max_scroll_y()
+                elif self._sticky_scroll_bottom and new_max_y > 0:
+                    self._scroll_offset_y = new_max_y
                 if self._sticky_scroll_left:
                     self._scroll_offset_x = 0
-                elif self._sticky_scroll_right:
-                    self._scroll_offset_x = self._max_scroll_x()
+                elif self._sticky_scroll_right and new_max_x > 0:
+                    self._scroll_offset_x = new_max_x
 
-        self._update_sticky_state()
+        # Note: do NOT call _update_sticky_state() here — it is called only
+        # by _set_scroll_offsets() (user-initiated scrolls).  Calling it during
+        # content-size recalculation would incorrectly reset _has_manual_scroll
+        # when content shrinks and the scroll offset is clamped (issue #709).
 
     def _set_scroll_offsets(
         self,
@@ -680,9 +716,14 @@ class ScrollBox(Box):
                 self._scroll_offset_y = new_y
                 changed = True
 
-        if changed and mark_manual and not self._is_applying_sticky_scroll:
-            if (self._max_scroll_y() > 1 or self._max_scroll_x() > 1) and not self._is_at_sticky_position():
-                self._has_manual_scroll = True
+        if (
+            changed
+            and mark_manual
+            and not self._is_applying_sticky_scroll
+            and (self._max_scroll_y() > 1 or self._max_scroll_x() > 1)
+            and not self._is_at_sticky_position()
+        ):
+            self._has_manual_scroll = True
 
         self._update_sticky_state()
         return changed
@@ -805,14 +846,12 @@ class ScrollBox(Box):
         height = self._layout_height or buffer.height
         self._sync_scroll_metrics()
 
-        # Draw border (unaffected by scroll)
         if self._border and width > 0 and height > 0:
             self._draw_border(buffer, width, height)
 
         if self._focused and width > 0 and height > 0:
             self._draw_focus_ring(buffer, width, height)
 
-        # Draw background (unaffected by scroll)
         if self._background_color:
             bg_x = self._x if not self._border else self._x + 1
             bg_y = self._y if not self._border else self._y + 1
@@ -831,12 +870,13 @@ class ScrollBox(Box):
         #   this.content.translateY = -position
         # If scroll_offset_fn is provided, call it at render time to get
         # the current offset — this bypasses the signal system entirely.
-        offset_y = int(self._scroll_offset_y_fn()) if self._scroll_offset_y_fn else self._scroll_offset_y
+        offset_y = (
+            int(self._scroll_offset_y_fn()) if self._scroll_offset_y_fn else self._scroll_offset_y
+        )
         offset_dx = -self._scroll_offset_x if self._scroll_x else 0
         offset_dy = -offset_y if self._scroll_y else 0
         buffer.push_offset(offset_dx, offset_dy)
 
-        # Render children at their yoga-computed positions.
         # The buffer offset transparently shifts all drawing (including
         # grandchildren) without changing any yoga layout properties.
         # Viewport culling: skip children entirely outside the visible

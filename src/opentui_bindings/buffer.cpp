@@ -4,10 +4,17 @@
 #include <cstring>
 #include <cstdint>
 #include <string>
+#include <vector>
 #include <optional>
 #include <array>
 
 namespace nb = nanobind;
+
+// EncodedChar struct matching the Zig ExternalEncodedChar layout
+struct EncodedChar {
+    uint8_t width;
+    uint32_t ch;
+};
 
 extern "C" {
     void bufferClear(void* buffer, float* color);
@@ -22,7 +29,7 @@ extern "C" {
     uint32_t getBufferWidth(void* buffer);
     uint32_t getBufferHeight(void* buffer);
     uint32_t bufferGetRealCharSize(void* buffer);
-    uint32_t bufferWriteResolvedChars(void* buffer, void* chars, bool showCursor);
+    uint32_t bufferWriteResolvedChars(void* buffer, uint8_t* output, size_t outputLen, bool addLineBreaks);
     void bufferSetCellWithAlphaBlending(void* buffer, uint32_t x, uint32_t y, uint32_t ch, float* fg, float* bg, uint32_t attrs);
     bool bufferGetRespectAlpha(void* buffer);
     void bufferSetRespectAlpha(void* buffer, bool respect);
@@ -31,6 +38,11 @@ extern "C" {
     void destroyOptimizedBuffer(void* buffer);
     void drawFrameBuffer(void* buffer);
     size_t bufferGetId(void* buffer, void* out, size_t maxLen);
+
+    // Unicode encoding and drawChar
+    bool encodeUnicode(const char* text, size_t textLen, EncodedChar** outPtr, size_t* outLenPtr, uint8_t widthMethod);
+    void freeUnicode(const EncodedChar* charsPtr, size_t charsLen);
+    void bufferDrawChar(void* buffer, uint32_t ch, uint32_t x, uint32_t y, float* fg, float* bg, uint32_t attrs);
 }
 
 // Helper: copy optional RGBA array into a float[4], using default if not provided
@@ -125,14 +137,26 @@ void bind_buffer(nb::module_& m) {
     m.def("get_buffer_width", &getBufferWidth, nb::arg("buffer"));
     m.def("get_buffer_height", &getBufferHeight, nb::arg("buffer"));
     m.def("buffer_get_real_char_size", &bufferGetRealCharSize, nb::arg("buffer"));
-    m.def("buffer_write_resolved_chars", &bufferWriteResolvedChars,
-          nb::arg("buffer"), nb::arg("chars"), nb::arg("show_cursor"));
+    m.def("buffer_write_resolved_chars", [](void* buffer, bool addLineBreaks) -> nb::bytes {
+        uint32_t realSize = bufferGetRealCharSize(buffer);
+        if (realSize == 0) return nb::bytes("", 0);
+        // Allocate output + extra space for newlines (one per row)
+        uint32_t height = getBufferHeight(buffer);
+        std::vector<uint8_t> output(realSize + height + 1);
+        uint32_t bytesWritten = bufferWriteResolvedChars(buffer, output.data(), output.size(), addLineBreaks);
+        return nb::bytes(reinterpret_cast<const char*>(output.data()), bytesWritten);
+    }, nb::arg("buffer"), nb::arg("add_line_breaks") = false);
 
-    m.def("buffer_set_cell_with_alpha_blending", [](void* buffer, uint32_t x, uint32_t y, uint32_t ch) {
-        float fg_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-        float bg_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-        bufferSetCellWithAlphaBlending(buffer, x, y, ch, fg_color, bg_color, 0);
-    }, nb::arg("buffer"), nb::arg("x"), nb::arg("y"), nb::arg("ch"));
+    m.def("buffer_set_cell_with_alpha_blending", [](void* buffer, uint32_t x, uint32_t y, uint32_t ch,
+                                                    std::optional<std::array<float, 4>> fg,
+                                                    std::optional<std::array<float, 4>> bg,
+                                                    uint32_t attrs) {
+        float fg_color[4], bg_color[4];
+        resolve_fg(fg, fg_color);
+        resolve_bg(bg, bg_color);
+        bufferSetCellWithAlphaBlending(buffer, x, y, ch, fg_color, bg_color, attrs);
+    }, nb::arg("buffer"), nb::arg("x"), nb::arg("y"), nb::arg("ch"),
+       nb::arg("fg") = std::nullopt, nb::arg("bg") = std::nullopt, nb::arg("attrs") = 0);
 
     m.def("buffer_get_respect_alpha", &bufferGetRespectAlpha, nb::arg("buffer"));
     m.def("buffer_set_respect_alpha", &bufferSetRespectAlpha, nb::arg("buffer"), nb::arg("respect"));
@@ -155,4 +179,31 @@ void bind_buffer(nb::module_& m) {
         size_t len = bufferGetId(buffer, out.data(), maxLen);
         return nb::bytes(out.data(), len);
     }, nb::arg("buffer"), nb::arg("max_len") = 256);
+
+    // encodeUnicode: encode text into array of (width, char) tuples
+    m.def("encode_unicode", [](nb::bytes text, uint8_t widthMethod) -> nb::list {
+        EncodedChar* outPtr = nullptr;
+        size_t outLen = 0;
+        bool ok = encodeUnicode(text.c_str(), text.size(), &outPtr, &outLen, widthMethod);
+        nb::list result;
+        if (ok && outPtr && outLen > 0) {
+            for (size_t i = 0; i < outLen; i++) {
+                result.append(nb::make_tuple(outPtr[i].width, outPtr[i].ch));
+            }
+            freeUnicode(outPtr, outLen);
+        }
+        return result;
+    }, nb::arg("text"), nb::arg("width_method") = 0);
+
+    // bufferDrawChar: draw a single encoded character at position
+    m.def("buffer_draw_char", [](void* buffer, uint32_t ch, uint32_t x, uint32_t y,
+                                  std::optional<std::array<float, 4>> fg,
+                                  std::optional<std::array<float, 4>> bg,
+                                  uint32_t attrs) {
+        float fg_color[4], bg_color[4];
+        resolve_fg(fg, fg_color);
+        resolve_bg(bg, bg_color);
+        bufferDrawChar(buffer, ch, x, y, fg_color, bg_color, attrs);
+    }, nb::arg("buffer"), nb::arg("ch"), nb::arg("x"), nb::arg("y"),
+       nb::arg("fg") = std::nullopt, nb::arg("bg") = std::nullopt, nb::arg("attrs") = 0);
 }

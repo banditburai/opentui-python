@@ -77,7 +77,9 @@ __all__ = [
 ]
 
 
-def resize_rgba_nearest(data: bytes, src_width: int, src_height: int, dst_width: int, dst_height: int) -> bytes:
+def resize_rgba_nearest(
+    data: bytes, src_width: int, src_height: int, dst_width: int, dst_height: int
+) -> bytes:
     """Resize RGBA image data using nearest-neighbor scaling."""
     if src_width <= 0 or src_height <= 0 or dst_width <= 0 or dst_height <= 0:
         return b""
@@ -85,13 +87,17 @@ def resize_rgba_nearest(data: bytes, src_width: int, src_height: int, dst_width:
     if src_width == dst_width and src_height == dst_height:
         return data
 
+    # Precompute source x indices for all destination columns
+    src_x_indices = [min(src_width - 1, (x * src_width) // dst_width) for x in range(dst_width)]
+
     out = bytearray(dst_width * dst_height * 4)
     for y in range(dst_height):
         src_y = min(src_height - 1, (y * src_height) // dst_height)
+        src_row_offset = src_y * src_width
+        dst_row_offset = y * dst_width
         for x in range(dst_width):
-            src_x = min(src_width - 1, (x * src_width) // dst_width)
-            src_idx = (src_y * src_width + src_x) * 4
-            dst_idx = (y * dst_width + x) * 4
+            src_idx = (src_row_offset + src_x_indices[x]) * 4
+            dst_idx = (dst_row_offset + x) * 4
             out[dst_idx : dst_idx + 4] = data[src_idx : src_idx + 4]
     return bytes(out)
 
