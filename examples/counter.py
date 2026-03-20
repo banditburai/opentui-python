@@ -1,18 +1,21 @@
-"""Example app demonstrating OpenTUI Python with signals."""
+"""Minimal counter app demonstrating OpenTUI Python with signals."""
+
+import asyncio
 
 import opentui
-from opentui import Box, Signal, Text, use_keyboard, use_renderer
+from opentui import Box, Signal, Text, reactive, template_component, use_keyboard, use_renderer
 
-count = Signal("count", 0)
+count = Signal(0, name="count")
 
 
+@template_component
 def counter_app():
-    """Simple counter app example."""
+    """Simple counter with reactive text content."""
     return Box(
         Text("Counter App"),
         Text("-" * 20),
         Box(
-            Text(f"Count: {count()}"),
+            Text(reactive(lambda: f"Count: {count()}")),
             border=True,
             padding=2,
         ),
@@ -23,24 +26,19 @@ def counter_app():
     )
 
 
-def handle_key(event):
+def handle_key(event) -> None:
     if event.name == "q":
-        renderer = use_renderer()
-        renderer.stop()
+        use_renderer().stop()
     elif event.name in {"+", "="}:
         count.add(1)
     elif event.name == "-":
         count.add(-1)
 
 
-async def main():
-    """Main entry point."""
+async def main() -> None:
     use_keyboard(handle_key)
-
     await opentui.render(counter_app)
 
 
 if __name__ == "__main__":
-    import asyncio
-
     asyncio.run(main())

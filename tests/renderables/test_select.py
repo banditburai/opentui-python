@@ -4,6 +4,9 @@ Upstream: packages/core/src/renderables/Select.test.ts
 Tests ported: 48/48 (48 real)
 """
 
+import pytest
+
+from opentui import create_test_renderer
 from opentui.components.input import SelectOption
 from opentui.components.select_renderable import SelectRenderable
 from opentui.events import KeyEvent
@@ -30,6 +33,36 @@ def _sample_options(n: int = 5) -> list[SelectOption]:
 
 class TestSelectRenderableInitialization:
     """Maps to describe("SelectRenderable > Initialization")."""
+
+    @pytest.mark.asyncio
+    async def test_reuses_raster_cache_when_select_is_clean(self):
+        setup = await create_test_renderer(40, 12)
+        try:
+            class _CountingSelect(SelectRenderable):
+                __slots__ = ("render_calls",)
+
+                def __init__(self, **kwargs):
+                    super().__init__(**kwargs)
+                    self.render_calls = 0
+
+                def _render_select_contents(self, buffer):
+                    self.render_calls += 1
+                    return super()._render_select_contents(buffer)
+
+            sel = _CountingSelect(options=_sample_options(6), width=40, height=12)
+            setup.renderer.root.add(sel)
+
+            setup.render_frame()
+            assert sel.render_calls == 1
+
+            setup.render_frame()
+            assert sel.render_calls == 1
+
+            sel.selected_index = 1
+            setup.render_frame()
+            assert sel.render_calls == 2
+        finally:
+            setup.destroy()
 
     def test_should_initialize_with_default_options(self):
         """Maps to test("should initialize with default options")."""

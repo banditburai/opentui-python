@@ -43,7 +43,6 @@ class VRenderable(Renderable):
         self._render_fn = value
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render using custom render function, then render children."""
         if not self._visible:
             return
 
@@ -54,8 +53,7 @@ class VRenderable(Renderable):
             self._render_fn(buffer, delta_time, self)
 
         for child in self._children:
-            if isinstance(child, Renderable):
-                child.render(buffer, delta_time)
+            child.render(buffer, delta_time)
 
         if self._render_after:
             self._render_after(buffer, delta_time, self)

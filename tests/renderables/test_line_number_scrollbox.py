@@ -7,7 +7,7 @@ Tests ported: 10/10 (0 skipped)
 import pytest
 
 from opentui import create_test_renderer
-from opentui.components.box import Box, ScrollBox
+from opentui.components.box import Box, ScrollBox, ScrollContent
 from opentui.components.code_renderable import CodeRenderable, SyntaxStyle
 from opentui.components.line_number_renderable import LineNumberRenderable
 from opentui.structs import RGBA
@@ -80,7 +80,7 @@ class TestLineNumberRenderableInScrollBox:
             )
 
             scroll = ScrollBox(
-                bordered_box,
+                content=ScrollContent(bordered_box),
                 width="100%",
                 height="100%",
                 scroll_y=True,
@@ -140,7 +140,7 @@ class TestLineNumberRenderableInScrollBox:
             )
 
             scroll = ScrollBox(
-                bordered_box,
+                content=ScrollContent(bordered_box),
                 width="100%",
                 height="100%",
                 scroll_y=True,
@@ -210,7 +210,7 @@ class TestLineNumberRenderableInScrollBox:
                 ln_renderables.append(ln)
 
             scroll = ScrollBox(
-                *ln_renderables,
+                content=ScrollContent(*ln_renderables),
                 width="100%",
                 height="100%",
                 scroll_y=True,
@@ -277,7 +277,7 @@ class TestLineNumberRenderableInScrollBox:
             )
 
             scroll = ScrollBox(
-                outer_box,
+                content=ScrollContent(outer_box),
                 width="100%",
                 height="100%",
                 scroll_y=True,
@@ -334,7 +334,7 @@ class TestLineNumberRenderableInScrollBox:
             )
 
             scroll = ScrollBox(
-                ln,
+                content=ScrollContent(ln),
                 width="100%",
                 height="100%",
                 scroll_x=True,
@@ -397,7 +397,7 @@ class TestLineNumberRenderableInScrollBox:
             )
 
             scroll = ScrollBox(
-                ln,
+                content=ScrollContent(ln),
                 width="100%",
                 height="100%",
                 scroll_y=True,
@@ -459,7 +459,7 @@ class TestLineNumberRenderableInScrollBox:
             )
 
             scroll = ScrollBox(
-                ln,
+                content=ScrollContent(ln),
                 width="100%",
                 height="100%",
                 scroll_y=True,
@@ -510,7 +510,7 @@ class TestLineNumberRenderableInScrollBox:
             )
 
             scroll = ScrollBox(
-                ln,
+                content=ScrollContent(ln),
                 width="100%",
                 height="100%",
                 scroll_y=True,
@@ -573,7 +573,7 @@ class TestLineNumberRenderableInScrollBox:
             )
 
             scroll = ScrollBox(
-                bordered_box,
+                content=ScrollContent(bordered_box),
                 width="100%",
                 height="100%",
                 scroll_y=True,
@@ -629,7 +629,7 @@ class TestLineNumberRenderableInScrollBox:
             )
 
             scroll = ScrollBox(
-                bordered_box,
+                content=ScrollContent(bordered_box),
                 width="100%",
                 height="100%",
                 scroll_y=True,

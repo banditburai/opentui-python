@@ -47,6 +47,9 @@ PLAN.md
 progress.md
 buffer_dump/
 
+# Benchmark baselines (machine-specific)
+benchmarks/baselines/
+
 # Issue tracking
 .beads/
 

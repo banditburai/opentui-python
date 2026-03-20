@@ -10,7 +10,7 @@ from opentui.image import DecodedImage, ImageSource
 
 def test_image_cache_reuses_decoded_asset():
     """Decoded images should be cached by source identity."""
-    from opentui.image_cache import ImageCache
+    from opentui.native import ImageCache
 
     cache = ImageCache()
     source = ImageSource.from_value("logo.png", mime_type="image/png")
@@ -31,7 +31,7 @@ def test_image_cache_reuses_decoded_asset():
 
 def test_image_cache_reuses_resized_variant():
     """Resized variants should be cached by dimensions."""
-    from opentui.image_cache import ImageCache
+    from opentui.native import ImageCache
 
     cache = ImageCache()
     decoded = DecodedImage(data=bytes([255, 0, 0, 255] * 4), width=2, height=2)
@@ -50,7 +50,7 @@ def test_image_cache_reuses_resized_variant():
 
 def test_image_cache_invalidates_on_clear():
     """Clearing the cache should drop decoded and resized entries."""
-    from opentui.image_cache import ImageCache
+    from opentui.native import ImageCache
 
     cache = ImageCache()
     source = ImageSource.from_value("logo.png")

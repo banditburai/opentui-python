@@ -38,20 +38,18 @@ class ScrollBar(Renderable):
         position_fn: Callable[[], int] | None = None,
         on_scroll: Callable[[int], None] | None = None,
         auto_hide: bool = True,
-        # Arrow characters
         arrow_up: str = "▲",
         arrow_down: str = "▼",
         arrow_left: str = "◀",
         arrow_right: str = "▶",
-        # Track characters
         track_char: str = "░",
         slider_char: str = "█",
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
         self._orientation = orientation
-        self._total_items = total_items
-        self._visible_items = visible_items
+        self._set_or_bind("_total_items", total_items)
+        self._set_or_bind("_visible_items", visible_items)
         self._position = position
         self._position_fn = position_fn
         self._on_scroll = on_scroll
@@ -81,7 +79,7 @@ class ScrollBar(Renderable):
     @total_items.setter
     def total_items(self, value: int) -> None:
         self._total_items = value
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     @property
     def visible_items(self) -> int:
@@ -90,7 +88,7 @@ class ScrollBar(Renderable):
     @visible_items.setter
     def visible_items(self, value: int) -> None:
         self._visible_items = value
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     @property
     def position(self) -> int:
@@ -100,46 +98,34 @@ class ScrollBar(Renderable):
     def position(self, value: int) -> None:
         max_pos = max(0, self._total_items - self._visible_items)
         self._position = max(0, min(value, max_pos))
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     @property
     def should_show(self) -> bool:
-        """Whether the scrollbar should be visible (content exceeds viewport)."""
         return self._total_items > self._visible_items
 
     def scroll_to(self, position: int) -> None:
-        """Scroll to a specific position."""
         old_pos = self._position
         self.position = position
         if self._position != old_pos and self._on_scroll:
             self._on_scroll(self._position)
 
     def scroll_by(self, delta: int) -> None:
-        """Scroll by a relative amount."""
         self.scroll_to(self._position + delta)
 
     def scroll_page_up(self) -> None:
-        """Scroll up by one page."""
         self.scroll_by(-self._visible_items)
 
     def scroll_page_down(self) -> None:
-        """Scroll down by one page."""
         self.scroll_by(self._visible_items)
 
     def scroll_to_start(self) -> None:
-        """Scroll to the beginning."""
         self.scroll_to(0)
 
     def scroll_to_end(self) -> None:
-        """Scroll to the end."""
         self.scroll_to(self._total_items - self._visible_items)
 
     def _get_slider_info(self, track_length: int) -> tuple[int, int]:
-        """Calculate slider position and size within the track.
-
-        Returns:
-            (slider_start, slider_size) in track units
-        """
         if self._total_items <= 0 or self._total_items <= self._visible_items:
             return 0, track_length
 
@@ -195,7 +181,6 @@ class ScrollBar(Renderable):
         return round(clamped_start * max_pos / available_track)
 
     def _handle_mouse_down(self, event: MouseEvent) -> None:
-        """Handle mouse presses on arrows, track, and slider thumb."""
         if event.button != MouseButton.LEFT:
             return
         if not self.contains_point(event.x, event.y):
@@ -242,7 +227,6 @@ class ScrollBar(Renderable):
         event.stop_propagation()
 
     def _handle_mouse_drag(self, event: MouseEvent) -> None:
-        """Drag the scrollbar thumb while the left mouse button is held."""
         if not self._dragging_slider or not event.is_dragging:
             return
         if self._auto_hide and not self.should_show:
@@ -267,7 +251,6 @@ class ScrollBar(Renderable):
         event.stop_propagation()
 
     def _handle_mouse_up(self, event: MouseEvent) -> None:
-        """End any active scrollbar drag."""
         if self._dragging_slider:
             self._dragging_slider = False
             event.stop_propagation()
@@ -334,26 +317,27 @@ class ScrollBar(Renderable):
             if key in ("up", "k"):
                 self.scroll_by(-1)
                 return True
-            elif key in ("down", "j"):
+            if key in ("down", "j"):
                 self.scroll_by(1)
                 return True
-        elif key in ("left", "h"):
-            self.scroll_by(-1)
-            return True
-        elif key in ("right", "l"):
-            self.scroll_by(1)
-            return True
+        else:
+            if key in ("left", "h"):
+                self.scroll_by(-1)
+                return True
+            if key in ("right", "l"):
+                self.scroll_by(1)
+                return True
 
         if key == "pageup":
             self.scroll_page_up()
             return True
-        elif key == "pagedown":
+        if key == "pagedown":
             self.scroll_page_down()
             return True
-        elif key == "home":
+        if key == "home":
             self.scroll_to_start()
             return True
-        elif key == "end":
+        if key == "end":
             self.scroll_to_end()
             return True
 

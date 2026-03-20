@@ -6,10 +6,16 @@ Tests ported: 19/19 (0 skipped)
 
 import pytest
 
+from opentui import reactive, template_component
 from opentui import test_render as _test_render
-from opentui.components.box import Box, ScrollBox
+from opentui.components.box import Box, ScrollBox, ScrollContent
 from opentui.components.text import Span, Text
 from opentui.signals import Signal
+
+
+async def _strict_render(component_fn, options):
+    merged = dict(options)
+    return await _test_render(component_fn, merged)
 
 
 class TestLayoutBasicTextRendering:
@@ -241,21 +247,20 @@ class TestLayoutReactiveUpdates:
     async def test_should_handle_reactive_state_changes(self):
         """Maps to it("should handle reactive state changes")."""
 
-        counter = Signal("counter", 0)
-        setup = await _test_render(
-            lambda: Text(f"Counter: {counter()}"),
+        counter = Signal(0, name="counter")
+
+        @template_component
+        def CounterText():
+            return Text(reactive(lambda: f"Counter: {counter()}"), id="counter")
+
+        setup = await _strict_render(
+            CounterText,
             {"width": 15, "height": 3},
         )
         initial_frame = setup.capture_char_frame()
         assert "Counter: 0" in initial_frame
 
         counter.set(5)
-        # Re-render by rebuilding the component tree
-        root = setup.renderer.root
-        root._children.clear()
-        root._yoga_node.remove_all_children()
-        component = Text(f"Counter: {counter()}")
-        root.add(component)
         updated_frame = setup.capture_char_frame()
         assert "Counter: 5" in updated_frame
         assert initial_frame != updated_frame
@@ -264,12 +269,18 @@ class TestLayoutReactiveUpdates:
     async def test_should_handle_conditional_rendering(self):
         """Maps to it("should handle conditional rendering")."""
 
-        show_text = Signal("show", True)
-        setup = await _test_render(
-            lambda: Text(
-                "Always visible" + (" - Conditional text" if show_text() else ""),
+        show_text = Signal(True, name="show")
+
+        @template_component
+        def ConditionalText():
+            return Text(
+                reactive(lambda: "Always visible" + (" - Conditional text" if show_text() else "")),
+                id="conditional_text",
                 wrap_mode="none",
-            ),
+            )
+
+        setup = await _strict_render(
+            ConditionalText,
             {"width": 40, "height": 3},
         )
         visible_frame = setup.capture_char_frame()
@@ -277,14 +288,6 @@ class TestLayoutReactiveUpdates:
         assert "Conditional text" in visible_frame
 
         show_text.set(False)
-        root = setup.renderer.root
-        root._children.clear()
-        root._yoga_node.remove_all_children()
-        component = Text(
-            "Always visible" + (" - Conditional text" if show_text() else ""),
-            wrap_mode="none",
-        )
-        root.add(component)
         hidden_frame = setup.capture_char_frame()
         assert "Always visible" in hidden_frame
         assert "Conditional text" not in hidden_frame
@@ -365,11 +368,13 @@ class TestLayoutComplexLayouts:
         setup = await _test_render(
             lambda: Box(
                 ScrollBox(
-                    Box(border=True, height=10, title="hi"),
+                    content=ScrollContent(
+                        Box(border=True, height=10, title="hi"),
+                        padding_top=1,
+                        padding_bottom=1,
+                    ),
                     sticky_scroll=True,
                     sticky_start="bottom",
-                    padding_top=1,
-                    padding_bottom=1,
                     title="scroll area",
                     flex_grow=0,
                     border=True,

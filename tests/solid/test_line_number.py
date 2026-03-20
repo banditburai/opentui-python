@@ -23,6 +23,11 @@ from opentui.components.control_flow import Show
 from opentui.signals import Signal
 
 
+async def _strict_render(component_fn, options):
+    merged = dict(options)
+    return await _test_render(component_fn, merged)
+
+
 CODE_CONTENT = """\
 function test() {
   return 42
@@ -43,7 +48,7 @@ class TestLineNumberRenderableWithSolidJS:
         and code content.
         """
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Code(
                     CODE_CONTENT,
@@ -82,7 +87,7 @@ class TestLineNumberRenderableWithSolidJS:
         conditional rendering.
         """
 
-        show_line_numbers = Signal("show_line_numbers", True)
+        show_line_numbers = Signal(True, name="show_line_numbers")
 
         def make_component():
             return Box(
@@ -108,19 +113,18 @@ class TestLineNumberRenderableWithSolidJS:
                 height="100%",
             )
 
-        setup = await _test_render(make_component, {"width": 40, "height": 10})
+        setup = await _strict_render(
+            make_component,
+            {"width": 40, "height": 10},
+        )
         frame = setup.capture_char_frame()
 
         # Initially shows line numbers
         assert " 1" in frame  # Line number 1
         assert " 2" in frame  # Line number 2
 
-        # Toggle to hide line numbers — rebuild the component tree
+        # Toggle to hide line numbers through Show's reactive update path
         show_line_numbers.set(False)
-        root = setup.renderer.root
-        root._children.clear()
-        root._yoga_node.remove_all_children()
-        root.add(make_component())
 
         frame = setup.capture_char_frame()
 

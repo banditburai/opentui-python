@@ -16,23 +16,15 @@ dynamic siblings), so all tests use scrollbox with 2+ sibling expressions.
 """
 
 from opentui import test_render as _test_render
-from opentui.components.box import Box, ScrollBox
+from opentui.components.box import Box, ScrollBox, ScrollContent
 from opentui.components.control_flow import For, Show
 from opentui.components.text import Text
 from opentui.signals import Signal
 
 
-def _rebuild(setup, build_fn):
-    """Rebuild the component tree from a factory function.
-
-    Clears the root's children and yoga nodes, then adds the new component.
-    This is the Python equivalent of SolidJS reactive re-rendering.
-    """
-    root = setup.renderer.root
-    root._children.clear()
-    root._yoga_node.remove_all_children()
-    component = build_fn()
-    root.add(component)
+def _strict_render(component_fn, options=None):
+    options = dict(options or {})
+    return _test_render(component_fn, options)
 
 
 def _make_box_with_id(box_id: str, **kwargs) -> Box:
@@ -44,7 +36,7 @@ def _make_box_with_id(box_id: str, **kwargs) -> Box:
 
 def _make_scrollbox_with_id(scroll_id: str, *children, **kwargs) -> ScrollBox:
     """Create a ScrollBox and set its id explicitly."""
-    sb = ScrollBox(*children, **kwargs)
+    sb = ScrollBox(content=ScrollContent(*children), **kwargs)
     sb.id = scroll_id
     return sb
 
@@ -89,8 +81,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
         """two <For> lists in scrollbox"""
 
         async def test_clear_first_list_keep_second(self):
-            headers = Signal("headers", ["h1", "h2"])
-            items = Signal("items", ["a", "b", "c"])
+            headers = Signal(["h1", "h2"], name="headers")
+            items = Signal(["a", "b", "c"], name="items")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -110,7 +102,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -120,7 +112,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Clear first list
             headers.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -130,8 +121,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             setup.destroy()
 
         async def test_clear_second_list_keep_first(self):
-            headers = Signal("headers", ["h1", "h2"])
-            items = Signal("items", ["a", "b", "c"])
+            headers = Signal(["h1", "h2"], name="headers")
+            items = Signal(["a", "b", "c"], name="items")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -151,7 +142,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -161,7 +152,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Clear second list
             items.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -171,8 +161,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             setup.destroy()
 
         async def test_clear_both_lists_simultaneously(self):
-            headers = Signal("headers", ["h1", "h2"])
-            items = Signal("items", ["a", "b", "c"])
+            headers = Signal(["h1", "h2"], name="headers")
+            items = Signal(["a", "b", "c"], name="items")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -192,7 +182,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -201,7 +191,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             # Clear both simultaneously
             headers.set([])
             items.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -211,8 +200,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             setup.destroy()
 
         async def test_clear_both_then_repopulate_both(self):
-            headers = Signal("headers", ["h1", "h2"])
-            items = Signal("items", ["a", "b"])
+            headers = Signal(["h1", "h2"], name="headers")
+            items = Signal(["a", "b"], name="items")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -232,7 +221,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -241,7 +230,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             # Clear both
             headers.set([])
             items.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -251,7 +239,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             # Repopulate both
             headers.set(["x1"])
             items.set(["y1", "y2", "y3"])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -270,9 +257,9 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
         """three <For> lists in scrollbox"""
 
         async def test_clear_middle_list_keep_outer_lists(self):
-            a_list = Signal("a_list", ["a1", "a2"])
-            b_list = Signal("b_list", ["b1", "b2", "b3"])
-            c_list = Signal("c_list", ["c1"])
+            a_list = Signal(["a1", "a2"], name="a_list")
+            b_list = Signal(["b1", "b2", "b3"], name="b_list")
+            c_list = Signal(["c1"], name="c_list")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -298,7 +285,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -306,7 +293,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Clear middle list
             b_list.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -324,8 +310,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
         """
 
         async def test_reconcile_both_to_empty(self):
-            headers = Signal("headers", [{"id": "h1"}, {"id": "h2"}])
-            items = Signal("items", [{"id": "i1"}, {"id": "i2"}, {"id": "i3"}])
+            headers = Signal([{"id": "h1"}, {"id": "h2"}], name="headers")
+            items = Signal([{"id": "i1"}, {"id": "i2"}, {"id": "i3"}], name="items")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -345,7 +331,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -356,7 +342,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             # Reconcile both to empty
             headers.set([])
             items.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -366,8 +351,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             setup.destroy()
 
         async def test_reconcile_to_completely_new_data(self):
-            headers = Signal("headers", [{"id": "h1"}])
-            items = Signal("items", [{"id": "i1"}, {"id": "i2"}])
+            headers = Signal([{"id": "h1"}], name="headers")
+            items = Signal([{"id": "i1"}, {"id": "i2"}], name="items")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -387,7 +372,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -396,7 +381,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             # Reconcile to completely new data
             headers.set([{"id": "h10"}, {"id": "h11"}])
             items.set([{"id": "i10"}])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -419,8 +403,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
         """
 
         async def test_clear_second_list_with_continuous_renderer(self):
-            headers = Signal("headers", ["h1"])
-            items = Signal("items", [])
+            headers = Signal(["h1"], name="headers")
+            items = Signal([], name="items")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -440,12 +424,11 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             # Add items
             items.set(["a", "b", "c"])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -455,7 +438,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Clear items
             items.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -471,8 +453,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             accumulating into a list and setting the signal after each push.
             """
 
-            tags = Signal("tags", [{"id": "t1"}])
-            rows = Signal("rows", [])
+            tags = Signal([{"id": "t1"}], name="tags")
+            rows = Signal([], name="rows")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -492,7 +474,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             # Incrementally push rows (simulating produce)
@@ -500,7 +482,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             for i in range(1, 5):
                 current_rows = current_rows + [{"id": f"r{i}"}]
                 rows.set(current_rows)
-                _rebuild(setup, build)
                 setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -510,7 +491,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Clear via reconcile (set to empty)
             rows.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -522,8 +502,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
         async def test_multiple_clear_repopulate_cycles(self):
             """Port of upstream 'multiple clear-repopulate cycles'."""
 
-            sys_items = Signal("sys", [{"id": "s0"}])
-            data_items = Signal("data", [])
+            sys_items = Signal([{"id": "s0"}], name="sys")
+            data_items = Signal([], name="data")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -543,7 +523,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             for cycle in range(1, 4):
@@ -552,7 +532,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 for i in range(1, 4):
                     current_data = current_data + [{"id": f"d{cycle}-{i}"}]
                     data_items.set(current_data)
-                    _rebuild(setup, build)
                     setup.render_frame()
 
                 scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -561,7 +540,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
                 # Clear via reconcile
                 data_items.set([])
-                _rebuild(setup, build)
                 setup.render_frame()
 
                 scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -576,22 +554,11 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
         async def test_for_show_with_for_clear_inner_list(self):
             """<For> + <Show> with <For>: clear inner list."""
 
-            headers = Signal("headers", ["h1", "h2"])
-            show_items = Signal("show_items", True)
-            items = Signal("items", ["a", "b"])
+            headers = Signal(["h1", "h2"], name="headers")
+            show_items = Signal(True, name="show_items")
+            items = Signal(["a", "b"], name="items")
 
             def build():
-                show_children = []
-                if show_items():
-                    show_children.append(
-                        For(
-                            each=items,
-                            render=lambda item: _make_box_with_id(f"i-{item}"),
-                            key_fn=lambda item: f"i-{item}",
-                            key="for-items",
-                        )
-                    )
-
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
@@ -600,11 +567,20 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                         key_fn=lambda h: f"h-{h}",
                         key="for-headers",
                     ),
-                    *show_children,
+                    Show(
+                        when=lambda: show_items(),
+                        render=lambda: For(
+                            each=items,
+                            render=lambda item: _make_box_with_id(f"i-{item}"),
+                            key_fn=lambda item: f"i-{item}",
+                            key="for-items",
+                        ),
+                        key="show-items",
+                    ),
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -614,7 +590,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Hide items (Show false)
             show_items.set(False)
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -623,7 +598,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Show items again
             show_items.set(True)
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -635,38 +609,37 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
         async def test_show_toggling_between_two_for_lists(self):
             """<Show> toggling between two <For> lists."""
 
-            mode = Signal("mode", "a")
+            mode = Signal("a", name="mode")
             list_a = ["a1", "a2", "a3"]
             list_b = ["b1", "b2"]
 
             def build():
-                children = []
-                if mode() == "a":
-                    children.append(
-                        For(
+                return _make_scrollbox_with_id(
+                    "scroll",
+                    Show(
+                        when=lambda: mode() == "a",
+                        render=lambda: For(
                             each=list_a,
                             render=lambda item: _make_box_with_id(f"a-{item}"),
                             key_fn=lambda item: f"a-{item}",
                             key="for-a",
-                        )
-                    )
-                if mode() == "b":
-                    children.append(
-                        For(
+                        ),
+                        key="show-a",
+                    ),
+                    Show(
+                        when=lambda: mode() == "b",
+                        render=lambda: For(
                             each=list_b,
                             render=lambda item: _make_box_with_id(f"b-{item}"),
                             key_fn=lambda item: f"b-{item}",
                             key="for-b",
-                        )
-                    )
-
-                return _make_scrollbox_with_id(
-                    "scroll",
-                    *children,
+                        ),
+                        key="show-b",
+                    ),
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -676,7 +649,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Switch to mode b
             mode.set("b")
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -685,7 +657,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Switch back to mode a
             mode.set("a")
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -698,7 +669,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
         """static children + <For> in scrollbox"""
 
         async def test_static_before_for_clear_list_keeps_static(self):
-            items = Signal("items", ["a", "b"])
+            items = Signal(["a", "b"], name="items")
 
             def build():
                 header = _make_box_with_id("static-header")
@@ -715,7 +686,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -725,7 +696,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Clear list
             items.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -734,7 +704,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Repopulate
             items.set(["x", "y", "z"])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -744,8 +713,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             setup.destroy()
 
         async def test_static_between_two_for_clear_both_keeps_divider(self):
-            top_items = Signal("top_items", ["t1", "t2"])
-            bottom_items = Signal("bottom_items", ["b1", "b2"])
+            top_items = Signal(["t1", "t2"], name="top_items")
+            bottom_items = Signal(["b1", "b2"], name="bottom_items")
 
             def build():
                 divider = _make_box_with_id("divider")
@@ -768,7 +737,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -776,7 +745,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Clear top list
             top_items.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -786,7 +754,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Clear bottom list too
             bottom_items.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -796,7 +763,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
             setup.destroy()
 
         async def test_static_after_for_clear_list_keeps_footer(self):
-            items = Signal("items", ["a", "b"])
+            items = Signal(["a", "b"], name="items")
 
             def build():
                 footer = _make_box_with_id("static-footer")
@@ -813,7 +780,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -821,7 +788,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Clear list
             items.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -840,8 +806,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
         async def test_clear_index_keep_for(self):
             # Index-like: keyed by index position
-            index_items = Signal("index_items", ["x", "y"])
-            for_items = Signal("for_items", ["a", "b"])
+            index_items = Signal(["x", "y"], name="index_items")
+            for_items = Signal(["a", "b"], name="for_items")
 
             def build():
                 return _make_scrollbox_with_id(
@@ -862,7 +828,7 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     flex_grow=1,
                 )
 
-            setup = await _test_render(build, {"width": 40, "height": 20})
+            setup = await _strict_render(build, {"width": 40, "height": 20})
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")
@@ -872,7 +838,6 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
 
             # Clear index items
             index_items.set([])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scrollbox = setup.renderer.root.find_descendant_by_id("scroll")

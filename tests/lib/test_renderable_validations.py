@@ -30,12 +30,12 @@ class TestUtilityFunctions:
         # Valid options - should not raise
         validate_options("test", {"width": 100, "height": 100})
 
-        # Negative width - should raise TypeError
-        with pytest.raises(TypeError):
+        # Negative width - should raise ValueError
+        with pytest.raises(ValueError):
             validate_options("test", {"width": -100, "height": 100})
 
-        # Negative height - should raise TypeError
-        with pytest.raises(TypeError):
+        # Negative height - should raise ValueError
+        with pytest.raises(ValueError):
             validate_options("test", {"width": 100, "height": -100})
 
     def test_is_valid_percentage(self):

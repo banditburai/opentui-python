@@ -6,10 +6,11 @@ destruction ordering, ref callback, _host, and display=none marker.
 
 import pytest
 
+from opentui import create_test_renderer
 from opentui.components.base import BaseRenderable, Renderable
 from opentui.components.box import Box
 from opentui.components.text import Text
-from opentui.components.control_flow import Portal, Show
+from opentui.components.control_flow import Match, Portal, Show, Switch
 from opentui.hooks import set_renderer
 from opentui.reconciler import reconcile, _init_nested_fors
 from opentui.renderer import CliRenderer, CliRendererConfig, RootRenderable
@@ -48,7 +49,9 @@ class TestPortalUnit:
         root.add(parent)
 
         # Configure triggers _ensure_container and sets display=none
+        portal._pre_configure_yoga()
         portal._configure_yoga_node(portal._yoga_node)
+        portal._post_configure_yoga(portal._yoga_node)
 
         # Portal's own _children should be empty (marker only)
         assert len(portal._children) == 0
@@ -217,7 +220,9 @@ class TestPortalMounting:
             key="portal",
         )
         wrapper.add(portal)
+        portal._pre_configure_yoga()
         portal._configure_yoga_node(portal._yoga_node)
+        portal._post_configure_yoga(portal._yoga_node)
 
         # Portal marker is in wrapper (but invisible)
         assert portal in wrapper._children
@@ -246,7 +251,9 @@ class TestPortalMounting:
             key="portal",
         )
         main.add(portal)
+        portal._pre_configure_yoga()
         portal._configure_yoga_node(portal._yoga_node)
+        portal._post_configure_yoga(portal._yoga_node)
 
         # Content appears in sidebar, not main
         assert portal._container in sidebar._children
@@ -308,6 +315,65 @@ class TestPortalMounting:
         assert container not in root._children
         assert container._destroyed
 
+    def test_show_toggle_reactively_removes_and_recreates_portal_container(self):
+        """Show should tear down portal containers on false and recreate on true."""
+        root = _make_root()
+        visible = Signal(True, name="visible")
+
+        show = Show(
+            when=lambda: visible(),
+            render=lambda: Portal(
+                Text("Modal", key="modal-text"),
+                mount=root,
+                key="portal",
+            ),
+            key="show",
+        )
+        root.add(show)
+        show._configure_yoga_properties()
+
+        assert any(getattr(child, "key", None) == "portal-container-portal" for child in root._children)
+
+        visible.set(False)
+
+        assert show._children == []
+        assert not any(getattr(child, "key", None) == "portal-container-portal" for child in root._children)
+
+        visible.set(True)
+        show._configure_yoga_properties()
+
+        containers = [child for child in root._children if getattr(child, "key", None) == "portal-container-portal"]
+        assert len(containers) == 1
+        assert containers[0]._children[0].key == "modal-text"
+
+    def test_switch_toggle_reactively_removes_portal_branch(self):
+        """Switch should destroy portal branches instead of leaving orphaned containers."""
+        root = _make_root()
+        mode = Signal("portal", name="mode")
+
+        switch = Switch(
+            Match(
+                when=lambda: mode() == "portal",
+                render=lambda: Portal(
+                    Text("Modal", key="modal-text"),
+                    mount=root,
+                    key="portal",
+                ),
+            ),
+            fallback=lambda: Text("Inline", key="inline"),
+            key="switch",
+        )
+        root.add(switch)
+        switch._configure_yoga_properties()
+
+        assert any(getattr(child, "key", None) == "portal-container-portal" for child in root._children)
+
+        mode.set("inline")
+
+        assert len(switch._children) == 1
+        assert switch._children[0].key == "inline"
+        assert not any(getattr(child, "key", None) == "portal-container-portal" for child in root._children)
+
     def test_multiple_portals(self):
         """Two Portals coexist at the same mount point.
 
@@ -346,7 +412,7 @@ class TestPortalMounting:
         of Dynamic since Python has no Dynamic component.
         """
         root = _make_root()
-        condition = Signal("cond", True)
+        condition = Signal(True, name="cond")
 
         def make_portal():
             return Portal(
@@ -508,3 +574,74 @@ class TestPortalMounting:
         # Direct box is now the child
         assert parent._children[0] is direct
         assert parent._children[0].key == "content"
+
+
+@pytest.mark.asyncio
+async def test_clean_portal_overlay_reuses_current_buffer():
+    """A clean portal overlay should still qualify for current-buffer replay."""
+    setup = await create_test_renderer(60, 20)
+    root = setup.renderer.root
+
+    page = Box(width=60, height=20, flex_direction="column")
+    for i in range(8):
+        row = Box(height=1, flex_direction="row")
+        row.add(Text(f"row {i}", width=12))
+        row.add(Text("page content", flex_grow=1))
+        page.add(row)
+
+    modal = Box(width=24, height=8, left=18, top=4, border=True, background_color="#112233")
+    modal.add(Text("Portal modal", width=18, left=2))
+    page.add(Portal(modal, mount=root, key="modal"))
+    root.add(page)
+
+    try:
+        setup.render_frame()
+        setup.render_frame()
+
+        assert setup.renderer._can_reuse_current_buffer_frame()
+        assert setup.renderer.last_frame_timings.render_tree_ns < 10_000
+    finally:
+        setup.destroy()
+
+
+@pytest.mark.asyncio
+async def test_portal_overlay_remove_reuses_current_buffer(monkeypatch):
+    """Portal removal should replay the current buffer instead of full clearing."""
+    setup = await create_test_renderer(30, 8)
+    try:
+        root = setup.renderer.root
+        page = Box(width=30, height=8, flex_direction="column")
+        page.add(Text("background", width=10))
+
+        overlay = Box(width=10, height=3, left=5, top=2, border=True)
+        overlay.add(Text("modal", width=5))
+        portal = Portal(overlay, mount=root, key="modal")
+        page.add(portal)
+        root.add(page)
+        setup.render_frame()
+
+        calls = {"copy": 0, "clear": 0}
+        native_buffer = setup.renderer._native.buffer
+        original_draw_frame_buffer = native_buffer.draw_frame_buffer
+        original_clear = native_buffer.buffer_clear
+
+        def counting_draw_frame_buffer(*args, **kwargs):
+            calls["copy"] += 1
+            return original_draw_frame_buffer(*args, **kwargs)
+
+        def counting_clear(*args, **kwargs):
+            calls["clear"] += 1
+            return original_clear(*args, **kwargs)
+
+        monkeypatch.setattr(native_buffer, "draw_frame_buffer", counting_draw_frame_buffer)
+        monkeypatch.setattr(native_buffer, "buffer_clear", counting_clear)
+
+        page.remove(portal)
+        portal.destroy()
+        setup.render_frame()
+
+        assert calls["copy"] == 1
+        assert calls["clear"] == 0
+        assert "modal" not in setup.get_buffer().get_plain_text()
+    finally:
+        setup.destroy()

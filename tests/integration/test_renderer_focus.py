@@ -14,7 +14,9 @@ import pytest
 
 from opentui import create_test_renderer
 from opentui.components.box import Box, ScrollBox
+from opentui.components.control_flow import Portal, Show
 from opentui.events import MouseButton, MouseEvent
+from opentui.signals import Signal
 
 
 def _render_and_layout(setup):
@@ -376,5 +378,72 @@ class TestRendererFocus:
 
             assert first.focused is True
             assert second.focused is False
+        finally:
+            setup.destroy()
+
+    async def test_portal_overlay_focuses_overlay_and_unmounts_cleanly_when_hidden(self):
+        """Portal overlay should win focus while visible and release it when hidden."""
+        setup = await create_test_renderer(50, 30)
+        try:
+            visible = Signal(True, name="visible")
+
+            background = Box(
+                width=12,
+                height=6,
+                focusable=True,
+                position="absolute",
+                left=1,
+                top=1,
+            )
+            setup.renderer.root.add(background)
+
+            overlay_show = Show(
+                when=lambda: visible(),
+                render=lambda: Portal(
+                    Box(
+                        width=12,
+                        height=6,
+                        focusable=True,
+                        position="absolute",
+                        left=1,
+                        top=1,
+                    ),
+                    key="portal",
+                ),
+                key="overlay-show",
+            )
+            setup.renderer.root.add(overlay_show)
+            _render_and_layout(setup)
+
+            click_event = MouseEvent(type="down", x=background.x + 1, y=background.y + 1, button=MouseButton.LEFT)
+            setup.renderer._dispatch_mouse_event(click_event)
+
+            portal_container = next(
+                child
+                for child in setup.renderer.root._children
+                if getattr(child, "key", None) == "portal-container-portal"
+            )
+            overlay = portal_container._children[0]
+
+            assert overlay.focused is True
+            assert background.focused is False
+
+            visible.set(False)
+            _render_and_layout(setup)
+
+            assert not any(
+                getattr(child, "key", None) == "portal-container-portal"
+                for child in setup.renderer.root._children
+            )
+
+            background_click = MouseEvent(
+                type="down",
+                x=background.x + 1,
+                y=background.y + 1,
+                button=MouseButton.LEFT,
+            )
+            setup.renderer._dispatch_mouse_event(background_click)
+
+            assert background.focused is True
         finally:
             setup.destroy()

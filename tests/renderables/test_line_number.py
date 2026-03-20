@@ -15,10 +15,94 @@ from opentui import (
     create_test_renderer,
 )
 from opentui.components.box import Box
+from opentui.components.line_number_renderable import GutterRenderable
 
 
 class TestLineNumberRenderable:
     """Maps to describe("LineNumberRenderable")."""
+
+    async def test_reuses_gutter_raster_cache_when_clean(self):
+        setup = await create_test_renderer(20, 10)
+        try:
+            class _CountingGutter(GutterRenderable):
+                __slots__ = ("draw_calls",)
+
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self.draw_calls = 0
+
+                def _draw_line_number(self, *args, **kwargs):
+                    self.draw_calls += 1
+                    return super()._draw_line_number(*args, **kwargs)
+
+            class _CountingLineNumberRenderable(LineNumberRenderable):
+                __slots__ = ()
+
+                def _set_target(self, target):
+                    if self._target is target:
+                        return
+
+                    if self._target is not None:
+                        if hasattr(self._target, "off"):
+                            self._target.off("line-info-change", self._handle_line_info_change)
+                        super(LineNumberRenderable, self).remove(self._target)
+
+                    if self._gutter is not None:
+                        super(LineNumberRenderable, self).remove(self._gutter)
+                        self._gutter = None
+
+                    self._target = target
+
+                    if self._target._yoga_node is not None:
+                        self._target._yoga_node.flex_grow = 1
+                        self._target._yoga_node.flex_shrink = 1
+
+                    if hasattr(self._target, "on"):
+                        self._target.on("line-info-change", self._handle_line_info_change)
+
+                    self._gutter = _CountingGutter(
+                        self._target,
+                        fg=self._ln_fg,
+                        bg=self._ln_bg,
+                        min_width=self._ln_min_width,
+                        padding_right=self._ln_padding_right,
+                        line_colors_gutter=self._line_colors_gutter,
+                        line_colors_content=self._line_colors_content,
+                        line_signs=self._line_signs,
+                        line_number_offset=self._ln_line_number_offset,
+                        hide_line_numbers=self._ln_hide_line_numbers,
+                        line_numbers=self._ln_line_numbers,
+                        id=f"{self._id}-gutter" if self._id else None,
+                    )
+
+                    super(LineNumberRenderable, self).add(self._gutter)
+                    super(LineNumberRenderable, self).add(self._target)
+
+            text_r = TextRenderable(content="Line 1\nLine 2\nLine 3", width="100%", height="100%")
+            ln = _CountingLineNumberRenderable(
+                target=text_r,
+                min_width=3,
+                padding_right=1,
+                fg="white",
+                width="100%",
+                height="100%",
+            )
+            setup.renderer.root.add(ln)
+            gutter = ln.gutter
+            assert gutter is not None
+
+            setup.render_frame()
+            assert gutter.draw_calls > 0
+            first_calls = gutter.draw_calls
+
+            setup.render_frame()
+            assert gutter.draw_calls == first_calls
+
+            gutter.set_line_number_offset(10)
+            setup.render_frame()
+            assert gutter.draw_calls > first_calls
+        finally:
+            setup.destroy()
 
     async def test_renders_line_numbers_correctly(self):
         """Maps to test("renders line numbers correctly")."""

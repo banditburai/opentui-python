@@ -1,9 +1,4 @@
-"""SliderRenderable - a scrollbar-like slider with sub-cell precision.
-
-Slider component for numeric value selection.
-Provides a draggable thumb on a track with virtual (half-cell) coordinate
-system for smooth rendering.
-"""
+"""SliderRenderable - a scrollbar-like slider with sub-cell precision."""
 
 from __future__ import annotations
 
@@ -102,8 +97,6 @@ class SliderRenderable(Renderable):
         self.on_mouse_drag = self._handle_mouse_drag
         self.on_mouse_up = self._handle_mouse_up
 
-    # -- Public properties ---------------------------------------------------
-
     @property
     def orientation(self) -> str:
         return self._orientation
@@ -120,7 +113,7 @@ class SliderRenderable(Renderable):
             if self._on_change_cb is not None:
                 self._on_change_cb(clamped)
             self.emit("change", value=clamped)
-            self.request_render()
+            self.mark_paint_dirty()
 
     @property
     def min(self) -> float:
@@ -132,7 +125,7 @@ class SliderRenderable(Renderable):
             self._slider_min = new_min
             if self._slider_value < new_min:
                 self.value = new_min
-            self.request_render()
+            self.mark_paint_dirty()
 
     @property
     def max(self) -> float:
@@ -144,7 +137,7 @@ class SliderRenderable(Renderable):
             self._slider_max = new_max
             if self._slider_value > new_max:
                 self.value = new_max
-            self.request_render()
+            self.mark_paint_dirty()
 
     @property
     def viewport_size(self) -> float:
@@ -155,9 +148,7 @@ class SliderRenderable(Renderable):
         clamped = _max(0.01, _min(size, self._slider_max - self._slider_min))
         if clamped != self._viewport_size:
             self._viewport_size = clamped
-            self.request_render()
-
-    # -- Internal: effective dimensions ------------------------------------
+            self.mark_paint_dirty()
 
     def _effective_width(self) -> int:
         if self._layout_width and self._layout_width > 0:
@@ -172,8 +163,6 @@ class SliderRenderable(Renderable):
         if isinstance(self._height, int) and self._height > 0:
             return self._height
         return 0
-
-    # -- Virtual coordinate helpers ----------------------------------------
 
     def get_virtual_thumb_size(self) -> int:
         w = self._effective_width()
@@ -210,7 +199,6 @@ class SliderRenderable(Renderable):
         return _js_round(value_ratio * (virtual_track - vts))
 
     def _get_thumb_rect(self) -> dict:
-        """Calculate real-cell bounding box of the thumb."""
         vts = self.get_virtual_thumb_size()
         vt_start = self.get_virtual_thumb_start()
 
@@ -224,18 +212,14 @@ class SliderRenderable(Renderable):
                 "width": self._effective_width(),
                 "height": _max(1, real_size),
             }
-        else:
-            return {
-                "x": self._x + real_start,
-                "y": self._y,
-                "width": _max(1, real_size),
-                "height": self._effective_height(),
-            }
-
-    # -- Mouse handling ----------------------------------------------------
+        return {
+            "x": self._x + real_start,
+            "y": self._y,
+            "width": _max(1, real_size),
+            "height": self._effective_height(),
+        }
 
     def _calculate_drag_offset_virtual(self, event: Any) -> float:
-        """Compute offset of mouse within the thumb in virtual coords."""
         w = self._effective_width()
         h = self._effective_height()
         track_start = self._y if self._orientation == "vertical" else self._x
@@ -258,13 +242,10 @@ class SliderRenderable(Renderable):
             and event.y < thumb["y"] + thumb["height"]
         )
 
-        if in_thumb:
-            self._is_dragging = True
-            self._drag_offset_virtual = self._calculate_drag_offset_virtual(event)
-        else:
+        if not in_thumb:
             self._update_value_from_mouse_direct(event)
-            self._is_dragging = True
-            self._drag_offset_virtual = self._calculate_drag_offset_virtual(event)
+        self._is_dragging = True
+        self._drag_offset_virtual = self._calculate_drag_offset_virtual(event)
 
     def _handle_mouse_drag(self, event: Any) -> None:
         if not self._is_dragging:
@@ -278,7 +259,6 @@ class SliderRenderable(Renderable):
         self._is_dragging = False
 
     def _update_value_from_mouse_direct(self, event: Any) -> None:
-        """Set value based on direct click position (no offset)."""
         w = self._effective_width()
         h = self._effective_height()
         track_start = self._y if self._orientation == "vertical" else self._x
@@ -313,15 +293,13 @@ class SliderRenderable(Renderable):
         rng = self._slider_max - self._slider_min
         self.value = self._slider_min + ratio * rng
 
-    # -- Rendering ---------------------------------------------------------
-
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         if not self._visible:
             return
         if self._orientation == "horizontal":
             self._render_horizontal(buffer)
-        else:
-            self._render_vertical(buffer)
+            return
+        self._render_vertical(buffer)
 
     def _render_horizontal(self, buffer: Buffer) -> None:
         w = self._effective_width()

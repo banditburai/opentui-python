@@ -896,7 +896,7 @@ class TestScrollboxHitgrid:
             assert hover_events == ["over:moving"]
 
             # Move the box down by 3 via top offset (simulates translateY animation)
-            moving._pos_top = 5  # move from top=2 to top=5
+            moving.pos_top = 5  # move from top=2 to top=5
             setup.render_frame()
 
             assert hovered_id == "under"
@@ -975,6 +975,50 @@ class TestScrollboxHitgrid:
 
             assert hovered_id == "back"
             assert hover_events == ["over:front", "out:front", "over:back"]
+        finally:
+            setup.destroy()
+
+    async def test_mouse_down_dispatch_uses_z_index_order(self):
+        """Mouse dispatch should follow the same front-to-back order as hit-testing."""
+        setup = await create_test_renderer(50, 30)
+        try:
+            clicks: list[str] = []
+
+            back = Box(
+                id="back",
+                position="absolute",
+                left=2,
+                top=2,
+                width=6,
+                height=2,
+                z_index=0,
+            )
+            back._on_mouse_down = lambda event: clicks.append("back")
+            setup.renderer.root.add(back)
+
+            front = Box(
+                id="front",
+                position="absolute",
+                left=2,
+                top=2,
+                width=6,
+                height=2,
+                z_index=1,
+            )
+            front._on_mouse_down = lambda event: clicks.append("front")
+            setup.renderer.root.add(front)
+
+            setup.render_frame()
+
+            setup.mock_mouse.click(front.x + 1, front.y + 1)
+            assert clicks == ["front"]
+
+            clicks.clear()
+            back.z_index = 2
+            setup.render_frame()
+
+            setup.mock_mouse.click(front.x + 1, front.y + 1)
+            assert clicks == ["back"]
         finally:
             setup.destroy()
 

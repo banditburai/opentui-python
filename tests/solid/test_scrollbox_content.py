@@ -6,24 +6,18 @@ Tests ported: 5/5 (0 skipped)
 
 import re
 
+from opentui import reactive, template_component
 from opentui import test_render as _test_render
 from opentui.components.advanced import Code
-from opentui.components.box import Box, ScrollBox
+from opentui.components.box import Box, ScrollBox, ScrollContent
+from opentui.components.control_flow import For
 from opentui.components.text import Text
 from opentui.signals import Signal
 
 
-def _rebuild(setup, component_fn):
-    """Rebuild the component tree from a factory function.
-
-    Clears the root's children and yoga nodes, then adds the new component.
-    This is the Python equivalent of SolidJS reactive re-rendering.
-    """
-    root = setup.renderer.root
-    root._children.clear()
-    root._yoga_node.remove_all_children()
-    component = component_fn()
-    root.add(component)
+async def _strict_render(component_fn, options):
+    merged = dict(options)
+    return await _test_render(component_fn, merged)
 
 
 def _find_scrollbox(renderable):
@@ -43,25 +37,37 @@ class TestScrollBoxContentVisibility:
     async def test_maintains_content_visibility_when_adding_many_items_and_scrolling(self):
         """Maps to it("maintains content visibility when adding many items and scrolling")."""
 
-        count = Signal("count", 0)
+        count = Signal(0, name="count")
 
+        @template_component
         def build():
-            messages = [f"Message {i + 1}" for i in range(count())]
             return Box(
-                Box(Text("Header Content"), flex_shrink=0),
+                Box(Text(reactive(lambda: "Header Content"), id="header"), flex_shrink=0),
                 ScrollBox(
-                    *[Box(Text(msg), margin_top=1, margin_bottom=1) for msg in messages],
+                    content=ScrollContent(
+                        For(
+                            each=lambda: [f"Message {i + 1}" for i in range(count())],
+                            render=lambda msg: Box(
+                                Text(msg),
+                                margin_top=1,
+                                margin_bottom=1,
+                                key=f"message-{msg}",
+                            ),
+                            key_fn=lambda msg: f"message-{msg}",
+                            key="messages",
+                        )
+                    ),
                     focused=True,
                     sticky_scroll=True,
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text("Footer Content"), flex_shrink=0),
+                Box(Text(reactive(lambda: "Footer Content"), id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = await _test_render(build, {"width": 40, "height": 20})
+        setup = await _strict_render(build, {"width": 40, "height": 20})
 
         # Initial render - no items
         setup.render_frame()
@@ -69,9 +75,8 @@ class TestScrollBoxContentVisibility:
         assert "Header Content" in initial_frame
         assert "Footer Content" in initial_frame
 
-        # Add 100 items and rebuild
+        # Add 100 items through For's reactive update path
         count.set(100)
-        _rebuild(setup, build)
         setup.render_frame()
 
         # Find the ScrollBox and scroll to bottom
@@ -111,45 +116,49 @@ class TestScrollBoxContentVisibility:
             "```\n\n\n"
         )
 
-        count = Signal("count", 0)
+        count = Signal(0, name="count")
 
+        @template_component
         def build():
-            items = [code_block for _ in range(count())]
             return Box(
-                Box(Text("Some visual content"), flex_shrink=0),
+                Box(Text(reactive(lambda: "Some visual content"), id="visual-top"), flex_shrink=0),
                 ScrollBox(
-                    *[
-                        Box(
-                            Code(
-                                code,
-                                filetype="markdown",
-                                show_line_numbers=False,
+                    content=ScrollContent(
+                        For(
+                            each=lambda: list(range(count())),
+                            render=lambda idx: Box(
+                                Code(
+                                    code_block,
+                                    filetype="markdown",
+                                    show_line_numbers=False,
+                                ),
+                                margin_top=2,
+                                margin_bottom=2,
+                                key=f"code-block-{idx}",
                             ),
-                            margin_top=2,
-                            margin_bottom=2,
-                        )
-                        for code in items
-                    ],
+                            key_fn=lambda idx: f"code-block-{idx}",
+                            key="code-blocks",
+                        ),
+                    ),
                     focused=True,
                     sticky_scroll=True,
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text("Some visual content"), flex_shrink=0),
+                Box(Text(reactive(lambda: "Some visual content"), id="visual-bottom"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = await _test_render(build, {"width": 80, "height": 30})
+        setup = await _strict_render(build, {"width": 80, "height": 30})
 
         # Initial render
         setup.render_frame()
         initial_frame = setup.capture_char_frame()
         assert "Some visual content" in initial_frame
 
-        # Add 100 code blocks
+        # Add 100 code blocks through For's reactive update path
         count.set(100)
-        _rebuild(setup, build)
         setup.render_frame()
 
         # Scroll to bottom
@@ -182,43 +191,47 @@ class TestScrollBoxContentVisibility:
     async def test_maintains_visibility_with_many_code_elements(self):
         """Maps to it("maintains visibility with many Code elements")."""
 
-        count = Signal("count", 0)
+        count = Signal(0, name="count")
 
+        @template_component
         def build():
-            items = list(range(count()))
             return Box(
-                Box(Text("Header"), flex_shrink=0),
+                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
                 ScrollBox(
-                    *[
-                        Box(
-                            Code(
-                                f"Item {i}",
-                                filetype="markdown",
-                                show_line_numbers=False,
+                    content=ScrollContent(
+                        For(
+                            each=lambda: list(range(count())),
+                            render=lambda i: Box(
+                                Code(
+                                    f"Item {i}",
+                                    filetype="markdown",
+                                    show_line_numbers=False,
+                                ),
+                                margin_top=1,
+                                margin_bottom=1,
+                                key=f"code-item-{i}",
                             ),
-                            margin_top=1,
-                            margin_bottom=1,
-                        )
-                        for i in items
-                    ],
+                            key_fn=lambda i: f"code-item-{i}",
+                            key="code-items",
+                        ),
+                    ),
                     focused=True,
                     sticky_scroll=True,
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text("Footer"), flex_shrink=0),
+                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = await _test_render(build, {"width": 40, "height": 20})
+        setup = await _strict_render(build, {"width": 40, "height": 20})
 
         # Initial render
         setup.render_frame()
 
-        # Add 50 code elements
+        # Add 50 code elements through For's reactive update path
         count.set(50)
-        _rebuild(setup, build)
         setup.render_frame()
 
         # Scroll to bottom
@@ -245,12 +258,19 @@ class TestScrollBoxContentVisibility:
     async def test_should_maintain_content_when_rapidly_updating_and_scrolling(self):
         """Maps to it("should maintain content when rapidly updating and scrolling")."""
 
-        items = Signal("items", [])
+        items = Signal([], name="items")
 
         def build():
             return Box(
                 ScrollBox(
-                    *[Box(Text(item)) for item in items()],
+                    content=ScrollContent(
+                        For(
+                            each=items,
+                            render=lambda item: Box(Text(item), key=f"item-{item}"),
+                            key_fn=lambda item: f"item-{item}",
+                            key="items",
+                        ),
+                    ),
                     focused=True,
                     sticky_scroll=True,
                     flex_grow=1,
@@ -258,12 +278,11 @@ class TestScrollBoxContentVisibility:
                 flex_direction="column",
             )
 
-        setup = await _test_render(build, {"width": 40, "height": 15})
+        setup = await _strict_render(build, {"width": 40, "height": 15})
         setup.render_frame()
 
         # Rapid updates - add 50 items at once (Python batch equivalent)
         items.set([f"Item {i + 1}" for i in range(50)])
-        _rebuild(setup, build)
         setup.render_frame()
 
         # Scroll to bottom
@@ -307,32 +326,37 @@ class TestScrollBoxContentVisibility:
             "`-c core.autocrlf=false` there too."
         )
 
-        items = Signal("items", [])
+        items = Signal([], name="items")
 
+        @template_component
         def build():
-            current_items = items()
             return Box(
                 Box(
-                    Box(Text("Header"), flex_shrink=0),
+                    Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
                     ScrollBox(
-                        *[
-                            Box(
-                                Code(
-                                    item.strip(),
-                                    filetype="markdown",
-                                    show_line_numbers=False,
+                        content=ScrollContent(
+                            For(
+                                each=items,
+                                render=lambda item: Box(
+                                    Code(
+                                        item.strip(),
+                                        filetype="markdown",
+                                        show_line_numbers=False,
+                                    ),
+                                    margin_top=1,
+                                    flex_shrink=0,
+                                    padding_left=3,
+                                    key=f"message-{hash(item)}",
                                 ),
-                                margin_top=1,
-                                flex_shrink=0,
-                                padding_left=3,
+                                key_fn=lambda item: f"message-{hash(item)}",
+                                key="messages",
                             )
-                            for item in current_items
-                        ],
+                        ),
                         sticky_scroll=True,
                         sticky_start="bottom",
                         flex_grow=1,
                     ),
-                    Box(Text("Prompt"), flex_shrink=0),
+                    Box(Text(reactive(lambda: "Prompt"), id="prompt"), flex_shrink=0),
                     flex_grow=1,
                     padding_bottom=1,
                     padding_top=1,
@@ -343,13 +367,12 @@ class TestScrollBoxContentVisibility:
                 flex_direction="row",
             )
 
-        setup = await _test_render(build, {"width": 100, "height": 24})
+        setup = await _strict_render(build, {"width": 100, "height": 24})
         setup.render_frame()
 
         # Add filler messages plus the long opencode message
         filler = [f"Message {i + 1}" for i in range(12)]
         items.set([*filler, opencode_message])
-        _rebuild(setup, build)
         setup.render_frame()
 
         # Scroll to bottom

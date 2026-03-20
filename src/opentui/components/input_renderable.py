@@ -1,11 +1,6 @@
-"""InputRenderable - single-line text input renderable.
-
-Single-line input component. Uses Python-level text
-storage with keybinding dispatch, focus management, and event emission.
-"""
-
 from __future__ import annotations
 
+from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
@@ -15,6 +10,7 @@ from ..keymapping import (
     KeyAliasMap,
     KeyBinding,
     build_key_bindings_map,
+    lookup_action,
     merge_key_aliases,
     merge_key_bindings,
 )
@@ -25,15 +21,10 @@ if TYPE_CHECKING:
 
     from ..renderer import Buffer
 
-
-# ── Default key bindings for InputRenderable ────────────────────────────
 # Defaults match TextareaRenderable but override Enter → submit.
-
 _DEFAULT_INPUT_BINDINGS: list[KeyBinding] = [
-    # Submit (Enter → submit instead of newline)
     KeyBinding(name="return", action="submit"),
     KeyBinding(name="linefeed", action="submit"),
-    # Delete
     KeyBinding(name="backspace", action="delete-backward"),
     KeyBinding(name="delete", action="delete"),
     KeyBinding(name="w", action="delete-word-backward", ctrl=True),
@@ -42,7 +33,6 @@ _DEFAULT_INPUT_BINDINGS: list[KeyBinding] = [
     KeyBinding(name="u", action="delete-to-line-start", ctrl=True),
     KeyBinding(name="k", action="delete-to-line-end", ctrl=True),
     KeyBinding(name="d", action="delete-line", ctrl=True, shift=True),
-    # Cursor movement
     KeyBinding(name="left", action="move-left"),
     KeyBinding(name="right", action="move-right"),
     KeyBinding(name="b", action="move-left", ctrl=True),
@@ -51,14 +41,11 @@ _DEFAULT_INPUT_BINDINGS: list[KeyBinding] = [
     KeyBinding(name="e", action="line-end", ctrl=True),
     KeyBinding(name="home", action="buffer-home"),
     KeyBinding(name="end", action="buffer-end"),
-    # Word movement
     KeyBinding(name="b", action="move-word-backward", meta=True),
     KeyBinding(name="f", action="move-word-forward", meta=True),
     KeyBinding(name="left", action="move-word-backward", meta=True),
     KeyBinding(name="right", action="move-word-forward", meta=True),
-    # Delete char (Ctrl+D = delete forward)
     KeyBinding(name="d", action="delete", ctrl=True),
-    # Undo / Redo
     KeyBinding(name="z", action="undo", ctrl=True),
     KeyBinding(name=".", action="redo", ctrl=True, shift=True),
 ]
@@ -130,25 +117,26 @@ class InputRenderable(Renderable):
         self._max_length = max_length
         self._placeholder_str = placeholder
 
-        self._text_color = self._parse_color(text_color)
-        self._placeholder_color = (
-            self._parse_color(placeholder_color)
-            if placeholder_color
-            else s.RGBA(0.5, 0.5, 0.5, 1.0)
+        self._set_or_bind("_text_color", text_color, transform=self._parse_color)
+        self._set_or_bind(
+            "_placeholder_color",
+            placeholder_color if placeholder_color is not None else s.RGBA(0.5, 0.5, 0.5, 1.0),
+            transform=self._parse_color,
         )
-        self._focused_bg_color = self._parse_color(focused_background_color)
-        self._focused_text_color = self._parse_color(focused_text_color)
-        self._cursor_color = self._parse_color(cursor_color)
+        self._set_or_bind(
+            "_focused_bg_color", focused_background_color, transform=self._parse_color
+        )
+        self._set_or_bind("_focused_text_color", focused_text_color, transform=self._parse_color)
+        self._set_or_bind("_cursor_color", cursor_color, transform=self._parse_color)
 
         self._focusable = True
         self._last_committed_value = clean_value
 
-        # Event handlers
         self._on_key_down = on_key_down
         self._on_paste_handler = on_paste
 
-        self._undo_stack: list[tuple[str, int]] = []
-        self._redo_stack: list[tuple[str, int]] = []
+        self._undo_stack: deque[tuple[str, int]] = deque(maxlen=self._MAX_UNDO_HISTORY)
+        self._redo_stack: deque[tuple[str, int]] = deque(maxlen=self._MAX_UNDO_HISTORY)
 
         self._key_bindings = list(_DEFAULT_INPUT_BINDINGS)
         self._key_alias_map = dict(DEFAULT_KEY_ALIASES)
@@ -161,8 +149,6 @@ class InputRenderable(Renderable):
         self._is_destroyed = False
 
         self._setup_measure_func()
-
-    # ── Properties ─────────────────────────────────────────────────────
 
     @property
     def value(self) -> str:
@@ -187,7 +173,10 @@ class InputRenderable(Renderable):
 
     @cursor_offset.setter
     def cursor_offset(self, v: int) -> None:
-        self._cursor_position = max(0, min(v, len(self._value)))
+        new_pos = max(0, min(v, len(self._value)))
+        if new_pos != self._cursor_position:
+            self._cursor_position = new_pos
+            self.mark_paint_dirty()
 
     @property
     def max_length(self) -> int:
@@ -208,7 +197,13 @@ class InputRenderable(Renderable):
     @placeholder.setter
     def placeholder(self, v: str) -> None:
         self._placeholder_str = v
-        self.mark_dirty()
+        if not self._value:
+            # Placeholder affects measure function when value is empty
+            self.mark_dirty()
+            if self._yoga_node is not None:
+                self._yoga_node.mark_dirty()
+        else:
+            self.mark_paint_dirty()
 
     @property
     def text_color(self) -> s.RGBA | None:
@@ -217,7 +212,7 @@ class InputRenderable(Renderable):
     @text_color.setter
     def text_color(self, v: s.RGBA | str | None) -> None:
         self._text_color = self._parse_color(v)
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     @property
     def background_color(self) -> s.RGBA | None:
@@ -226,7 +221,7 @@ class InputRenderable(Renderable):
     @background_color.setter
     def background_color(self, v: s.RGBA | str | None) -> None:
         self._background_color = self._parse_color(v)
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     @property
     def focused_background_color(self) -> s.RGBA | None:
@@ -235,7 +230,7 @@ class InputRenderable(Renderable):
     @focused_background_color.setter
     def focused_background_color(self, v: s.RGBA | str | None) -> None:
         self._focused_bg_color = self._parse_color(v)
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     @property
     def focused_text_color(self) -> s.RGBA | None:
@@ -244,7 +239,7 @@ class InputRenderable(Renderable):
     @focused_text_color.setter
     def focused_text_color(self, v: s.RGBA | str | None) -> None:
         self._focused_text_color = self._parse_color(v)
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     @property
     def placeholder_color(self) -> s.RGBA | None:
@@ -253,7 +248,7 @@ class InputRenderable(Renderable):
     @placeholder_color.setter
     def placeholder_color(self, v: s.RGBA | str | None) -> None:
         self._placeholder_color = self._parse_color(v)
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     @property
     def cursor_color(self) -> s.RGBA | None:
@@ -262,7 +257,7 @@ class InputRenderable(Renderable):
     @cursor_color.setter
     def cursor_color(self, v: s.RGBA | str | None) -> None:
         self._cursor_color = self._parse_color(v)
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     @property
     def key_bindings(self) -> list[KeyBinding]:
@@ -290,26 +285,27 @@ class InputRenderable(Renderable):
     def on_key_down(self, handler: Callable | None) -> None:
         self._on_key_down = handler
 
-    # ── Focus management ───────────────────────────────────────────────
-
     def focus(self) -> None:
         """Focus this input, storing current value for change detection."""
+        if self._focused:
+            return
         self._focused = True
         self._last_committed_value = self._value
+        self.mark_paint_dirty()
 
     def blur(self) -> None:
         """Blur this input, emitting CHANGE if value changed since focus."""
         if self._is_destroyed:
             return
+        if not self._focused:
+            return
         self._focused = False
+        self.mark_paint_dirty()
         if self._value != self._last_committed_value:
             self.emit("change", self._value)
             self._last_committed_value = self._value
 
-    # ── Text manipulation ──────────────────────────────────────────────
-
     def insert_text(self, text: str) -> None:
-        """Insert text at cursor, stripping newlines and enforcing maxLength."""
         text = text.replace("\n", "").replace("\r", "")
         if not text:
             return
@@ -326,7 +322,6 @@ class InputRenderable(Renderable):
         self.mark_dirty()
 
     def delete_char(self) -> bool:
-        """Delete character forward (at cursor)."""
         if self._cursor_position >= len(self._value):
             return False
         self._save_undo_state()
@@ -338,7 +333,6 @@ class InputRenderable(Renderable):
         return True
 
     def delete_char_backward(self) -> bool:
-        """Delete character backward (backspace)."""
         if self._cursor_position <= 0:
             return False
         self._save_undo_state()
@@ -351,15 +345,12 @@ class InputRenderable(Renderable):
         return True
 
     def delete_word_backward(self) -> bool:
-        """Delete word backward from cursor."""
         if self._cursor_position <= 0:
             return False
         self._save_undo_state()
         pos = self._cursor_position
-        # Skip trailing spaces
         while pos > 0 and self._value[pos - 1] == " ":
             pos -= 1
-        # Skip word chars
         while pos > 0 and self._value[pos - 1] != " ":
             pos -= 1
         self._value = self._value[:pos] + self._value[self._cursor_position :]
@@ -369,15 +360,12 @@ class InputRenderable(Renderable):
         return True
 
     def delete_word_forward(self) -> bool:
-        """Delete word forward from cursor."""
         if self._cursor_position >= len(self._value):
             return False
         self._save_undo_state()
         pos = self._cursor_position
-        # Skip word chars
         while pos < len(self._value) and self._value[pos] != " ":
             pos += 1
-        # Skip trailing spaces
         while pos < len(self._value) and self._value[pos] == " ":
             pos += 1
         self._value = self._value[: self._cursor_position] + self._value[pos:]
@@ -386,7 +374,6 @@ class InputRenderable(Renderable):
         return True
 
     def delete_line(self) -> bool:
-        """Delete entire line content."""
         if not self._value:
             return False
         self._save_undo_state()
@@ -397,7 +384,6 @@ class InputRenderable(Renderable):
         return True
 
     def delete_to_line_start(self) -> bool:
-        """Delete from start of line to cursor."""
         if self._cursor_position <= 0:
             return False
         self._save_undo_state()
@@ -408,7 +394,6 @@ class InputRenderable(Renderable):
         return True
 
     def delete_to_line_end(self) -> bool:
-        """Delete from cursor to end of line."""
         if self._cursor_position >= len(self._value):
             return False
         self._save_undo_state()
@@ -417,34 +402,32 @@ class InputRenderable(Renderable):
         self.mark_dirty()
         return True
 
-    # ── Cursor movement ────────────────────────────────────────────────
-
     def move_cursor_left(self) -> bool:
-        """Move cursor left by one character."""
         if self._cursor_position <= 0:
             return False
         self._cursor_position -= 1
+        self.mark_paint_dirty()
         return True
 
     def move_cursor_right(self) -> bool:
-        """Move cursor right by one character."""
         if self._cursor_position >= len(self._value):
             return False
         self._cursor_position += 1
+        self.mark_paint_dirty()
         return True
 
     def goto_line_home(self) -> bool:
-        """Move cursor to start of line (start of text)."""
         if self._cursor_position == 0:
             return False
         self._cursor_position = 0
+        self.mark_paint_dirty()
         return True
 
     def goto_line_end(self) -> bool:
-        """Move cursor to end of line (end of text)."""
         if self._cursor_position == len(self._value):
             return False
         self._cursor_position = len(self._value)
+        self.mark_paint_dirty()
         return True
 
     def goto_buffer_home(self) -> bool:
@@ -456,44 +439,36 @@ class InputRenderable(Renderable):
         return self.goto_line_end()
 
     def move_word_forward(self) -> bool:
-        """Move cursor forward by one word."""
         if self._cursor_position >= len(self._value):
             return False
         pos = self._cursor_position
-        # Skip word chars
         while pos < len(self._value) and self._value[pos] != " ":
             pos += 1
         while pos < len(self._value) and self._value[pos] == " ":
             pos += 1
         self._cursor_position = pos
+        self.mark_paint_dirty()
         return True
 
     def move_word_backward(self) -> bool:
-        """Move cursor backward by one word."""
         if self._cursor_position <= 0:
             return False
         pos = self._cursor_position
-        # Skip trailing spaces
         while pos > 0 and self._value[pos - 1] == " ":
             pos -= 1
-        # Skip word chars
         while pos > 0 and self._value[pos - 1] != " ":
             pos -= 1
         self._cursor_position = pos
+        self.mark_paint_dirty()
         return True
-
-    # ── Undo/Redo ──────────────────────────────────────────────────────
 
     _MAX_UNDO_HISTORY = 100
 
     def _save_undo_state(self) -> None:
         self._undo_stack.append((self._value, self._cursor_position))
-        if len(self._undo_stack) > self._MAX_UNDO_HISTORY:
-            self._undo_stack = self._undo_stack[-self._MAX_UNDO_HISTORY :]
         self._redo_stack.clear()
 
     def undo(self) -> bool:
-        """Undo last text change."""
         if not self._undo_stack:
             return False
         self._redo_stack.append((self._value, self._cursor_position))
@@ -503,7 +478,6 @@ class InputRenderable(Renderable):
         return True
 
     def redo(self) -> bool:
-        """Redo last undone change."""
         if not self._redo_stack:
             return False
         self._undo_stack.append((self._value, self._cursor_position))
@@ -512,29 +486,20 @@ class InputRenderable(Renderable):
         self.mark_dirty()
         return True
 
-    # ── Submit ─────────────────────────────────────────────────────────
-
     def _submit(self) -> None:
-        """Handle submit (Enter key)."""
         if self._value != self._last_committed_value:
             self.emit("change", self._value)
             self._last_committed_value = self._value
         self.emit("enter", self._value)
 
-    # ── Paste handling ─────────────────────────────────────────────────
-
     def handle_paste(self, event: Any) -> None:
-        """Handle paste event, stripping newlines and enforcing maxLength."""
         if self._on_paste_handler:
             self._on_paste_handler(event)
         text = getattr(event, "text", "")
         if text:
             self.insert_text(text)
 
-    # ── Key handling ───────────────────────────────────────────────────
-
     def handle_key(self, event: KeyEvent) -> bool:
-        """Handle a key event. Returns True if event was consumed."""
         if event.default_prevented:
             return False
         if not self._focused:
@@ -557,96 +522,43 @@ class InputRenderable(Renderable):
         return False
 
     def _lookup_action(self, event: KeyEvent) -> str | None:
-        """Look up action for a key event in the keybinding map."""
-        key_name = event.key
-
-        # Try direct lookup
-        binding_key = (
-            f"{key_name}:"
-            f"{1 if event.ctrl else 0}:"
-            f"{1 if event.shift else 0}:"
-            f"{1 if event.alt else 0}:"
-            f"{1 if event.meta else 0}"
+        return lookup_action(
+            event.key,
+            event.ctrl,
+            event.shift,
+            event.alt,
+            event.meta,
+            self._key_map,
+            self._key_alias_map,
         )
-        action = self._key_map.get(binding_key)
-        if action:
-            return action
-
-        # Try with aliases
-        for alias, canonical in self._key_alias_map.items():
-            if key_name == alias:
-                alias_key = (
-                    f"{canonical}:"
-                    f"{1 if event.ctrl else 0}:"
-                    f"{1 if event.shift else 0}:"
-                    f"{1 if event.alt else 0}:"
-                    f"{1 if event.meta else 0}"
-                )
-                action = self._key_map.get(alias_key)
-                if action:
-                    return action
-
-        return None
 
     def _dispatch_action(self, action: str) -> bool:
-        """Dispatch an action from key binding. Returns True if handled."""
-        if action == "submit":
-            self._submit()
-            return True
-        elif action == "delete-backward":
-            self.delete_char_backward()
-            return True
-        elif action == "delete":
-            self.delete_char()
-            return True
-        elif action == "delete-word-backward":
-            self.delete_word_backward()
-            return True
-        elif action == "delete-word-forward":
-            self.delete_word_forward()
-            return True
-        elif action == "delete-line":
-            self.delete_line()
-            return True
-        elif action == "delete-to-line-start":
-            self.delete_to_line_start()
-            return True
-        elif action == "delete-to-line-end":
-            self.delete_to_line_end()
-            return True
-        elif action == "move-left":
-            self.move_cursor_left()
-            return True
-        elif action == "move-right":
-            self.move_cursor_right()
-            return True
-        elif action == "line-home":
-            self.goto_line_home()
-            return True
-        elif action == "line-end":
-            self.goto_line_end()
-            return True
-        elif action == "buffer-home":
-            self.goto_buffer_home()
-            return True
-        elif action == "buffer-end":
-            self.goto_buffer_end()
-            return True
-        elif action == "move-word-forward":
-            self.move_word_forward()
-            return True
-        elif action == "move-word-backward":
-            self.move_word_backward()
-            return True
-        elif action == "undo":
-            self.undo()
-            return True
-        elif action == "redo":
-            self.redo()
+        handler = self._ACTION_TABLE.get(action)
+        if handler is not None:
+            handler(self)
             return True
         return False
 
-    # ── Yoga measure ───────────────────────────────────────────────────
+    _ACTION_TABLE: dict[str, Any] = {
+        "submit": lambda self: self._submit(),
+        "delete-backward": lambda self: self.delete_char_backward(),
+        "delete": lambda self: self.delete_char(),
+        "delete-word-backward": lambda self: self.delete_word_backward(),
+        "delete-word-forward": lambda self: self.delete_word_forward(),
+        "delete-line": lambda self: self.delete_line(),
+        "delete-to-line-start": lambda self: self.delete_to_line_start(),
+        "delete-to-line-end": lambda self: self.delete_to_line_end(),
+        "move-left": lambda self: self.move_cursor_left(),
+        "move-right": lambda self: self.move_cursor_right(),
+        "line-home": lambda self: self.goto_line_home(),
+        "line-end": lambda self: self.goto_line_end(),
+        "buffer-home": lambda self: self.goto_buffer_home(),
+        "buffer-end": lambda self: self.goto_buffer_end(),
+        "move-word-forward": lambda self: self.move_word_forward(),
+        "move-word-backward": lambda self: self.move_word_backward(),
+        "undo": lambda self: self.undo(),
+        "redo": lambda self: self.redo(),
+    }
 
     def _setup_measure_func(self) -> None:
         """Set up yoga measure function — always height 1 for single-line input."""
@@ -658,7 +570,7 @@ class InputRenderable(Renderable):
             text_len = len(text) if text else 1
 
             measured_w = text_len
-            measured_h = 1  # Always 1 for single-line
+            measured_h = 1
 
             if width_mode == yoga.MeasureMode.AtMost:
                 measured_w = min(int(width), measured_w)
@@ -667,10 +579,7 @@ class InputRenderable(Renderable):
 
         self._yoga_node.set_measure_func(measure)
 
-    # ── Rendering ──────────────────────────────────────────────────────
-
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the input to the buffer."""
         if not self._visible:
             return
 
@@ -705,10 +614,7 @@ class InputRenderable(Renderable):
         if display_text:
             buffer.draw_text(display_text, x, y, draw_color, bg)
 
-    # ── Cleanup ────────────────────────────────────────────────────────
-
     def destroy(self) -> None:
-        """Destroy and clean up."""
         self._is_destroyed = True
         super().destroy()
 

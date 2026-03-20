@@ -7,6 +7,7 @@ Tests ported: 56/56 (all passing)
 import re
 
 import pytest
+import yoga
 
 from opentui import layout as yoga_layout
 from opentui.components.base import BaseRenderable, Renderable, is_renderable
@@ -153,6 +154,35 @@ class TestBaseRenderable:
         r.visible = True
         assert r.visible is True
 
+    def test_clear_all_dirty_prunes_clean_siblings(self):
+        """Paint-only dirty clearing should avoid descending into clean branches."""
+
+        class _Node:
+            def __init__(self, *, dirty=False, subtree_dirty=False, children=None):
+                self._dirty = dirty
+                self._subtree_dirty = subtree_dirty
+                self._children = list(children or [])
+
+        class _ExplodingCleanNode(_Node):
+            @property
+            def _children(self):
+                raise AssertionError("clean sibling should not be traversed")
+
+            @_children.setter
+            def _children(self, value):
+                self.__dict__["_children_storage"] = value
+
+        dirty_leaf = _Node(dirty=True)
+        dirty_branch = _Node(dirty=True, children=[dirty_leaf])
+        clean_sibling = _ExplodingCleanNode()
+        root = _Node(dirty=True, children=[dirty_branch, clean_sibling])
+
+        CliRenderer._clear_all_dirty(root)
+
+        assert root._dirty is False
+        assert dirty_branch._dirty is False
+        assert dirty_leaf._dirty is False
+
 
 class TestRenderable:
     """Maps to describe('Renderable')."""
@@ -180,13 +210,13 @@ class TestRenderable:
         assert r.height == 50
 
     def test_throws_on_invalid_width(self):
-        """Negative width raises TypeError."""
-        with pytest.raises(TypeError):
+        """Negative width raises ValueError."""
+        with pytest.raises(ValueError):
             Renderable(width=-10)
 
     def test_throws_on_invalid_height(self):
-        """Negative height raises TypeError."""
-        with pytest.raises(TypeError):
+        """Negative height raises ValueError."""
+        with pytest.raises(ValueError):
             Renderable(height=-5)
 
     def test_handles_visibility_changes(self):
@@ -197,6 +227,41 @@ class TestRenderable:
         assert r.visible is False
         r.visible = True
         assert r.visible is True
+
+    def test_visibility_updates_yoga_display(self):
+        """Hidden renderables should stop participating in Yoga layout."""
+        r = Renderable()
+        assert r._yoga_node.display == yoga.Display.Flex
+        r.visible = False
+        assert r._yoga_node.display == yoga.Display.None_
+        r.visible = True
+        assert r._yoga_node.display == yoga.Display.Flex
+
+    def test_numeric_width_defaults_flex_shrink_to_zero(self):
+        """Solid parity: explicit numeric size disables shrink by default."""
+        r = Renderable(width=10)
+        assert r.flex_shrink == 0
+
+    def test_explicit_flex_shrink_is_preserved_with_numeric_width(self):
+        """Explicit flex_shrink should win over the size-based default."""
+        r = Renderable(width=10, flex_shrink=1)
+        assert r.flex_shrink == 1
+
+    def test_setting_numeric_width_flips_default_flex_shrink_to_zero(self):
+        """Width setter should match Solid's runtime behavior."""
+        r = Renderable()
+        assert r.flex_shrink == 1
+        r.width = 12
+        assert r.flex_shrink == 0
+
+    def test_configure_yoga_node_falls_back_without_configure_node_fast(self, monkeypatch):
+        """Plain yoga-python should still be able to configure a node."""
+        r = Renderable(width=10, height=2, visible=False)
+        monkeypatch.delattr(yoga, "configure_node_fast", raising=False)
+        r._configure_yoga_node(r._yoga_node)
+        assert r._yoga_node.width.value == 10
+        assert r._yoga_node.height.value == 2
+        assert r._yoga_node.display == yoga.Display.None_
 
     def test_handles_live_mode(self):
         """Maps to test('handles live mode').

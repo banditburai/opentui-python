@@ -35,6 +35,11 @@ from opentui.events import KeyEvent
 from opentui.signals import Signal
 
 
+def _strict_render(component_fn, options=None):
+    options = dict(options or {})
+    return _test_render(component_fn, options)
+
+
 def _get_input(setup):
     """Retrieve the first Input component from the render tree."""
     root = setup.renderer.root
@@ -74,7 +79,7 @@ class TestTextareaCursorBehavior:
             does not call use_cursor().
             """
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Input(value="Hello", focused=True, width=20, height=5),
                 {"width": 30, "height": 10},
             )
@@ -91,7 +96,7 @@ class TestTextareaCursorBehavior:
             the cursor should not be visible.
             """
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Input(value="Hello", focused=False, width=20, height=5),
                 {"width": 30, "height": 10},
             )
@@ -104,7 +109,7 @@ class TestTextareaCursorBehavior:
         async def test_should_hide_cursor_when_show_cursor_is_set_to_false_while_focused(self):
             """Maps to it("should hide cursor when showCursor is set to false while focused")."""
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Input(
                     value="Hello",
                     focused=True,
@@ -131,7 +136,7 @@ class TestTextareaCursorBehavior:
                 width=20,
                 height=5,
             )
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: inp,
                 {"width": 30, "height": 10},
             )
@@ -155,17 +160,17 @@ class TestTextareaCursorBehavior:
             in an unfocused replacement via the component function and re-render.
             """
 
-            is_focused = Signal("is_focused", True)
+            is_focused = Signal(True, name="is_focused")
 
-            def component():
-                return Input(
+            setup = await _strict_render(
+                lambda: Input(
                     value="Hello",
-                    focused=is_focused(),
+                    focused=is_focused,
                     width=20,
                     height=5,
-                )
-
-            setup = await _test_render(component, {"width": 30, "height": 10})
+                ),
+                {"width": 30, "height": 10},
+            )
             setup.render_frame()
 
             cursor_state = setup.renderer.get_cursor_state()
@@ -185,17 +190,17 @@ class TestTextareaCursorBehavior:
             Start unfocused, verify hidden, then gain focus and verify visible.
             """
 
-            is_focused = Signal("is_focused", False)
+            is_focused = Signal(False, name="is_focused")
 
-            def component():
-                return Input(
+            setup = await _strict_render(
+                lambda: Input(
                     value="Hello",
-                    focused=is_focused(),
+                    focused=is_focused,
                     width=20,
                     height=5,
-                )
-
-            setup = await _test_render(component, {"width": 30, "height": 10})
+                ),
+                {"width": 30, "height": 10},
+            )
             setup.render_frame()
 
             cursor_state = setup.renderer.get_cursor_state()
@@ -211,7 +216,7 @@ class TestTextareaCursorBehavior:
         async def test_should_not_show_cursor_if_show_cursor_is_false_even_when_focused(self):
             """Maps to it("should not show cursor if showCursor is false even when focused")."""
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Input(
                     value="Hello",
                     focused=True,
@@ -238,7 +243,7 @@ class TestTextareaCursorBehavior:
             returns x > 0 and y > 0.
             """
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Input(value="Hello", focused=True, width=20, height=5),
                 {"width": 30, "height": 10},
             )
@@ -259,7 +264,7 @@ class TestTextareaCursorBehavior:
             Input component does not register, so we call handle_key directly.
             """
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Input(value="X", focused=True, width=20, height=5),
                 {"width": 30, "height": 10},
             )
@@ -288,7 +293,7 @@ class TestTextareaCursorBehavior:
 
             from opentui.components.input import Textarea
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Textarea(
                     initial_value="Line 1\nLine 2",
                     focused=True,
@@ -312,7 +317,7 @@ class TestTextareaCursorBehavior:
             via handle_key, cursor x should decrease.
             """
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Input(value="Hello", focused=True, width=20, height=5),
                 {"width": 30, "height": 10},
             )
@@ -344,7 +349,7 @@ class TestTextareaCursorBehavior:
             _cursor_style attribute.
             """
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Input(value="Hello", focused=True, width=20, height=5),
                 {"width": 30, "height": 10},
             )
@@ -363,7 +368,7 @@ class TestTextareaCursorBehavior:
             records that style after rendering.
             """
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Input(
                     value="Hello",
                     focused=True,
@@ -390,7 +395,7 @@ class TestTextareaCursorBehavior:
             renderer._cursor_color.
             """
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: Input(
                     value="Hello",
                     focused=True,
@@ -417,16 +422,16 @@ class TestTextareaCursorBehavior:
             verify cursor y moves to the second input.
             """
 
-            focused1 = Signal("focused1", True)
-            focused2 = Signal("focused2", False)
+            focused1 = Signal(True, name="focused1")
+            focused2 = Signal(False, name="focused2")
 
-            def component():
-                return Box(
-                    Input(value="First", focused=focused1(), width=20, height=3),
-                    Input(value="Second", focused=focused2(), width=20, height=3),
-                )
-
-            setup = await _test_render(component, {"width": 30, "height": 10})
+            setup = await _strict_render(
+                lambda: Box(
+                    Input(value="First", focused=focused1, width=20, height=3),
+                    Input(value="Second", focused=focused2, width=20, height=3),
+                ),
+                {"width": 30, "height": 10},
+            )
             setup.render_frame()
 
             cursor_state = setup.renderer.get_cursor_state()
@@ -450,16 +455,16 @@ class TestTextareaCursorBehavior:
             Start with first input focused, then unfocus both.
             """
 
-            focused1 = Signal("focused1", True)
-            focused2 = Signal("focused2", False)
+            focused1 = Signal(True, name="focused1")
+            focused2 = Signal(False, name="focused2")
 
-            def component():
-                return Box(
-                    Input(value="First", focused=focused1(), width=20, height=3),
-                    Input(value="Second", focused=focused2(), width=20, height=3),
-                )
-
-            setup = await _test_render(component, {"width": 30, "height": 10})
+            setup = await _strict_render(
+                lambda: Box(
+                    Input(value="First", focused=focused1, width=20, height=3),
+                    Input(value="Second", focused=focused2, width=20, height=3),
+                ),
+                {"width": 30, "height": 10},
+            )
             setup.render_frame()
 
             cursor_state = setup.renderer.get_cursor_state()
@@ -496,7 +501,7 @@ class TestTextareaCursorBehavior:
             inner.add(textarea)
             outer.add(inner)
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: outer,
                 {"width": 50, "height": 12},
             )
@@ -552,7 +557,7 @@ class TestTextareaCursorBehavior:
             inner.add(textarea)
             outer.add(inner)
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: outer,
                 {"width": 50, "height": 12},
             )
@@ -605,7 +610,7 @@ class TestTextareaCursorBehavior:
             inner.add(textarea)
             outer.add(inner)
 
-            setup = await _test_render(
+            setup = await _strict_render(
                 lambda: outer,
                 {"width": 50, "height": 12},
             )
@@ -617,10 +622,7 @@ class TestTextareaCursorBehavior:
 
             def capture_height(_buf=None):
                 if textarea._yoga_node is not None:
-                    from opentui.layout import get_layout
-
-                    layout = get_layout(textarea._yoga_node)
-                    heights.append(layout.get("height", 0))
+                    heights.append(textarea._yoga_node.layout_height)
 
             setup.renderer.add_post_process_fn(capture_height)
 

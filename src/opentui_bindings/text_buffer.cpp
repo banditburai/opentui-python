@@ -7,12 +7,10 @@
 #include <string>
 #include <optional>
 #include <array>
-#include <utility>
 #include <vector>
 
 namespace nb = nanobind;
 
-// ExternalLineInfo struct matching the Zig ExternalLineInfo layout
 struct ExternalLineInfo {
     const uint32_t* start_cols_ptr;
     uint32_t start_cols_len;
@@ -25,7 +23,6 @@ struct ExternalLineInfo {
     uint32_t width_cols_max;
 };
 
-// ExternalHighlight struct matching the Zig ExternalHighlight layout
 struct ExternalHighlight {
     uint32_t start;
     uint32_t end;
@@ -35,7 +32,6 @@ struct ExternalHighlight {
 };
 
 extern "C" {
-    // TextBuffer functions
     void* createTextBuffer(uint8_t encoding);
     void destroyTextBuffer(void* buffer);
     void textBufferAppend(void* buffer, const char* text, size_t len);
@@ -60,7 +56,6 @@ extern "C" {
     void textBufferSetTextFromMem(void* buffer, uint8_t encoding);
     bool textBufferLoadFile(void* buffer, void* path, size_t pathLen);
 
-    // Highlight functions
     void textBufferAddHighlightByCharRange(void* buffer, const ExternalHighlight* hl);
     void textBufferAddHighlight(void* buffer, uint32_t lineIdx, const ExternalHighlight* hl);
     void textBufferRemoveHighlightsByRef(void* buffer, uint16_t hlRef);
@@ -72,14 +67,12 @@ extern "C" {
     uint32_t textBufferGetHighlightCount(void* buffer);
     size_t textBufferGetTextRangeByCoords(void* buffer, uint32_t startRow, uint32_t startCol, uint32_t endRow, uint32_t endCol, char* outPtr, size_t maxLen);
 
-    // SyntaxStyle functions
     void* createSyntaxStyle();
     void destroySyntaxStyle(void* style);
     uint32_t syntaxStyleRegister(void* style, const char* name, size_t nameLen, float* fg, float* bg, uint32_t attributes);
     uint32_t syntaxStyleResolveByName(void* style, const char* name, size_t nameLen);
     size_t syntaxStyleGetStyleCount(void* style);
 
-    // TextBufferView functions
     void* createTextBufferView(void* buffer);
     void destroyTextBufferView(void* view);
     void textBufferViewSetViewport(void* view, int32_t x, int32_t y, uint32_t width, uint32_t height);
@@ -106,11 +99,9 @@ extern "C" {
     size_t getArenaAllocatedBytes();
 }
 
-// Helper: convert ExternalLineInfo to a Python dict with lists
 static nb::dict line_info_to_dict(const ExternalLineInfo& info) {
     nb::dict d;
 
-    // Copy arrays from native memory into Python lists
     std::vector<uint32_t> start_cols(info.start_cols_ptr, info.start_cols_ptr + info.start_cols_len);
     std::vector<uint32_t> width_cols(info.width_cols_ptr, info.width_cols_ptr + info.width_cols_len);
     std::vector<uint32_t> sources(info.sources_ptr, info.sources_ptr + info.sources_len);
@@ -126,7 +117,6 @@ static nb::dict line_info_to_dict(const ExternalLineInfo& info) {
 }
 
 void bind_text_buffer(nb::module_& m) {
-    // ===== TextBuffer bindings =====
     m.def("create_text_buffer", &createTextBuffer, nb::arg("encoding") = 0);
     m.def("destroy_text_buffer", &destroyTextBuffer, nb::arg("buffer"));
     m.def("text_buffer_append", [](void* buffer, nb::bytes text, size_t len) {
@@ -137,12 +127,30 @@ void bind_text_buffer(nb::module_& m) {
     m.def("text_buffer_get_length", &textBufferGetLength, nb::arg("buffer"));
     m.def("text_buffer_reset", &textBufferReset, nb::arg("buffer"));
     m.def("text_buffer_clear", &textBufferClear, nb::arg("buffer"));
-    m.def("text_buffer_set_default_fg", [](void* buffer) {
-        textBufferSetDefaultFg(buffer, nullptr);
-    }, nb::arg("buffer"));
-    m.def("text_buffer_set_default_bg", [](void* buffer) {
-        textBufferSetDefaultBg(buffer, nullptr);
-    }, nb::arg("buffer"));
+    m.def("text_buffer_set_default_fg", [](void* buffer, std::optional<std::array<float, 4>> fg) {
+        float fg_color[4];
+        float* fg_ptr = nullptr;
+        if (fg.has_value()) {
+            fg_color[0] = (*fg)[0];
+            fg_color[1] = (*fg)[1];
+            fg_color[2] = (*fg)[2];
+            fg_color[3] = (*fg)[3];
+            fg_ptr = fg_color;
+        }
+        textBufferSetDefaultFg(buffer, fg_ptr);
+    }, nb::arg("buffer"), nb::arg("fg") = std::nullopt);
+    m.def("text_buffer_set_default_bg", [](void* buffer, std::optional<std::array<float, 4>> bg) {
+        float bg_color[4];
+        float* bg_ptr = nullptr;
+        if (bg.has_value()) {
+            bg_color[0] = (*bg)[0];
+            bg_color[1] = (*bg)[1];
+            bg_color[2] = (*bg)[2];
+            bg_color[3] = (*bg)[3];
+            bg_ptr = bg_color;
+        }
+        textBufferSetDefaultBg(buffer, bg_ptr);
+    }, nb::arg("buffer"), nb::arg("bg") = std::nullopt);
     m.def("text_buffer_set_default_attributes", [](void* buffer, uint32_t attrs) {
         textBufferSetDefaultAttributes(buffer, &attrs);
     }, nb::arg("buffer"), nb::arg("attrs"));
@@ -173,7 +181,6 @@ void bind_text_buffer(nb::module_& m) {
     }, nb::arg("buffer"), nb::arg("data"), nb::arg("len"));
     m.def("text_buffer_get_byte_size", &textBufferGetByteSize, nb::arg("buffer"));
 
-    // ===== Highlight bindings =====
     m.def("text_buffer_add_highlight_by_char_range",
           [](void* buffer, uint32_t start, uint32_t end, uint32_t styleId, uint8_t priority, uint16_t hlRef) {
         ExternalHighlight hl = {start, end, styleId, priority, hlRef};
@@ -222,7 +229,6 @@ void bind_text_buffer(nb::module_& m) {
 
     m.def("text_buffer_get_highlight_count", &textBufferGetHighlightCount, nb::arg("buffer"));
 
-    // ===== SyntaxStyle bindings =====
     m.def("create_syntax_style", &createSyntaxStyle);
     m.def("destroy_syntax_style", &destroySyntaxStyle, nb::arg("style"));
 
@@ -255,13 +261,11 @@ void bind_text_buffer(nb::module_& m) {
 
     m.def("syntax_style_get_style_count", &syntaxStyleGetStyleCount, nb::arg("style"));
 
-    // ===== TextBufferView bindings =====
     m.def("create_text_buffer_view", &createTextBufferView, nb::arg("buffer"));
     m.def("destroy_text_buffer_view", &destroyTextBufferView, nb::arg("view"));
     m.def("text_buffer_view_set_viewport", &textBufferViewSetViewport,
           nb::arg("view"), nb::arg("x"), nb::arg("y"), nb::arg("width"), nb::arg("height"));
 
-    // Selection: pass nullptr for bgColor/fgColor (no custom selection colors)
     m.def("text_buffer_view_set_selection", [](void* view, uint32_t start, uint32_t end) {
         textBufferViewSetSelection(view, start, end, nullptr, nullptr);
     }, nb::arg("view"), nb::arg("start"), nb::arg("end"));
@@ -323,7 +327,6 @@ void bind_text_buffer(nb::module_& m) {
           nb::arg("view"), nb::arg("width"), nb::arg("height"));
     m.def("text_buffer_view_get_virtual_line_count", &textBufferViewGetVirtualLineCount, nb::arg("view"));
 
-    // LineInfo: returns dict with start_cols, width_cols, sources, wraps, width_cols_max
     m.def("text_buffer_view_get_line_info", [](void* view) -> nb::dict {
         ExternalLineInfo info;
         memset(&info, 0, sizeof(info));
@@ -338,7 +341,6 @@ void bind_text_buffer(nb::module_& m) {
         return line_info_to_dict(info);
     }, nb::arg("view"));
 
-    // Text extraction from view
     m.def("text_buffer_view_get_selected_text", [](void* view, size_t maxLen) -> nb::bytes {
         std::string out(maxLen, '\0');
         size_t len = textBufferViewGetSelectedText(view, out.data(), maxLen);
@@ -351,7 +353,6 @@ void bind_text_buffer(nb::module_& m) {
         return nb::bytes(out.data(), len);
     }, nb::arg("view"), nb::arg("max_len") = 65536);
 
-    // Tab indicator
     m.def("text_buffer_view_set_tab_indicator", &textBufferViewSetTabIndicator,
           nb::arg("view"), nb::arg("indicator"));
 
@@ -360,11 +361,9 @@ void bind_text_buffer(nb::module_& m) {
         textBufferViewSetTabIndicatorColor(view, color);
     }, nb::arg("view"), nb::arg("r"), nb::arg("g"), nb::arg("b"), nb::arg("a"));
 
-    // Truncate
     m.def("text_buffer_view_set_truncate", &textBufferViewSetTruncate,
           nb::arg("view"), nb::arg("truncate"));
 
-    // Measure
     m.def("text_buffer_view_measure_for_dimensions",
           [](void* view, uint32_t width, uint32_t height) -> nb::object {
         struct Result { uint32_t line_count; uint32_t width_cols_max; };
@@ -379,7 +378,6 @@ void bind_text_buffer(nb::module_& m) {
     m.def("buffer_draw_text_buffer_view", &bufferDrawTextBufferView,
           nb::arg("buffer"), nb::arg("view"), nb::arg("x"), nb::arg("y"));
 
-    // Mem buffer management
     m.def("text_buffer_register_mem_buffer", [](void* buffer, nb::bytes data, size_t len, bool copy) -> uint16_t {
         return textBufferRegisterMemBuffer(buffer, (void*)data.c_str(), len, copy);
     }, nb::arg("buffer"), nb::arg("data"), nb::arg("len"), nb::arg("copy"));

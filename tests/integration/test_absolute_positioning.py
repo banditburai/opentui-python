@@ -9,13 +9,18 @@ from opentui.components.box import Box
 from opentui.components.text import Text
 
 
+def _strict_render(component_fn, options=None):
+    options = dict(options or {})
+    return _test_render(component_fn, options)
+
+
 class TestBasicAbsolutePositioning:
     """Maps to describe('Absolute Positioning - Snapshot Tests > Basic absolute positioning')."""
 
     async def test_absolute_positioned_box_at_top_left(self):
         """Maps to test('absolute positioned box at top-left')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Text("Top Left"),
@@ -44,7 +49,7 @@ class TestBasicAbsolutePositioning:
     async def test_absolute_positioned_box_at_bottom_right_using_right_bottom(self):
         """Maps to test('absolute positioned box at bottom-right using right/bottom')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Text("Bottom Right"),
@@ -70,7 +75,7 @@ class TestBasicAbsolutePositioning:
     async def test_absolute_positioned_box_centered_with_left_top(self):
         """Maps to test('absolute positioned box centered with left/top')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Text("Centered"),
@@ -107,7 +112,7 @@ class TestNestedAbsolutePositioning:
     async def test_absolute_child_inside_absolute_parent_basic(self):
         """Maps to test('absolute child inside absolute parent - basic')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -143,7 +148,7 @@ class TestNestedAbsolutePositioning:
     async def test_absolute_child_at_bottom_0_inside_absolute_parent(self):
         """Maps to test('absolute child at bottom:0 inside absolute parent (issue #406 fix)')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -193,7 +198,7 @@ class TestNestedAbsolutePositioning:
     async def test_absolute_child_at_right_0_inside_absolute_parent(self):
         """Maps to test('absolute child at right:0 inside absolute parent')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -233,7 +238,7 @@ class TestNestedAbsolutePositioning:
     async def test_absolute_child_at_bottom_right_corner_inside_absolute_parent(self):
         """Maps to test('absolute child at bottom-right corner inside absolute parent')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -274,7 +279,7 @@ class TestNestedAbsolutePositioning:
     async def test_multiple_absolute_children_inside_absolute_parent_at_different_positions(self):
         """Maps to test('multiple absolute children inside absolute parent at different positions')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -366,7 +371,7 @@ class TestThreeLevelNesting:
     async def test_deeply_nested_absolute_positioning_grandchild_at_bottom(self):
         """Maps to test('deeply nested absolute positioning - grandchild at bottom')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -417,7 +422,7 @@ class TestMixedPositioning:
     async def test_absolute_child_inside_relative_parent(self):
         """Maps to test('absolute child inside relative parent')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -460,7 +465,7 @@ class TestMixedPositioning:
     async def test_sibling_absolute_elements_at_same_level(self):
         """Maps to test('sibling absolute elements at same level')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Text("Box 1"),
@@ -521,7 +526,7 @@ class TestEdgeCases:
     async def test_absolute_positioned_box_with_negative_coordinates_partially_off_screen(self):
         """Maps to test('absolute positioned box with negative coordinates (partially off-screen)')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Text("Partial"),
@@ -555,7 +560,7 @@ class TestEdgeCases:
     async def test_absolute_positioned_box_extending_beyond_viewport(self):
         """Maps to test('absolute positioned box extending beyond viewport')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Text("Overflow"),
@@ -587,7 +592,7 @@ class TestEdgeCases:
     async def test_absolute_child_fills_parent_completely(self):
         """Maps to test('absolute child fills parent completely')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -625,7 +630,7 @@ class TestEdgeCases:
     async def test_absolute_positioned_box_with_percentage_width_inside_absolute_parent(self):
         """Maps to test('absolute positioned box with percentage width inside absolute parent')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -662,7 +667,7 @@ class TestEdgeCases:
     async def test_absolute_positioned_box_with_percentage_height_inside_absolute_parent(self):
         """Maps to test('absolute positioned box with percentage height inside absolute parent')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -703,7 +708,7 @@ class TestEdgeCases:
     ):
         """Maps to test('absolute child with conflicting insets (left and right without explicit width)')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -747,7 +752,7 @@ class TestEdgeCases:
     ):
         """Maps to test('absolute child with conflicting insets (top and bottom without explicit height)')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -792,7 +797,7 @@ class TestComplexHierarchies:
     async def test_relative_parent_with_absolute_child_containing_absolute_grandchild(self):
         """Maps to test('relative parent with absolute child containing absolute grandchild')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -842,7 +847,7 @@ class TestComplexHierarchies:
     async def test_multiple_nested_relative_and_absolute_layers(self):
         """Maps to test('multiple nested relative and absolute layers')."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(

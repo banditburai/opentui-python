@@ -1,11 +1,3 @@
-"""CodeRenderable - syntax-highlighted code display component.
-
-Code block component with syntax highlighting via Tree-sitter.
-Renders code with optional syntax highlighting via a pluggable tree-sitter
-client interface. Supports streaming mode, concealment, draw modes, and
-onHighlight/onChunks callbacks.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -14,24 +6,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..enums import RenderStrategy
 from .text_renderable import TextRenderable
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
 
 
-# ---------------------------------------------------------------------------
-# SimpleHighlight type  (tuple: [start, end, group, meta?])
-# ---------------------------------------------------------------------------
-
-# A SimpleHighlight is a tuple of (start_offset, end_offset, group_name, optional_meta).
-# In Python we represent it as a tuple or list.
 SimpleHighlight = list  # [int, int, str] or [int, int, str, dict]
-
-
-# ---------------------------------------------------------------------------
-# SyntaxStyle
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -58,31 +40,17 @@ class SyntaxStyle:
 
     @classmethod
     def from_styles(cls, styles: dict[str, dict]) -> SyntaxStyle:
-        """Create a SyntaxStyle from a dict of style definitions.
-
-        Args:
-            styles: Maps group names to dicts with optional keys: fg, bg, bold, italic, etc.
-        """
         ss = cls()
         for name, style_def in styles.items():
-            sd = StyleDefinition()
-            if "fg" in style_def:
-                sd.fg = style_def["fg"]
-            if "bg" in style_def:
-                sd.bg = style_def["bg"]
-            if "bold" in style_def:
-                sd.bold = style_def["bold"]
-            if "italic" in style_def:
-                sd.italic = style_def["italic"]
-            if "underline" in style_def:
-                sd.underline = style_def["underline"]
-            if "dim" in style_def:
-                sd.dim = style_def["dim"]
-            ss.register_style(name, sd)
+            fields = {
+                k: style_def[k]
+                for k in ("fg", "bg", "bold", "italic", "underline", "dim")
+                if k in style_def
+            }
+            ss.register_style(name, StyleDefinition(**fields))
         return ss
 
     def register_style(self, name: str, style: StyleDefinition) -> int:
-        """Register a style and return its ID."""
         self._styles[name] = style
         if name not in self._style_ids:
             self._style_ids[name] = self._next_id
@@ -90,7 +58,6 @@ class SyntaxStyle:
         return self._style_ids[name]
 
     def get_style(self, name: str) -> StyleDefinition | None:
-        """Get a style by name, with fallback to base scope."""
         style = self._styles.get(name)
         if style is not None:
             return style
@@ -101,60 +68,28 @@ class SyntaxStyle:
         return None
 
     def get_style_id(self, name: str) -> int:
-        """Get the numeric ID for a style name."""
         if name not in self._style_ids:
             self._style_ids[name] = self._next_id
             self._next_id += 1
         return self._style_ids[name]
 
 
-# ---------------------------------------------------------------------------
-# TextChunk (simplified)
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class TextChunk:
-    """A chunk of styled text."""
-
     text: str
     fg: s.RGBA | None = None
     bg: s.RGBA | None = None
     attributes: int = 0
 
 
-# ---------------------------------------------------------------------------
-# LineHighlight (returned by getLineHighlights)
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class LineHighlight:
-    """A highlight span within a single line."""
-
     start: int
     end: int
     style_id: int
 
 
-# ---------------------------------------------------------------------------
-# TreeSitterClient interface
-# ---------------------------------------------------------------------------
-
-
 class TreeSitterClient:
-    """Base tree-sitter client interface.
-
-    Production implementations would communicate with a tree-sitter worker.
-    For testing, use MockTreeSitterClient.
-
-    The highlight pipeline has two phases:
-    1. ``start_highlight_once`` (synchronous) - creates a pending request
-    2. ``await`` the returned awaitable to get the result
-
-    ``highlight_once`` is the async convenience wrapper that does both.
-    """
-
     def __init__(self, options: dict | None = None) -> None:
         self._options = options or {}
 
@@ -163,11 +98,6 @@ class TreeSitterClient:
         content: str,
         filetype: str,
     ) -> asyncio.Future:
-        """Synchronously create a highlight request and return a future.
-
-        The default implementation returns an already-resolved future.
-        Override in subclasses to provide real async behavior.
-        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -181,37 +111,16 @@ class TreeSitterClient:
         content: str,
         filetype: str,
     ) -> dict:
-        """Highlight content and return result dict.
-
-        Returns:
-            {"highlights": [...], "warning": str|None, "error": str|None}
-        """
         return await self.start_highlight_once(content, filetype)
 
     async def initialize(self) -> None:
-        """Initialize the client (no-op in base)."""
+        pass
 
     async def preload_parser(self, filetype: str) -> None:
-        """Preload parser for a filetype (no-op in base)."""
-
-
-# ---------------------------------------------------------------------------
-# MockTreeSitterClient
-# ---------------------------------------------------------------------------
+        pass
 
 
 class MockTreeSitterClient(TreeSitterClient):
-    """Mock tree-sitter client for testing.
-
-    Queues highlight requests as
-    pending futures that can be resolved manually or auto-resolved after
-    a timeout.
-
-    Key design: ``start_highlight_once`` is synchronous - it creates the
-    future and appends to the pending list immediately. This mirrors JS
-    Promise behavior where the executor runs synchronously.
-    """
-
     def __init__(self, options: dict | None = None) -> None:
         super().__init__(options)
         self._highlight_futures: list[dict] = []
@@ -221,16 +130,9 @@ class MockTreeSitterClient(TreeSitterClient):
             self._auto_resolve_timeout = options["autoResolveTimeout"] / 1000.0
 
     def set_mock_result(self, result: dict) -> None:
-        """Set the result that will be returned when highlights are resolved."""
         self._mock_result = result
 
     def start_highlight_once(self, content: str, filetype: str) -> asyncio.Future:
-        """Synchronously create a pending highlight request.
-
-        Returns an asyncio.Future that will be resolved when
-        resolve_highlight_once() or resolve_all_highlight_once() is called.
-        This is synchronous so that is_highlighting() returns True immediately.
-        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -255,11 +157,9 @@ class MockTreeSitterClient(TreeSitterClient):
         return future
 
     async def highlight_once(self, content: str, filetype: str) -> dict:
-        """Queue a highlight request and await the result."""
         return await self.start_highlight_once(content, filetype)
 
     def resolve_highlight_once(self, index: int = 0) -> None:
-        """Resolve a pending highlight at the given index."""
         if 0 <= index < len(self._highlight_futures):
             entry = self._highlight_futures[index]
             future = entry["future"]
@@ -268,7 +168,6 @@ class MockTreeSitterClient(TreeSitterClient):
             self._highlight_futures.pop(index)
 
     def resolve_all_highlight_once(self) -> None:
-        """Resolve all pending highlights."""
         for entry in self._highlight_futures:
             future = entry["future"]
             if not future.done():
@@ -276,13 +175,7 @@ class MockTreeSitterClient(TreeSitterClient):
         self._highlight_futures.clear()
 
     def is_highlighting(self) -> bool:
-        """Check if there are pending highlight requests."""
-        return len(self._highlight_futures) > 0
-
-
-# ---------------------------------------------------------------------------
-# Highlight context types
-# ---------------------------------------------------------------------------
+        return bool(self._highlight_futures)
 
 
 @dataclass
@@ -300,27 +193,17 @@ class ChunkRenderContext:
     highlights: list
 
 
-# ---------------------------------------------------------------------------
-# tree_sitter_to_text_chunks - convert highlights to TextChunks
-# ---------------------------------------------------------------------------
-
-
 def tree_sitter_to_text_chunks(
     content: str,
     highlights: list,
     syntax_style: SyntaxStyle,
     conceal_options: dict | None = None,
 ) -> list[TextChunk]:
-    """Convert tree-sitter highlights to styled text chunks.
-
-    Converts Tree-sitter highlight ranges to styled text chunks.
-    """
     chunks: list[TextChunk] = []
     default_style = syntax_style.get_style("default")
     conceal_enabled = (conceal_options or {}).get("enabled", True)
 
     if not highlights:
-        # No highlights - return content with default style
         chunks.append(
             TextChunk(
                 text=content,
@@ -422,35 +305,6 @@ def tree_sitter_to_text_chunks(
     return chunks
 
 
-# ---------------------------------------------------------------------------
-# StyledText wrapper for text chunks
-# ---------------------------------------------------------------------------
-
-
-class StyledTextWrapper:
-    """Wrapper that converts TextChunks to a renderable text string.
-
-    The native text buffer only supports plain text. This wrapper converts
-    styled chunks to plain text for the buffer, while keeping the styled
-    chunks for highlight tracking.
-    """
-
-    def __init__(self, chunks: list[TextChunk]) -> None:
-        self._chunks = chunks
-
-    def to_plain_text(self) -> str:
-        return "".join(c.text for c in self._chunks)
-
-    @property
-    def chunks(self) -> list[TextChunk]:
-        return self._chunks
-
-
-# ---------------------------------------------------------------------------
-# CodeRenderable
-# ---------------------------------------------------------------------------
-
-
 class CodeRenderable(TextRenderable):
     """Code renderable with optional syntax highlighting.
 
@@ -474,6 +328,9 @@ class CodeRenderable(TextRenderable):
             syntax_style=syntax_style,
         )
     """
+
+    def get_render_strategy(self) -> RenderStrategy:
+        return RenderStrategy.HEAVY_WIDGET
 
     def __init__(
         self,
@@ -501,10 +358,8 @@ class CodeRenderable(TextRenderable):
             **kwargs,
         )
 
-        # Store context (renderer)
         self._ctx = ctx
 
-        # Code-specific state
         self._code_content = content
         self._filetype = filetype
         self._syntax_style = syntax_style or SyntaxStyle()
@@ -515,7 +370,6 @@ class CodeRenderable(TextRenderable):
         self._on_highlight = on_highlight
         self._on_chunks = on_chunks
 
-        # Highlighting state
         self._is_highlighting = False
         self._highlights_dirty = False
         self._highlight_snapshot_id = 0
@@ -538,8 +392,6 @@ class CodeRenderable(TextRenderable):
             self._should_render_text_buffer = self._draw_unstyled_text or not self._filetype
             self._highlights_dirty = True
 
-    # ── Content property ────────────────────────────────────────────
-
     @property
     def content(self) -> str:
         return self._code_content
@@ -559,8 +411,6 @@ class CodeRenderable(TextRenderable):
             self._text_buffer.set_text(value)
             self._update_text_info()
 
-    # ── Filetype property ───────────────────────────────────────────
-
     @property
     def filetype(self) -> str | None:
         return self._filetype
@@ -570,8 +420,6 @@ class CodeRenderable(TextRenderable):
         if self._filetype != value:
             self._filetype = value
             self._highlights_dirty = True
-
-    # ── SyntaxStyle property ────────────────────────────────────────
 
     @property
     def syntax_style(self) -> SyntaxStyle:
@@ -583,8 +431,6 @@ class CodeRenderable(TextRenderable):
             self._syntax_style = value
             self._highlights_dirty = True
 
-    # ── Conceal property ────────────────────────────────────────────
-
     @property
     def conceal(self) -> bool:
         return self._conceal
@@ -595,8 +441,6 @@ class CodeRenderable(TextRenderable):
             self._conceal = value
             self._highlights_dirty = True
 
-    # ── drawUnstyledText property ───────────────────────────────────
-
     @property
     def draw_unstyled_text(self) -> bool:
         return self._draw_unstyled_text
@@ -606,8 +450,6 @@ class CodeRenderable(TextRenderable):
         if self._draw_unstyled_text != value:
             self._draw_unstyled_text = value
             self._highlights_dirty = True
-
-    # ── Streaming property ──────────────────────────────────────────
 
     @property
     def streaming(self) -> bool:
@@ -621,8 +463,6 @@ class CodeRenderable(TextRenderable):
             self._last_highlights = []
             self._highlights_dirty = True
 
-    # ── TreeSitterClient property ───────────────────────────────────
-
     @property
     def tree_sitter_client(self) -> TreeSitterClient:
         return self._tree_sitter_client
@@ -632,8 +472,6 @@ class CodeRenderable(TextRenderable):
         if self._tree_sitter_client is not value:
             self._tree_sitter_client = value
             self._highlights_dirty = True
-
-    # ── onHighlight property ────────────────────────────────────────
 
     @property
     def on_highlight(self) -> Any:
@@ -645,8 +483,6 @@ class CodeRenderable(TextRenderable):
             self._on_highlight = value
             self._highlights_dirty = True
 
-    # ── onChunks property ───────────────────────────────────────────
-
     @property
     def on_chunks(self) -> Any:
         return self._on_chunks
@@ -657,44 +493,26 @@ class CodeRenderable(TextRenderable):
             self._on_chunks = value
             self._highlights_dirty = True
 
-    # ── isHighlighting property ─────────────────────────────────────
-
     @property
     def is_highlighting(self) -> bool:
         return self._is_highlighting
 
-    # ── Plain text override ─────────────────────────────────────────
-
     @property
     def plain_text(self) -> str:
-        """Return content even if text buffer hasn't been updated yet."""
         return self._text_buffer.get_plain_text()
-
-    # ── Line count override ─────────────────────────────────────────
 
     @property
     def line_count(self) -> int:
-        """Return line count based on content, even before highlighting."""
-        # The text buffer should always have the content for line counting
         return self._text_buffer.get_line_count()
-
-    # ── Text length override ────────────────────────────────────────
 
     @property
     def text_length(self) -> int:
-        """Return text length based on content."""
         return self._text_buffer.get_length()
 
-    # ── Line highlights ─────────────────────────────────────────────
-
     def get_line_highlights(self, line_idx: int) -> list[LineHighlight]:
-        """Get highlights for a specific line."""
         return self._line_highlights.get(line_idx, [])
 
-    # ── Ensure visible text before highlight ────────────────────────
-
     def _ensure_visible_text_before_highlight(self) -> None:
-        """Set _should_render_text_buffer based on current state."""
         if self._code_destroyed:
             return
 
@@ -719,22 +537,10 @@ class CodeRenderable(TextRenderable):
         else:
             self._should_render_text_buffer = False
 
-    # ── Start highlight ─────────────────────────────────────────────
-
     def _start_highlight_sync(self) -> None:
-        """Synchronously initiate highlighting and schedule async completion.
-
-        This mirrors JS behavior where calling an async function executes
-        synchronously until the first real await. The tree-sitter client's
-        ``start_highlight_once`` creates the pending request synchronously,
-        making ``is_highlighting()`` return True immediately. The async
-        completion (waiting for result, processing highlights) is scheduled
-        via asyncio.ensure_future.
-
-        When the client's ``highlight_once`` has been monkey-patched (e.g. for
-        call counting in tests), we detect this and call the patched version
-        instead, preserving the wrapper's side effects.
-        """
+        # start_highlight_once runs synchronously so is_highlighting()
+        # is True immediately; async completion is scheduled separately.
+        # Falls back to highlight_once when it's been monkey-patched.
         content = self._code_content
         filetype = self._filetype
         self._highlight_snapshot_id += 1
@@ -797,7 +603,6 @@ class CodeRenderable(TextRenderable):
         filetype: str,
         snapshot_id: int,
     ) -> None:
-        """Async completion: await the highlight result and process it."""
         try:
             result = await result_future
             await self._process_highlight_result(result, content, filetype, snapshot_id)
@@ -811,7 +616,6 @@ class CodeRenderable(TextRenderable):
         filetype: str,
         snapshot_id: int,
     ) -> None:
-        """Async completion from a coroutine (for clients without start_highlight_once)."""
         try:
             result = await coro
             await self._process_highlight_result(result, content, filetype, snapshot_id)
@@ -825,7 +629,6 @@ class CodeRenderable(TextRenderable):
         filetype: str,
         snapshot_id: int,
     ) -> None:
-        """Process a highlight result dict."""
         if snapshot_id != self._highlight_snapshot_id:
             return
 
@@ -841,7 +644,6 @@ class CodeRenderable(TextRenderable):
                 syntax_style=self._syntax_style,
             )
             modified = self._on_highlight(highlights, context)
-            # Handle async callbacks
             if asyncio.iscoroutine(modified):
                 modified = await modified
             if modified is not None:
@@ -899,7 +701,6 @@ class CodeRenderable(TextRenderable):
         self.mark_dirty()
 
     def _handle_highlight_error(self, content: str, snapshot_id: int) -> None:
-        """Handle highlight failure by falling back to plain text."""
         if snapshot_id != self._highlight_snapshot_id:
             return
 
@@ -914,7 +715,6 @@ class CodeRenderable(TextRenderable):
         self.mark_dirty()
 
     def _build_line_highlights(self, content: str, highlights: list) -> None:
-        """Build per-line highlight data from highlights."""
         self._line_highlights.clear()
         if not highlights:
             return
@@ -932,11 +732,9 @@ class CodeRenderable(TextRenderable):
             group = hl[2]
             style_id = self._syntax_style.get_style_id(group)
 
-            # Find which lines this highlight spans
             for line_idx, line_offset in enumerate(line_offsets):
                 line_end = line_offset + len(lines[line_idx])
                 if start < line_end and end > line_offset:
-                    # Highlight intersects this line
                     hl_start = max(0, start - line_offset)
                     hl_end = min(len(lines[line_idx]), end - line_offset)
                     if hl_start < hl_end:
@@ -946,13 +744,7 @@ class CodeRenderable(TextRenderable):
                             LineHighlight(start=hl_start, end=hl_end, style_id=style_id)
                         )
 
-    # ── Render self (called each frame) ─────────────────────────────
-
     def _render_self(self, buffer: Any) -> None:
-        """Process highlights dirty flag and trigger highlighting.
-
-        Called from render() each frame.
-        """
         if self._highlights_dirty:
             if self._code_destroyed:
                 return
@@ -974,7 +766,6 @@ class CodeRenderable(TextRenderable):
                 self._start_highlight_sync()
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render code to the buffer."""
         if not self._visible:
             return
 
@@ -985,10 +776,7 @@ class CodeRenderable(TextRenderable):
 
         super().render(buffer, delta_time)
 
-    # ── Destroy ─────────────────────────────────────────────────────
-
     def destroy(self) -> None:
-        """Clean up resources."""
         self._code_destroyed = True
         self._line_highlights.clear()
         self._styled_chunks.clear()

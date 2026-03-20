@@ -7,18 +7,44 @@ and inserts unmatched new nodes.
 
 from __future__ import annotations
 
-import logging
 import types
+from collections import defaultdict, deque
 from typing import TYPE_CHECKING
 
+from .components.base import _SIMPLE_DEFAULTS
+from .components.box import ScrollBox
 from .components.control_flow import For, Portal
 
 if TYPE_CHECKING:
     from .components.base import BaseRenderable
 
-log = logging.getLogger(__name__)
-
 _SENTINEL = object()
+
+_NOT_LOADED = object()
+_native_patch_fn = _NOT_LOADED
+
+# Lazy-cached Text type for _patch_text_fast_path (avoids per-call import)
+_Text_type: type | None = None
+
+
+def _load_native_patch() -> None:
+    global _native_patch_fn
+    _native_patch_fn = None
+    try:
+        import sys
+
+        mod = getattr(sys.modules.get("opentui_bindings"), "reconciler_patch", None)
+        if mod is None:
+            return
+        init_fn = getattr(mod, "init_skip_attrs", None)
+        patch_fn = getattr(mod, "patch_node_fast", None)
+        if init_fn is None or patch_fn is None:
+            return
+        init_fn(list(_SKIP_ATTRS), types.MethodType)
+        _native_patch_fn = patch_fn
+    except Exception:
+        pass
+
 
 # Attributes that must NOT be copied during patching — these are either
 # identity / tree-structure fields managed by the reconciler itself, or
@@ -35,13 +61,12 @@ _SKIP_ATTRS: frozenset[str] = frozenset(
         "_event_handlers",
         "_cleanups",
         "_dirty",
+        "_subtree_dirty",
         "_destroyed",
         # Layout engine state (recomputed by yoga each frame)
         "_yoga_node",
         "_x",
         "_y",
-        "_layout_x",
-        "_layout_y",
         "_layout_width",
         "_layout_height",
         # Image render state (preserved from old node)
@@ -71,18 +96,51 @@ _SKIP_ATTRS: frozenset[str] = frozenset(
         # they should update on reconciliation so Portal picks up new mount
         # targets and ref callbacks from the latest render output.
         "_container",
+        "_scroll_content",
         "_current_mount",
         "_host",
         "_content_children",
+        # Reactive subscription state (Show/Switch/For fine-grained reactivity)
+        "_prop_bindings",
+        "_condition_cleanup",
+        "_data_cleanup",
+        "_current_branch",
+        "_current_branch_key",
+        "_is_active",
+        # Reentrancy guards (Show/Switch/For reactive updates)
+        "_updating",
+        "_reconciling",
+        "_computing",
+        # Branch cache (Show/Switch) + For item cache
+        "_render_cache",
+        "_fallback_cache",
+        "_branch_cache",
+        "_last_items",
+        # ErrorBoundary internal state
+        "_error",
+        "_has_error",
     }
 )
 
-# Cache: type → tuple of patchable slot names
 _slots_cache: dict[type, tuple[str, ...]] = {}
+_dict_presence_cache: dict[type, bool] = {}
+
+_SIMPLE_TEXT_SLOT_DEFAULTS: tuple[tuple[str, object], ...] = tuple(_SIMPLE_DEFAULTS.items())
+_SIMPLE_TEXT_DICT_ATTRS: tuple[str, ...] = (
+    "_content",
+    "_bold",
+    "_italic",
+    "_underline",
+    "_strikethrough",
+    "_selection_start",
+    "_selection_end",
+    "_selection_bg",
+    "_wrap_mode",
+    "_text_modifiers",
+)
 
 
 def _patchable_slots(cls: type) -> tuple[str, ...]:
-    """Collect all __slots__ from the MRO, minus the skip set.  Cached per type."""
     cached = _slots_cache.get(cls)
     if cached is not None:
         return cached
@@ -98,9 +156,17 @@ def _patchable_slots(cls: type) -> tuple[str, ...]:
     return result
 
 
+def _has_instance_dict(cls: type) -> bool:
+    cached = _dict_presence_cache.get(cls)
+    if cached is not None:
+        return cached
+    result = any("__dict__" in klass.__dict__ for klass in cls.__mro__)
+    _dict_presence_cache[cls] = result
+    return result
+
+
 def _node_key(node: BaseRenderable) -> tuple[type, str | int | None]:
-    """Return the reconciliation key for a node: (type, key)."""
-    return (type(node), getattr(node, "key", None))
+    return (type(node), node.key)
 
 
 def _init_nested_fors(node: BaseRenderable) -> None:
@@ -124,6 +190,97 @@ def _init_nested_fors(node: BaseRenderable) -> None:
         _init_nested_fors(child)
 
 
+def _can_patch_positionally(
+    old_children: list[BaseRenderable],
+    new_children: list[BaseRenderable],
+) -> bool:
+    """Return True when children can be matched pairwise in place.
+
+    This is the common rebuild case for stable trees: same arity, same types,
+    and same keys in the same order. In that case we can skip key maps and
+    avoid rebuilding the parent's yoga child list.
+    """
+    if len(old_children) != len(new_children):
+        return False
+    return all(
+        type(old_child) is type(new_child) and old_child.key == new_child.key
+        for old_child, new_child in zip(old_children, new_children)
+    )
+
+
+def _reconcile_matched_child(
+    parent: BaseRenderable,
+    matched: BaseRenderable,
+    new_child: BaseRenderable,
+) -> BaseRenderable:
+    _patch_node(matched, new_child)
+
+    # Clean up reactive subscriptions on the discarded new node.
+    # The old node keeps its own subscriptions (in _SKIP_ATTRS);
+    # the new node's subscriptions were created in __init__ and
+    # would otherwise be orphaned, leaking into Signal._subscribers.
+    for cleanup_attr in ("_condition_cleanup", "_data_cleanup"):
+        _cleanup_fn = getattr(new_child, cleanup_attr, None)
+        if _cleanup_fn is not None:
+            _cleanup_fn()
+            object.__setattr__(new_child, cleanup_attr, None)
+    # Generic reactive prop bindings — source-identity optimization
+    new_prop_bindings = getattr(new_child, "_prop_bindings", None)
+    old_prop_bindings = getattr(matched, "_prop_bindings", None)
+
+    if new_prop_bindings:
+        for _attr, _new_binding in list(new_prop_bindings.items()):
+            _old_binding = old_prop_bindings.get(_attr) if old_prop_bindings else None
+            if _old_binding and _old_binding.source is _new_binding.source:
+                # Same source object — keep old subscription, unsub new only
+                # (must NOT dispose shared source via full cleanup)
+                _new_binding.unsub_only()
+            else:
+                # Different source — unsub new's callback (without disposing
+                # the source), then re-bind on old with the still-alive source.
+                _new_binding.unsub_only()
+                if _old_binding:
+                    matched._unbind_reactive_prop(_attr)
+                matched._bind_reactive_prop(_attr, _new_binding.source)
+            # Remove cleanup from new node's _cleanups to prevent leak
+            new_child._cleanups.pop(id(_new_binding.cleanup), None)
+        new_child._prop_bindings = None
+
+        # Clean up old bindings for attrs not in new (reactive→static)
+        if old_prop_bindings:
+            for _attr in list(old_prop_bindings):
+                if _attr not in new_prop_bindings:
+                    matched._unbind_reactive_prop(_attr)
+    elif old_prop_bindings:
+        # All reactive→static: clean up everything
+        matched._unbind_all_reactive_props()
+
+    if isinstance(matched, For):
+        matched._reconcile_children()
+    elif isinstance(matched, ScrollBox):
+        assert isinstance(new_child, ScrollBox)
+        matched._copy_content_layout_from(new_child)
+        old_content = list(matched._scroll_content._children)
+        new_content = list(new_child._scroll_content._children)
+        reconcile(matched._scroll_content, old_content, new_content)
+    elif isinstance(matched, Portal):
+        assert isinstance(new_child, Portal)
+        if matched._container is not None:
+            old_content = list(matched._container._children)
+            new_content = list(new_child._content_children)
+            reconcile(matched._container, old_content, new_content)
+        else:
+            # Container not yet created — update content children for next _ensure_container
+            matched._content_children = list(new_child._content_children)
+    else:
+        old_grandchildren = list(matched._children)
+        new_grandchildren = list(new_child._children)
+        reconcile(matched, old_grandchildren, new_grandchildren)
+
+    matched._parent = parent
+    return matched
+
+
 def reconcile(
     parent: BaseRenderable,
     old_children: list[BaseRenderable],
@@ -135,69 +292,44 @@ def reconcile(
     - Unmatched old: destroy
     - Unmatched new: insert as-is
     """
+    if _can_patch_positionally(old_children, new_children):
+        result = [
+            _reconcile_matched_child(parent, matched, new_child)
+            for matched, new_child in zip(old_children, new_children)
+        ]
+        parent._children = result
+        parent._children_tuple = None
+        parent._subtree_dirty = True
+        return
+
     old_by_key: dict[tuple[type, str | int | None], BaseRenderable] = {}
-    old_unkeyed: list[BaseRenderable] = []
+    old_unkeyed_by_type: defaultdict[type, deque[BaseRenderable]] = defaultdict(deque)
 
     for child in old_children:
         key = _node_key(child)
         if key[1] is not None:
             old_by_key[key] = child
         else:
-            old_unkeyed.append(child)
+            old_unkeyed_by_type[type(child)].append(child)
 
-    matched_old: set[int] = set()  # IDs of matched old nodes
+    matched_old: set[int] = set()
     result: list[BaseRenderable] = []
-    unkeyed_idx = 0
 
     for new_child in new_children:
         key = _node_key(new_child)
         matched = None
 
         if key[1] is not None and key in old_by_key:
-            # Keyed match
             matched = old_by_key.pop(key)
         elif key[1] is None:
-            # Try to match an unkeyed old node of the same type
-            while unkeyed_idx < len(old_unkeyed):
-                candidate = old_unkeyed[unkeyed_idx]
-                unkeyed_idx += 1
-                if type(candidate) is type(new_child):
-                    matched = candidate
-                    break
+            new_type = type(new_child)
+            if new_type in old_unkeyed_by_type and old_unkeyed_by_type[new_type]:
+                matched = old_unkeyed_by_type[new_type].popleft()
 
         if matched is not None:
             matched_old.add(id(matched))
-            # Patch: copy props from new to old, keeping old identity
-            _patch_node(matched, new_child)
-
-            # For component: self-managed idiomorph reconciliation
-            if isinstance(matched, For):
-                matched._reconcile_children()
-            elif isinstance(matched, Portal):
-                # Portal manages its own container children
-                new_portal = new_child  # Same type as matched (Portal)
-                assert isinstance(new_portal, Portal)
-                if matched._container is not None:
-                    old_content = list(matched._container._children)
-                    new_content = list(new_portal._content_children)
-                    matched._container._children.clear()
-                    matched._container._children_tuple = None
-                    reconcile(matched._container, old_content, new_content)
-                else:
-                    # Container not yet created — update content children for next _ensure_container
-                    matched._content_children = list(new_portal._content_children)
-            elif hasattr(new_child, "_children"):
-                # Normal recursive reconciliation
-                old_grandchildren = list(matched._children)
-                new_grandchildren = list(new_child._children)
-                matched._children.clear()
-                matched._children_tuple = None
-                reconcile(matched, old_grandchildren, new_grandchildren)
-
-            matched._parent = parent
-            result.append(matched)
+            result.append(_reconcile_matched_child(parent, matched, new_child))
         else:
-            # New node — insert as-is
             new_child._parent = parent
             # Recursively init any For nodes in the new subtree.
             # For nodes are lazy (no _reconcile_children in __init__)
@@ -207,6 +339,7 @@ def reconcile(
 
     parent._children = result
     parent._children_tuple = None
+    parent._subtree_dirty = True
 
     # Sync yoga tree BEFORE destroying unmatched old nodes.
     #
@@ -217,14 +350,19 @@ def reconcile(
     # freed memory.  By syncing first, we detach all old yoga children
     # from the parent (via remove_all_children) while they're still alive,
     # making the subsequent destroy safe.
-    if parent._yoga_node is not None:
-        parent._yoga_node.remove_all_children()
+    yoga_structure_changed = len(result) != len(old_children) or any(
+        child is not old_child for child, old_child in zip(result, old_children)
+    )
+
+    if parent._yoga_node is not None and yoga_structure_changed:
+        yoga_children = []
         for child in result:
             if child._yoga_node is not None:
                 yoga_owner = child._yoga_node.owner
-                if yoga_owner is not None:
+                if yoga_owner is not None and yoga_owner is not parent._yoga_node:
                     yoga_owner.remove_child(child._yoga_node)
-                parent._yoga_node.insert_child(child._yoga_node, parent._yoga_node.child_count)
+                yoga_children.append(child._yoga_node)
+        parent._yoga_node.set_children(yoga_children)
 
     # Now safe to destroy unmatched old nodes — their yoga nodes are no
     # longer referenced by the parent's yoga tree.
@@ -244,29 +382,48 @@ def _patch_node(old: BaseRenderable, new: BaseRenderable) -> None:
     Handles both __slots__-based attrs (from base classes) and __dict__-based
     attrs (from subclasses that don't define __slots__).
     """
-    # 1. Patch slot-based attributes (from BaseRenderable / Renderable)
+    if _patch_text_fast_path(old, new):
+        return
+
+    global _native_patch_fn
+    if _native_patch_fn is _NOT_LOADED:
+        _load_native_patch()
+
+    if _native_patch_fn is not None:
+        changed, needs_dict = _native_patch_fn(old, new)
+        if needs_dict:
+            _patch_dict_attrs(old, new, changed)
+        elif changed:
+            old.mark_dirty()
+        return
+
+    get = object.__getattribute__
+    set_attr = object.__setattr__
+
     changed = False
     for attr in _patchable_slots(type(new)):
-        try:
-            new_val = _rebind_bound_method(getattr(new, attr), old, new)
-            if new_val is not getattr(old, attr, _SENTINEL):
-                setattr(old, attr, new_val)
-                changed = True
-        except AttributeError:
-            pass  # Slot exists on new's class but not old's
+        new_val = _rebind_bound_method(get(new, attr), old, new)
+        if not _same_value(get(old, attr), new_val):
+            set_attr(old, attr, new_val)
+            changed = True
 
-    # 2. Patch __dict__-based attributes (from subclasses like Text, Code, etc.)
-    new_dict = getattr(new, "__dict__", None)
-    if new_dict:
-        for attr, value in new_dict.items():
-            if attr not in _SKIP_ATTRS:
-                try:
-                    new_val = _rebind_bound_method(value, old, new)
-                    if new_val is not getattr(old, attr, _SENTINEL):
-                        setattr(old, attr, new_val)
-                        changed = True
-                except AttributeError:
-                    pass
+    if _has_instance_dict(type(new)):
+        _patch_dict_attrs(old, new, changed)
+    elif changed:
+        old.mark_dirty()
+
+
+def _patch_dict_attrs(old: BaseRenderable, new: BaseRenderable, changed: bool) -> None:
+    get = object.__getattribute__
+    set_attr = object.__setattr__
+    new_dict = get(new, "__dict__")
+    old_dict = get(old, "__dict__")
+    for attr, value in new_dict.items():
+        if attr not in _SKIP_ATTRS:
+            new_val = _rebind_bound_method(value, old, new)
+            if not _same_value(old_dict.get(attr, _SENTINEL), new_val):
+                set_attr(old, attr, new_val)
+                changed = True
 
     if changed:
         old.mark_dirty()
@@ -284,3 +441,56 @@ def _rebind_bound_method(value: object, old: BaseRenderable, new: BaseRenderable
     if isinstance(value, types.MethodType) and value.__self__ is new:
         return value.__func__.__get__(old, type(old))
     return value
+
+
+def _same_value(old_value: object, new_value: object) -> bool:
+    if old_value is new_value:
+        return True
+    if old_value is _SENTINEL or new_value is _SENTINEL:
+        return False
+    try:
+        return bool(old_value == new_value)
+    except Exception:
+        return False
+
+
+def _patch_text_fast_path(old: BaseRenderable, new: BaseRenderable) -> bool:
+    global _Text_type
+    if _Text_type is None:
+        from .components.text import Text
+
+        _Text_type = Text
+    Text = _Text_type
+
+    if type(old) is not Text or type(new) is not Text:
+        return False
+    if old._children or new._children:
+        return False
+    if not (_is_simple_text_shape(old) and _is_simple_text_shape(new)):
+        return False
+
+    changed = False
+
+    for attr in _SIMPLE_TEXT_DICT_ATTRS:
+        new_val = object.__getattribute__(new, attr)
+        old_val = object.__getattribute__(old, attr)
+        if not _same_value(old_val, new_val):
+            object.__setattr__(old, attr, new_val)
+            changed = True
+
+    if changed:
+        old.mark_dirty()
+    return True
+
+
+def _is_simple_text_shape(node: object) -> bool:
+    # Fast path: _is_simple flag is maintained by _set_or_bind during __init__
+    try:
+        return node._is_simple  # type: ignore[union-attr]
+    except AttributeError:
+        pass
+    get = object.__getattribute__
+    for attr, default in _SIMPLE_TEXT_SLOT_DEFAULTS:
+        if not _same_value(get(node, attr), default):
+            return False
+    return True

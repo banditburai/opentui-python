@@ -26,6 +26,11 @@ from opentui.components.control_flow import Show
 from opentui.signals import Signal
 
 
+async def _strict_render(component_fn, options):
+    merged = dict(options)
+    return await _test_render(component_fn, merged)
+
+
 # Sample diff content used across tests
 OLD_TEXT = """\
 function hello() {
@@ -62,7 +67,7 @@ class TestDiffRenderableWithSolidJS:
         with "+ ", and context lines with "  ".
         """
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Diff(
                     old_text=OLD_TEXT,
@@ -109,7 +114,7 @@ class TestDiffRenderableWithSolidJS:
         component creates and renders without error and produces diff output.
         """
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Diff(
                     old_text=OLD_TEXT,
@@ -194,7 +199,7 @@ class TestDiffRenderableWithSolidJS:
         diff content after toggling.
         """
 
-        show_diff = Signal("show_diff", True)
+        show_diff = Signal(True, name="show_diff")
 
         def make_component():
             return Box(
@@ -217,19 +222,18 @@ class TestDiffRenderableWithSolidJS:
                 height="100%",
             )
 
-        setup = await _test_render(make_component, {"width": 60, "height": 20})
+        setup = await _strict_render(
+            make_component,
+            {"width": 60, "height": 20},
+        )
         frame = setup.capture_char_frame()
 
         # Initially the diff is visible
         assert "hello" in frame
         assert "world" in frame
 
-        # Toggle to hide the diff — rebuild the component tree
+        # Toggle to hide the diff through Show's reactive update path
         show_diff.set(False)
-        root = setup.renderer.root
-        root._children.clear()
-        root._yoga_node.remove_all_children()
-        root.add(make_component())
 
         frame = setup.capture_char_frame()
 
@@ -249,7 +253,7 @@ class TestDiffRenderableWithSolidJS:
         verifying that the split-mode component is correctly added and removed.
         """
 
-        show_diff = Signal("show_diff", True)
+        show_diff = Signal(True, name="show_diff")
 
         def make_component():
             return Box(
@@ -272,19 +276,18 @@ class TestDiffRenderableWithSolidJS:
                 height="100%",
             )
 
-        setup = await _test_render(make_component, {"width": 80, "height": 20})
+        setup = await _strict_render(
+            make_component,
+            {"width": 80, "height": 20},
+        )
         frame = setup.capture_char_frame()
 
         # Initially the split diff is visible
         assert "hello" in frame
         assert "world" in frame
 
-        # Toggle to hide the diff — rebuild the component tree
+        # Toggle to hide the diff through Show's reactive update path
         show_diff.set(False)
-        root = setup.renderer.root
-        root._children.clear()
-        root._yoga_node.remove_all_children()
-        root.add(make_component())
 
         frame = setup.capture_char_frame()
 

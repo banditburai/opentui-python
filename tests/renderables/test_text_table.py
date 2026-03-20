@@ -167,6 +167,51 @@ async def _create_table(setup, **kwargs):
 class TestTextTableRenderable:
     """Maps to describe("TextTableRenderable")."""
 
+    async def test_reuses_raster_cache_when_table_is_clean(self):
+        setup = await create_test_renderer(60, 16)
+        try:
+            class _CountingTable(TextTableRenderable):
+                __slots__ = ("border_calls", "cell_calls")
+
+                def __init__(self, **kwargs):
+                    super().__init__(**kwargs)
+                    self.border_calls = 0
+                    self.cell_calls = 0
+
+                def _draw_borders(self, buffer, base_x, base_y):
+                    self.border_calls += 1
+                    return super()._draw_borders(buffer, base_x, base_y)
+
+                def _draw_cells(self, buffer, base_x, base_y):
+                    self.cell_calls += 1
+                    return super()._draw_cells(buffer, base_x, base_y)
+
+            table = _CountingTable(
+                left=0,
+                top=0,
+                position="absolute",
+                column_width_mode="content",
+                content=[[cell("A"), cell("B")], [cell("1"), cell("2")]],
+            )
+            setup.renderer.root.add(table)
+            setup.render_frame()
+
+            table.border_calls = 0
+            table.cell_calls = 0
+
+            table._invalidate_raster_only()
+            setup.render_frame()
+            dirty_border_calls = table.border_calls
+            dirty_cell_calls = table.cell_calls
+            assert dirty_border_calls >= 1
+            assert dirty_cell_calls >= 1
+
+            setup.render_frame()
+            assert table.border_calls == dirty_border_calls
+            assert table.cell_calls == dirty_cell_calls
+        finally:
+            setup.destroy()
+
     async def test_renders_a_basic_table_with_styled_cell_chunks(self):
         """Maps to test("renders a basic table with styled cell chunks")."""
         setup = await create_test_renderer(60, 16)

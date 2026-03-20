@@ -30,7 +30,6 @@ class Input(Renderable):
     def __init__(
         self,
         value: str | None = None,
-        *children: Any,
         # Input options
         placeholder: str = "",
         max_length: int | None = None,
@@ -82,13 +81,13 @@ class Input(Renderable):
     def value(self, v: str) -> None:
         self._value = v
         self._cursor_position = min(self._cursor_position, len(v))
+        self.mark_dirty()
 
     @property
     def placeholder(self) -> str:
         return self._placeholder
 
     def insert_text(self, text: str) -> None:
-        """Insert text at cursor position."""
         if (
             self._max_length is not None
             and self._max_length > 0
@@ -104,7 +103,6 @@ class Input(Renderable):
         self.emit("input", new_value)
 
     def delete_char(self, forward: bool = False) -> None:
-        """Delete character at cursor position."""
         if forward:
             if self._cursor_position < len(self._value):
                 self.value = (
@@ -117,41 +115,39 @@ class Input(Renderable):
             self._cursor_position -= 1
 
     def move_cursor(self, offset: int) -> None:
-        """Move cursor by offset."""
         new_pos = self._cursor_position + offset
         self._cursor_position = max(0, min(len(self._value), new_pos))
+        self.mark_paint_dirty()
 
     def handle_key(self, event: KeyEvent) -> bool:
-        """Handle keyboard input.
-
-        Returns True if the event was handled.
-        """
         key = event.key.lower()
 
         if key == "backspace":
             self.delete_char(forward=False)
             return True
-        elif key == "delete":
+        if key == "delete":
             self.delete_char(forward=True)
             return True
-        elif key == "left":
+        if key == "left":
             self.move_cursor(-1)
             return True
-        elif key == "right":
+        if key == "right":
             self.move_cursor(1)
             return True
-        elif key == "home":
+        if key == "home":
             self._cursor_position = 0
+            self.mark_paint_dirty()
             return True
-        elif key == "end":
+        if key == "end":
             self._cursor_position = len(self._value)
+            self.mark_paint_dirty()
             return True
-        elif key in {"return", "enter"}:
+        if key in {"return", "enter"}:
             self.emit("submit", self._value)
             return True
-        elif key == "escape":
+        if key == "escape":
             return True
-        elif len(key) == 1:
+        if len(key) == 1:
             self.insert_text(key)
             return True
 
@@ -161,7 +157,6 @@ class Input(Renderable):
         return False
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the input."""
         if not self._visible:
             return
 
@@ -178,14 +173,13 @@ class Input(Renderable):
 
         if not display_text and self._placeholder:
             display_text = self._placeholder
-            text_color = s.RGBA(0.5, 0.5, 0.5, 1)  # Gray for placeholder
+            text_color = s.RGBA(0.5, 0.5, 0.5, 1)
 
         if len(display_text) > width:
             display_text = display_text[:width]
 
         buffer.draw_text(display_text, x, y, text_color, bg_color)
 
-        # Position the terminal's native cursor (blink handled by the terminal)
         if self._focused and self._show_cursor and self._cursor_position <= width:
             use_cursor(x + self._cursor_position, y)
             use_cursor_style(self._cursor_style, self._cursor_color)
@@ -210,7 +204,6 @@ class Textarea(Renderable):
 
     def __init__(
         self,
-        *children: Any,
         # Content
         value: str | None = None,
         initial_value: str | None = None,
@@ -282,6 +275,7 @@ class Textarea(Renderable):
     def value(self, v: str) -> None:
         self._value = v
         self._cursor_position = min(self._cursor_position, len(v))
+        self.mark_dirty()
         if self._yoga_node is not None:
             self._yoga_node.mark_dirty()
 
@@ -299,6 +293,7 @@ class Textarea(Renderable):
             v = "none"
         if self._wrap_mode != v:
             self._wrap_mode = v
+            self.mark_dirty()
             if self._yoga_node is not None:
                 self._yoga_node.mark_dirty()
 
@@ -330,7 +325,6 @@ class Textarea(Renderable):
         self._yoga_node.set_measure_func(measure)
 
     def insert_text(self, text: str) -> None:
-        """Insert text at cursor position."""
         new_value = (
             self._value[: self._cursor_position] + text + self._value[self._cursor_position :]
         )
@@ -339,7 +333,6 @@ class Textarea(Renderable):
         self.emit("input", new_value)
 
     def delete_char(self, forward: bool = False) -> None:
-        """Delete character at cursor position."""
         if forward:
             if self._cursor_position < len(self._value):
                 self.value = (
@@ -352,38 +345,39 @@ class Textarea(Renderable):
             self._cursor_position -= 1
 
     def move_cursor(self, offset: int) -> None:
-        """Move cursor by offset."""
         new_pos = self._cursor_position + offset
         self._cursor_position = max(0, min(len(self._value), new_pos))
+        self.mark_paint_dirty()
 
     def handle_key(self, event: KeyEvent) -> bool:
-        """Handle keyboard input. Returns True if handled."""
         key = event.key.lower()
 
         if key == "backspace":
             self.delete_char(forward=False)
             return True
-        elif key == "delete":
+        if key == "delete":
             self.delete_char(forward=True)
             return True
-        elif key == "left":
+        if key == "left":
             self.move_cursor(-1)
             return True
-        elif key == "right":
+        if key == "right":
             self.move_cursor(1)
             return True
-        elif key == "home":
+        if key == "home":
             self._cursor_position = 0
+            self.mark_paint_dirty()
             return True
-        elif key == "end":
+        if key == "end":
             self._cursor_position = len(self._value)
+            self.mark_paint_dirty()
             return True
-        elif key in {"return", "enter"}:
+        if key in {"return", "enter"}:
             self.insert_text("\n")
             return True
-        elif key == "escape":
+        if key == "escape":
             return True
-        elif len(key) == 1:
+        if len(key) == 1:
             self.insert_text(key)
             return True
 
@@ -432,13 +426,11 @@ class Textarea(Renderable):
             buffer.draw_text(line, x, y + i, draw_color, bg_color)
 
         if self._focused:
-            # Account for newlines when calculating cursor position
             text_before_cursor = self._value[: self._cursor_position]
             lines_before = text_before_cursor.split("\n")
             cursor_line = len(lines_before) - 1
             cursor_col = len(lines_before[-1])
 
-            # If wrapping is active, account for wrapped lines
             if self._wrap_mode != "none" and available_width > 0:
                 wrapped_line_count = 0
                 for i, raw_line in enumerate(self._value.split("\n")):
@@ -447,7 +439,6 @@ class Textarea(Renderable):
                     if i < cursor_line:
                         wrapped_line_count += num_wrapped
                     else:
-                        # This is the line the cursor is on
                         col = cursor_col
                         line_offset = 0
                         for wl in wrapped[:-1]:
@@ -467,8 +458,6 @@ class Textarea(Renderable):
 
 
 class SelectOption:
-    """Option for Select component."""
-
     def __init__(
         self,
         name: str,
@@ -497,7 +486,6 @@ class Select(Renderable):
     def __init__(
         self,
         options: list[SelectOption] | None = None,
-        *children: Any,
         # Selection
         selected: Any = None,
         # Focus
@@ -545,14 +533,13 @@ class Select(Renderable):
         return None
 
     def select(self, index: int) -> None:
-        """Select an option by index."""
         if 0 <= index < len(self._options):
             self._selected_index = index
+            self.mark_paint_dirty()
             self.emit("change", index, self.selected)
             self.emit("select", index, self.selected)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the select."""
         if not self._visible:
             return
 

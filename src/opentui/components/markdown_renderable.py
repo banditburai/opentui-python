@@ -1,12 +1,4 @@
-"""MarkdownRenderable - renders parsed markdown as terminal output.
-
-Markdown renderable component.
-
-Parses markdown via the incremental parser, then renders each block as
-a child renderable: tables become bordered text tables, code blocks become
-plain text (fences hidden), and everything else is rendered as markdown
-text with optional concealment of inline formatting markers.
-"""
+"""MarkdownRenderable - renders parsed markdown as terminal output."""
 
 from __future__ import annotations
 
@@ -15,19 +7,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ..enums import RenderStrategy
 from ..markdown_parser import MarkedToken, ParseState, parse_markdown_incremental
 from ..structs import display_width as _display_width
 from .base import Renderable
+from .text_renderable import TextRenderable as NativeTextRenderable
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
 
 
-# ---------------------------------------------------------------------------
-# Inline formatting helpers
-# ---------------------------------------------------------------------------
-
-# Regex for inline formatting patterns
 _RE_BOLD = re.compile(r"\*\*(.+?)\*\*")
 _RE_ITALIC = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
 _RE_CODE = re.compile(r"`(.*?)`")
@@ -63,13 +52,7 @@ def _strip_inline_formatting(text: str, conceal: bool = True) -> str:
 
 
 def _strip_table_cell(text: str, conceal: bool = True) -> str:
-    """Strip inline formatting from a table cell."""
     return _strip_inline_formatting(text.strip(), conceal)
-
-
-# ---------------------------------------------------------------------------
-# Table rendering helpers
-# ---------------------------------------------------------------------------
 
 
 def _parse_escaped_cells(row_text: str) -> list[str]:
@@ -169,43 +152,22 @@ def _render_table(
     return lines
 
 
-# ---------------------------------------------------------------------------
-# BlockState
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class BlockState:
-    """Tracks the state of a rendered markdown block."""
-
     token: MarkedToken
     token_raw: str
-    renderable: _MarkdownBlockRenderable
+    renderable: Renderable
     table_content_cache: Any = None
-
-
-# ---------------------------------------------------------------------------
-# Table content cache for identity-preserving updates
-# ---------------------------------------------------------------------------
 
 
 @dataclass
 class TableContentCache:
-    """Cache for table content, enabling identity-preserving updates."""
-
     # content is list of rows, each row is list of cells, each cell is list of chunks
     content: list[list[list[dict[str, str]]]]
     cell_keys: list[list[int]]
 
 
-# ---------------------------------------------------------------------------
-# _MarkdownBlockRenderable - renders a single markdown block
-# ---------------------------------------------------------------------------
-
-
 class _MarkdownBlockRenderable(Renderable):
-    """Renders a single markdown block (table, code, or text)."""
-
     __slots__ = (
         "_block_type",
         "_block_content",
@@ -250,8 +212,6 @@ class _MarkdownBlockRenderable(Renderable):
         self._setup_measure_func()
 
     def _setup_measure_func(self) -> None:
-        """Set up yoga measure function."""
-
         def measure(yoga_node, width, width_mode, height, height_mode):
             import yoga
 
@@ -281,6 +241,7 @@ class _MarkdownBlockRenderable(Renderable):
     def margin_bottom(self, value: int) -> None:
         if self._margin_bottom_val != value:
             self._margin_bottom_val = value
+            self.mark_dirty()
             if self._yoga_node is not None:
                 self._yoga_node.mark_dirty()
 
@@ -342,7 +303,6 @@ class _MarkdownBlockRenderable(Renderable):
         self._selectable_val = value
 
     def update_lines(self, lines: list[str], margin_bottom: int | None = None) -> None:
-        """Update the rendered lines."""
         self._block_lines = lines
         self._block_content = "\n".join(lines)
         if margin_bottom is not None:
@@ -352,7 +312,6 @@ class _MarkdownBlockRenderable(Renderable):
         self.mark_dirty()
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the block lines to the buffer."""
         if not self._visible or not self._block_lines:
             return
 
@@ -369,16 +328,10 @@ class _MarkdownBlockRenderable(Renderable):
                 buffer.draw_text(line, x, y + i)
 
     def _render_full_width_table(self, buffer: Buffer, x: int, y: int, avail_w: int) -> None:
-        """Render table lines, expanding to fill available width in full mode."""
         for i, line in enumerate(self._block_lines):
             if y + i >= buffer.height:
                 break
             buffer.draw_text(line, x, y + i)
-
-
-# ---------------------------------------------------------------------------
-# TextTableRenderable (lightweight, for isinstance checks)
-# ---------------------------------------------------------------------------
 
 
 class TextTableRenderable(_MarkdownBlockRenderable):
@@ -417,20 +370,45 @@ class TextTableRenderable(_MarkdownBlockRenderable):
         pass
 
 
-# ---------------------------------------------------------------------------
-# CodeRenderable (lightweight, for isinstance checks)
-# ---------------------------------------------------------------------------
+class CodeRenderable(Renderable):
+    """Markdown block wrapper backed by a real TextRenderable."""
 
+    __slots__ = (
+        "_filetype",
+        "_is_highlighting",
+        "_block_type",
+        "_block_lines",
+        "_block_content",
+        "_margin_bottom_val",
+        "_text_child",
+        "_spacer",
+    )
 
-class CodeRenderable(_MarkdownBlockRenderable):
-    """A code renderable - subclass for isinstance checks in tests."""
-
-    __slots__ = ("_filetype", "_is_highlighting")
-
-    def __init__(self, *, filetype: str = "", **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        *,
+        filetype: str = "",
+        block_type: str = "text",
+        lines: list[str] | None = None,
+        margin_bottom: int = 0,
+        **kwargs,
+    ):
+        super().__init__(flex_direction="column", **kwargs)
         self._filetype = filetype
         self._is_highlighting = False
+        self._block_type = block_type
+        self._block_lines = lines or []
+        self._block_content = "\n".join(self._block_lines)
+        self._margin_bottom_val = margin_bottom
+        self._text_child = NativeTextRenderable(
+            content=self._block_content,
+            wrap_mode="none",
+            selectable=False,
+            width="100%",
+        )
+        self._spacer = Renderable(height=margin_bottom, flex_grow=0, flex_shrink=0)
+        super().add(self._text_child)
+        super().add(self._spacer)
 
     @property
     def filetype(self) -> str:
@@ -444,15 +422,28 @@ class CodeRenderable(_MarkdownBlockRenderable):
     def is_highlighting(self) -> bool:
         return self._is_highlighting
 
+    @property
+    def margin_bottom(self) -> int:
+        return self._margin_bottom_val
 
-# ---------------------------------------------------------------------------
-# RenderNodeContext
-# ---------------------------------------------------------------------------
+    @margin_bottom.setter
+    def margin_bottom(self, value: int) -> None:
+        if self._margin_bottom_val != value:
+            self._margin_bottom_val = value
+            self._spacer.height = value
+            self.mark_dirty()
+
+    def update_lines(self, lines: list[str], margin_bottom: int | None = None) -> None:
+        self._block_lines = lines
+        self._block_content = "\n".join(lines)
+        self._text_child.content = self._block_content
+        if margin_bottom is not None:
+            self.margin_bottom = margin_bottom
+        else:
+            self.mark_dirty()
 
 
 class RenderNodeContext:
-    """Context passed to custom renderNode callbacks."""
-
     def __init__(
         self,
         syntax_style: Any,
@@ -468,15 +459,8 @@ class RenderNodeContext:
         self.default_render = default_render
 
 
-# ---------------------------------------------------------------------------
-# MarkdownTableOptions
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class MarkdownTableOptions:
-    """Options for internally rendered markdown tables."""
-
     width_mode: str = "full"
     column_fitter: str = "proportional"
     wrap_mode: str = "word"
@@ -486,11 +470,6 @@ class MarkdownTableOptions:
     border_style: str = "single"
     border_color: str = "#888888"
     selectable: bool = True
-
-
-# ---------------------------------------------------------------------------
-# MarkdownRenderable
-# ---------------------------------------------------------------------------
 
 
 class MarkdownRenderable(Renderable):
@@ -549,6 +528,9 @@ class MarkdownRenderable(Renderable):
 
         self._update_blocks()
 
+    def get_render_strategy(self) -> RenderStrategy:
+        return RenderStrategy.HEAVY_WIDGET
+
     # -- Public properties --
 
     @property
@@ -562,7 +544,7 @@ class MarkdownRenderable(Renderable):
         if self._content != value:
             self._content = value
             self._update_blocks()
-            self.request_render()
+            self.mark_dirty()
 
     @property
     def syntax_style(self) -> Any:
@@ -573,6 +555,7 @@ class MarkdownRenderable(Renderable):
         if self._syntax_style is not value:
             self._syntax_style = value
             self._style_dirty = True
+            self.mark_paint_dirty()
 
     @property
     def conceal(self) -> bool:
@@ -583,6 +566,7 @@ class MarkdownRenderable(Renderable):
         if self._conceal != value:
             self._conceal = value
             self._style_dirty = True
+            self.mark_paint_dirty()
 
     @property
     def conceal_code(self) -> bool:
@@ -593,6 +577,7 @@ class MarkdownRenderable(Renderable):
         if self._conceal_code != value:
             self._conceal_code = value
             self._style_dirty = True
+            self.mark_paint_dirty()
 
     @property
     def streaming(self) -> bool:
@@ -639,26 +624,17 @@ class MarkdownRenderable(Renderable):
     # -- Public methods --
 
     def clear_cache(self) -> None:
-        """Force full rebuild of parse state and blocks."""
         self._parse_state = None
         self._clear_block_states()
         self._update_blocks()
-        self.request_render()
-
-    def request_render(self) -> None:
-        """Request a re-render."""
-        self._dirty = True
-        if self._parent is not None:
-            self._parent.request_render()
+        self.mark_dirty()
 
     # -- Private methods --
 
     def _should_render_separately(self, token: MarkedToken) -> bool:
-        """Return True if this token type gets its own renderable."""
         return token.type in ("code", "table", "blockquote")
 
     def _get_inter_block_margin(self, token: MarkedToken, has_next: bool) -> int:
-        """Get the margin below a block."""
         if not has_next:
             return 0
         return 1 if self._should_render_separately(token) else 0
@@ -727,40 +703,31 @@ class MarkdownRenderable(Renderable):
     def _render_token_lines(
         self, token: MarkedToken, margin_bottom: int = 0
     ) -> tuple[str, list[str]]:
-        """Render a token to display lines, returning (block_type, lines)."""
         if token.type == "table":
             if token.rows:
                 table_lines = _render_table(token.header, token.rows, self._conceal)
                 return "table", table_lines
             else:
-                # Table with no data rows - render as raw text
                 return "text", token.raw.rstrip("\n").split("\n")
 
         if token.type == "code":
-            # Code block - show content without fences
             code_text = token.text
             if code_text.endswith("\n"):
                 code_text = code_text[:-1]
             return "code", code_text.split("\n") if code_text else []
 
         if token.type == "blockquote":
-            # Blockquotes - render as-is
             lines = token.raw.rstrip("\n").split("\n")
             return "text", lines
 
-        # Default: paragraph/heading/list/hr text block
         raw = token.raw.rstrip("\n")
         if not raw:
             return "text", []
 
         lines = raw.split("\n")
-        processed_lines = []
-        for line in lines:
-            processed_lines.append(self._process_text_line(line))
-        return "text", processed_lines
+        return "text", [self._process_text_line(line) for line in lines]
 
     def _process_text_line(self, line: str) -> str:
-        """Process a single text line, applying concealment as needed."""
         if self._conceal:
             # Heading concealment: remove "# " prefix
             heading_match = re.match(r"^(#{1,6})\s+(.*)$", line)
@@ -769,8 +736,7 @@ class MarkdownRenderable(Renderable):
 
             # Strip inline formatting
             return _strip_inline_formatting(line, True)
-        else:
-            return line
+        return line
 
     def _create_table_renderable(
         self,
@@ -778,7 +744,6 @@ class MarkdownRenderable(Renderable):
         block_id: str,
         margin_bottom: int = 0,
     ) -> TextTableRenderable:
-        """Create a table renderable from a table token."""
         table_lines = _render_table(token.header, token.rows, self._conceal)
 
         num_cols = len(token.header)
@@ -828,7 +793,6 @@ class MarkdownRenderable(Renderable):
         block_id: str,
         margin_bottom: int = 0,
     ) -> CodeRenderable:
-        """Create a code renderable from a code token."""
         code_text = token.text
         if code_text.endswith("\n"):
             code_text = code_text[:-1]
@@ -848,7 +812,6 @@ class MarkdownRenderable(Renderable):
         block_id: str,
         margin_bottom: int = 0,
     ) -> CodeRenderable:
-        """Create a markdown text renderable (paragraph/heading/etc)."""
         raw_stripped = raw.rstrip("\n")
         if not raw_stripped:
             return CodeRenderable(
@@ -927,7 +890,6 @@ class MarkdownRenderable(Renderable):
         renderable.column_fitter = self._table_options.column_fitter
 
     def _apply_table_options_to_blocks(self) -> None:
-        """Apply table options to all existing table blocks."""
         for state in self._block_states:
             if isinstance(state.renderable, TextTableRenderable):
                 state.renderable.column_width_mode = self._table_options.width_mode
@@ -942,16 +904,14 @@ class MarkdownRenderable(Renderable):
                 )
                 state.renderable.show_borders = self._table_options.borders
                 state.renderable.selectable = self._table_options.selectable
-        self.request_render()
+        self.mark_dirty()
 
     def _clear_block_states(self) -> None:
-        """Destroy all block states."""
         for state in self._block_states:
             state.renderable.destroy_recursively()
         self._block_states = []
 
     def _update_blocks(self, force_table_refresh: bool = False) -> None:
-        """Parse content and update block renderables."""
         if self.is_destroyed:
             return
 
@@ -1047,8 +1007,7 @@ class MarkdownRenderable(Renderable):
         token: MarkedToken,
         index: int,
         has_next: bool,
-    ) -> _MarkdownBlockRenderable | None:
-        """Create a new block renderable for a token."""
+    ) -> Renderable | None:
         block_id = f"{self._id}-block-{index}"
         margin_bottom = self._get_inter_block_margin(token, has_next)
 
@@ -1064,7 +1023,7 @@ class MarkdownRenderable(Renderable):
             custom = self._render_node(token, ctx)
             if custom is not None:
                 # Custom renderable - wrap if not our type
-                if isinstance(custom, _MarkdownBlockRenderable):
+                if isinstance(custom, _MarkdownBlockRenderable | CodeRenderable):
                     return custom
                 # For external renderables, wrap in a block
                 return _ExternalBlockRenderable(
@@ -1080,8 +1039,7 @@ class MarkdownRenderable(Renderable):
         token: MarkedToken,
         index: int,
         has_next: bool,
-    ) -> _MarkdownBlockRenderable | None:
-        """Create the default renderable for a token."""
+    ) -> Renderable | None:
         block_id = f"{self._id}-block-{index}"
         margin_bottom = self._get_inter_block_margin(token, has_next)
 
@@ -1110,7 +1068,6 @@ class MarkdownRenderable(Renderable):
         index: int,
         has_next: bool,
     ) -> None:
-        """Update an existing block renderable with new token data."""
         margin_bottom = self._get_inter_block_margin(token, has_next)
 
         if (
@@ -1126,7 +1083,6 @@ class MarkdownRenderable(Renderable):
         state.renderable.update_lines(lines, margin_bottom)
 
     def _rerender_blocks(self) -> None:
-        """Re-render all existing blocks (used for style/conceal changes)."""
         for i, state in enumerate(self._block_states):
             has_next = i < len(self._block_states) - 1
             token = state.token
@@ -1150,17 +1106,11 @@ class MarkdownRenderable(Renderable):
             state.renderable.update_lines(lines, margin_bottom)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the markdown content."""
         if self._style_dirty:
             self._style_dirty = False
             self._rerender_blocks()
 
         super().render(buffer, delta_time)
-
-
-# ---------------------------------------------------------------------------
-# _ExternalBlockRenderable - wraps an external renderable
-# ---------------------------------------------------------------------------
 
 
 class _ExternalBlockRenderable(_MarkdownBlockRenderable):
@@ -1172,9 +1122,7 @@ class _ExternalBlockRenderable(_MarkdownBlockRenderable):
         self.add(child)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the external child."""
         if not self._visible:
             return
         for child in self._children:
-            if isinstance(child, Renderable):
-                child.render(buffer, delta_time)
+            child.render(buffer, delta_time)

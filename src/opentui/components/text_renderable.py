@@ -1,10 +1,3 @@
-"""TextRenderable - native text buffer backed renderable.
-
-Text renderable with optional selection support.
-Manages text content via either direct content assignment or TextNode
-children, with native text buffer for measurement, wrapping, and selection.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -86,19 +79,16 @@ class TextRenderable(Renderable):
         self._text_buffer_view.set_wrap_mode(self._wrap_mode_str)
 
         self._selectable = selectable
-        self._selection_bg_color = self._parse_color(selection_bg)
-        self._selection_fg_color = self._parse_color(selection_fg)
+        self._set_or_bind("_selection_bg_color", selection_bg, transform=self._parse_color)
+        self._set_or_bind("_selection_fg_color", selection_fg, transform=self._parse_color)
 
-        # Truncation
-        self._truncate = truncate
+        self._set_or_bind("_truncate", truncate)
 
-        # Tab indicator
         self._tab_indicator = tab_indicator
-        self._tab_indicator_color = self._parse_color(tab_indicator_color)
+        self._set_or_bind("_tab_indicator_color", tab_indicator_color, transform=self._parse_color)
         if isinstance(tab_indicator, int) and tab_indicator > 0:
             self._text_buffer.set_tab_width(tab_indicator)
 
-        # Text attributes (bold, italic, etc.)
         self._text_attributes = attributes
         if attributes:
             self._text_buffer.set_default_attributes(attributes)
@@ -106,10 +96,8 @@ class TextRenderable(Renderable):
         # Manual styled text flag — prevents auto-gather from nodes
         self._has_manual_styled_text = False
 
-        # Mark as scroll target for scroll event dispatch
         self._is_scroll_target = True
 
-        # Selection state
         self._current_selection: dict[str, int] | None = None
         self._cross_renderable_selection_active = False
 
@@ -117,22 +105,28 @@ class TextRenderable(Renderable):
         # (content setter calls mark_dirty which requires measure func on leaf)
         self._setup_text_measure_func()
 
-        # Set initial content
         if content is not None:
             self.content = content
 
         self._on_mouse_scroll = self._handle_scroll_event
 
-    # ── Content properties ───────────────────────────────────────────
+        # Chain _on_size_change: update viewport offset when dimensions change.
+        # Preserve any user-provided on_size_change callback from kwargs.
+        _prev_on_size_change = self._on_size_change
+
+        def _text_size_change(w, h):
+            self._update_viewport_offset()
+            if _prev_on_size_change is not None:
+                _prev_on_size_change(w, h)
+
+        self._on_size_change = _text_size_change
 
     @property
     def content(self) -> str:
-        """Get the current text content as plain text."""
         return self._text_buffer.get_plain_text()
 
     @content.setter
     def content(self, value: StyledText | str) -> None:
-        """Set text content directly (marks as manual, disables node gathering)."""
         self._has_manual_styled_text = True
         if isinstance(value, StyledText):
             chunks = value.to_text_nodes()
@@ -146,31 +140,22 @@ class TextRenderable(Renderable):
 
     @property
     def plain_text(self) -> str:
-        """Get plain text from the buffer."""
         return self._text_buffer.get_plain_text()
 
     @property
     def text_length(self) -> int:
-        """Get the length of the text content."""
         return self._text_buffer.get_length()
 
     @property
     def line_count(self) -> int:
-        """Get the number of logical lines."""
         return self._text_buffer.get_line_count()
 
     @property
     def virtual_line_count(self) -> int:
-        """Get the number of virtual (wrapped) lines."""
         return self._text_buffer_view.get_virtual_line_count()
 
     @property
     def line_info(self):
-        """Get line layout info from the native text buffer view.
-
-        Returns a LineInfo-like object with line_sources, line_start_cols, etc.
-        Used by LineNumberRenderable to map visual lines to logical lines.
-        """
         from .line_number_renderable import LineInfo
 
         try:
@@ -187,33 +172,29 @@ class TextRenderable(Renderable):
 
     @property
     def text_node(self) -> TextNode:
-        """Get the root text node for child management."""
         return self._root_text_node
-
-    # ── Width/Height overrides ───────────────────────────────────────
-    # Width/height return computed layout values, not developer-specified values.
 
     @property
     def width(self) -> int:
-        """Width returns the computed layout width."""
         return self._layout_width
 
     @width.setter
     def width(self, value: int | str | None) -> None:
         self._width = value
+        if isinstance(value, int | float) and self._flex_shrink == 1:
+            self._flex_shrink = 0
         self.mark_dirty()
 
     @property
     def height(self) -> int:
-        """Height returns the computed layout height."""
         return self._layout_height
 
     @height.setter
     def height(self, value: int | str | None) -> None:
         self._height = value
+        if isinstance(value, int | float) and self._flex_shrink == 1:
+            self._flex_shrink = 0
         self.mark_dirty()
-
-    # ── Wrap mode ────────────────────────────────────────────────────
 
     @property
     def wrap_mode(self) -> str:
@@ -230,8 +211,6 @@ class TextRenderable(Renderable):
                 self._yoga_node.mark_dirty()
             self._update_text_info()
 
-    # ── Truncation ───────────────────────────────────────────────────
-
     @property
     def truncate(self) -> bool:
         return self._truncate
@@ -239,9 +218,7 @@ class TextRenderable(Renderable):
     @truncate.setter
     def truncate(self, value: bool) -> None:
         self._truncate = value
-        self.mark_dirty()
-
-    # ── Scroll properties ────────────────────────────────────────────
+        self.mark_paint_dirty()
 
     @property
     def scroll_x(self) -> int:
@@ -253,6 +230,7 @@ class TextRenderable(Renderable):
         if self._scroll_x != clamped:
             self._scroll_x = clamped
             self._update_viewport_offset()
+            self.mark_paint_dirty()
 
     @property
     def scroll_y(self) -> int:
@@ -264,10 +242,10 @@ class TextRenderable(Renderable):
         if self._scroll_y != clamped:
             self._scroll_y = clamped
             self._update_viewport_offset()
+            self.mark_paint_dirty()
 
     @property
     def scroll_width(self) -> int:
-        """Total content width (max line width in columns)."""
         result = self._text_buffer_view.measure_for_dimensions(0, 0)
         if result:
             return result.get("widthColsMax", 0)
@@ -275,22 +253,17 @@ class TextRenderable(Renderable):
 
     @property
     def scroll_height(self) -> int:
-        """Total content height (number of lines)."""
         return self.line_count
 
     @property
     def max_scroll_x(self) -> int:
-        """Maximum horizontal scroll position."""
         w = self._layout_width or 0
         return max(0, self.scroll_width - w)
 
     @property
     def max_scroll_y(self) -> int:
-        """Maximum vertical scroll position."""
         h = self._layout_height or 0
         return max(0, self.scroll_height - h)
-
-    # ── Selection ────────────────────────────────────────────────────
 
     @property
     def selectable(self) -> bool:
@@ -307,6 +280,7 @@ class TextRenderable(Renderable):
     @selection_bg.setter
     def selection_bg(self, value: s.RGBA | str | None) -> None:
         self._selection_bg_color = self._parse_color(value)
+        self.mark_paint_dirty()
 
     @property
     def selection_fg(self) -> s.RGBA | None:
@@ -315,13 +289,9 @@ class TextRenderable(Renderable):
     @selection_fg.setter
     def selection_fg(self, value: s.RGBA | str | None) -> None:
         self._selection_fg_color = self._parse_color(value)
+        self.mark_paint_dirty()
 
     def should_start_selection(self, x: int, y: int) -> bool:
-        """Return True if a selection should start at global (x, y).
-
-        Converts global coordinates to local and checks if the point
-        is within this renderable's bounds and selection is enabled.
-        """
         if not self._selectable:
             return False
         local_x = x - self._x
@@ -331,8 +301,7 @@ class TextRenderable(Renderable):
         return 0 <= local_x < w and 0 <= local_y < h
 
     def has_selection(self) -> bool:
-        """Return True if there is an active selection."""
-        # Use native text buffer view when cross-renderable selection is active
+
         if self._cross_renderable_selection_active:
             try:
                 if self._text_buffer_view.has_selection():
@@ -342,8 +311,7 @@ class TextRenderable(Renderable):
         return self._current_selection is not None
 
     def get_selection(self) -> dict[str, int] | None:
-        """Get the current selection as {"start": N, "end": N} or None."""
-        # Use native text buffer view when cross-renderable selection is active
+
         if self._cross_renderable_selection_active:
             try:
                 native_sel = self._text_buffer_view.get_selection()
@@ -354,8 +322,7 @@ class TextRenderable(Renderable):
         return self._current_selection
 
     def get_selected_text(self) -> str:
-        """Get the selected text content."""
-        # Use native text buffer view when cross-renderable selection is active
+
         if self._cross_renderable_selection_active:
             try:
                 native_text = self._text_buffer_view.get_selected_text()
@@ -374,13 +341,9 @@ class TextRenderable(Renderable):
         return text[start:end]
 
     def on_selection_changed(self, selection) -> bool:
-        """Handle selection change from the renderer (cross-renderable selection).
-
-        Converts global selection coordinates to local and applies via the
+        """Converts global selection coordinates to local and applies via the
         native text buffer view's local selection API.  Returns True if this
         renderable has a selection after the change.
-
-        Handles selection change from the renderer.
         """
         from ..selection import convert_global_to_local_selection
 
@@ -390,7 +353,7 @@ class TextRenderable(Renderable):
             self._cross_renderable_selection_active = False
             self._text_buffer_view.reset_local_selection()
             self._current_selection = None
-            self.mark_dirty()
+            self.mark_paint_dirty()
             return False
 
         self._cross_renderable_selection_active = True
@@ -416,12 +379,11 @@ class TextRenderable(Renderable):
             )
 
         if changed:
-            self.mark_dirty()
+            self.mark_paint_dirty()
 
         return self.has_selection()
 
     def set_selection(self, start: int, end: int) -> None:
-        """Set a selection range by character offsets."""
         if start > end:
             start, end = end, start
         text = self._text_buffer.get_plain_text()
@@ -434,19 +396,16 @@ class TextRenderable(Renderable):
             self._current_selection = {"start": start, "end": end}
         with contextlib.suppress(Exception):
             self._text_buffer_view.set_selection(start, end)
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     def clear_selection(self) -> None:
-        """Clear the current selection."""
         self._current_selection = None
         self._cross_renderable_selection_active = False
         with contextlib.suppress(Exception):
             self._text_buffer_view.reset_selection()
         with contextlib.suppress(Exception):
             self._text_buffer_view.reset_local_selection()
-        self.mark_dirty()
-
-    # ── Tab indicator ────────────────────────────────────────────────
+        self.mark_paint_dirty()
 
     @property
     def tab_indicator(self) -> str | int | None:
@@ -466,9 +425,7 @@ class TextRenderable(Renderable):
     @tab_indicator_color.setter
     def tab_indicator_color(self, value: s.RGBA | str | None) -> None:
         self._tab_indicator_color = self._parse_color(value)
-        self.mark_dirty()
-
-    # ── Text attributes ──────────────────────────────────────────────
+        self.mark_paint_dirty()
 
     @property
     def attributes(self) -> int:
@@ -478,18 +435,9 @@ class TextRenderable(Renderable):
     def attributes(self, value: int) -> None:
         self._text_attributes = value
         self._text_buffer.set_default_attributes(value)
-        self.mark_dirty()
-
-    # ── TextNode child management ────────────────────────────────────
-    # TextNode/StyledText/str children go to the root text node.
-    # BaseRenderable children go to normal yoga children.
+        self.mark_paint_dirty()
 
     def add(self, child: Any, index: int | None = None) -> int:
-        """Add a child.
-
-        TextNode, StyledText, and str children are added to the root text node.
-        BaseRenderable children are added as normal yoga children.
-        """
         if isinstance(child, TextNode | StyledText | str):
             self._has_manual_styled_text = False  # Switch to node-based mode
             result = self._root_text_node.add(child, index)
@@ -498,12 +446,6 @@ class TextRenderable(Renderable):
         return super().add(child, index)
 
     def remove(self, child: Any) -> None:
-        """Remove a child.
-
-        String IDs remove from the root text node.
-        TextNode instances are removed by reference.
-        BaseRenderable instances are removed from yoga children.
-        """
         if isinstance(child, str):
             children = self._root_text_node.get_children()
             for c in children:
@@ -531,7 +473,6 @@ class TextRenderable(Renderable):
         super().remove(child)
 
     def insert_before(self, child: Any, anchor: Any = None) -> int:
-        """Insert a child before an anchor in the text node tree."""
         if isinstance(child, TextNode | StyledText | str):
             self._has_manual_styled_text = False  # Switch to node-based mode
             if anchor is not None:
@@ -543,7 +484,6 @@ class TextRenderable(Renderable):
         return super().insert_before(child, anchor)
 
     def clear(self) -> None:
-        """Clear all text content and children."""
         self._root_text_node.clear()
         self._root_text_node._text = ""
         self._text_buffer.clear()
@@ -552,15 +492,9 @@ class TextRenderable(Renderable):
         self._update_text_info()
 
     def get_text_children(self) -> list[TextNode]:
-        """Get only the TextNode children (not strings)."""
         return [c for c in self._root_text_node.get_children() if isinstance(c, TextNode)]
 
     def coord_to_offset(self, local_x: int, local_y: int) -> int:
-        """Convert local visual (x, y) coordinates to character offset.
-
-        Handles wrapping: visual lines are mapped back to original text
-        offsets in the buffer. Used for selection by coordinate.
-        """
         text = self.plain_text
         if not text:
             return 0
@@ -614,10 +548,7 @@ class TextRenderable(Renderable):
         col = max(0, min(local_x, line_len))
         return min(line_start + col, len(text))
 
-    # ── Internal methods ─────────────────────────────────────────────
-
     def _sync_text_from_nodes(self) -> None:
-        """Gather text from TextNode children and update the buffer."""
         if self._has_manual_styled_text:
             return
         plain_text = self._root_text_node.to_plain_text()
@@ -625,22 +556,18 @@ class TextRenderable(Renderable):
         self._update_text_info()
 
     def _update_text_info(self) -> None:
-        """Mark yoga dirty and update viewport."""
         if self._yoga_node is not None:
             self._yoga_node.mark_dirty()
         self._update_viewport_offset()
         self.mark_dirty()
 
     def _update_viewport_offset(self) -> None:
-        """Update the text buffer view viewport from current scroll/size."""
         w = self._layout_width or 0
         h = self._layout_height or 0
         if w > 0 and h > 0:
             self._text_buffer_view.set_viewport(self._scroll_x, self._scroll_y, w, h)
 
     def _setup_text_measure_func(self) -> None:
-        """Set up yoga measure function using native text buffer view."""
-
         def measure(
             yoga_node: Any, width: float, width_mode: Any, height: float, height_mode: Any
         ) -> tuple[float, float]:
@@ -678,7 +605,6 @@ class TextRenderable(Renderable):
         self._yoga_node.set_measure_func(measure)
 
     def _handle_scroll_event(self, event: Any) -> None:
-        """Handle mouse scroll events for vertical/horizontal scrolling."""
         direction = getattr(event, "scroll_direction", None)
         if direction is None:
             delta = getattr(event, "scroll_delta", 0)
@@ -693,20 +619,7 @@ class TextRenderable(Renderable):
                 delta = 1 if direction == "right" else -1
                 self.scroll_x = self._scroll_x + delta
 
-    # ── Layout ───────────────────────────────────────────────────────
-
-    def _apply_yoga_layout(self) -> None:
-        """Apply computed yoga layout and update viewport."""
-        old_w = self._layout_width
-        old_h = self._layout_height
-        super()._apply_yoga_layout()
-        if old_w != self._layout_width or old_h != self._layout_height:
-            self._update_viewport_offset()
-
-    # ── Rendering ────────────────────────────────────────────────────
-
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the text to the buffer."""
         if not self._visible:
             return
 
@@ -724,7 +637,6 @@ class TextRenderable(Renderable):
         if self._background_color:
             buffer.fill_rect(x, y, w, h, self._background_color)
 
-        # Try native rendering path first
         try:
             from ..native import _nb
 
@@ -753,7 +665,6 @@ class TextRenderable(Renderable):
         self._render_python(buffer, x, y, w, h)
 
     def _render_python(self, buffer: Buffer, x: int, y: int, w: int, h: int) -> None:
-        """Fallback Python-level text rendering."""
         text = self._text_buffer.get_plain_text()
         if not text:
             return
@@ -797,7 +708,6 @@ class TextRenderable(Renderable):
             self._render_border(buffer, x, y, w, h)
 
     def _render_border(self, buffer: Buffer, x: int, y: int, w: int, h: int) -> None:
-        """Render border if enabled."""
         border_color = self._border_color
         if self._focused and self._focused_border_color:
             border_color = self._focused_border_color
@@ -812,17 +722,13 @@ class TextRenderable(Renderable):
             title_alignment=self._title_alignment,
         )
 
-    # ── Destruction ──────────────────────────────────────────────────
-
     def destroy(self) -> None:
-        """Destroy and clean up native resources."""
         self._root_text_node.clear()
         self._current_selection = None
         super().destroy()
 
 
 def _word_wrap(text: str, width: int) -> list[str]:
-    """Word-wrap a single line of text into multiple lines."""
     if not text or width <= 0:
         return [text]
 

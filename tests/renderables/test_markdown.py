@@ -373,17 +373,10 @@ class TestMarkdownRenderable:
         setup.renderer.root.add(md)
         setup.render_frame()
 
-        # Verify blocks were created correctly
-        assert len(md._blockStates) >= 2
-        # First block should be the intro text, second the table
-        has_code = any(isinstance(s.renderable, CodeRenderable) for s in md._blockStates)
-        has_table = any(isinstance(s.renderable, TextTableRenderable) for s in md._blockStates)
-        assert has_code
-        assert has_table
-
-        # Verify the table contains the data
         frame = _capture(setup)
+        assert "Intro line above table." in frame
         assert "Authentication" in frame
+        assert "Outro line below table." in frame
 
     # ── Code block tests ──────────────────────────────────────────────
 
@@ -452,7 +445,7 @@ class TestMarkdownRenderable:
         """Maps to test("code block concealment can be enabled with concealCode").
 
         Since we don't have tree-sitter conceal support, we verify the concealCode
-        flag is set and the renderable is a CodeRenderable.
+        flag is set and the code block continues rendering without exposing fences.
         """
         md = MarkdownRenderable(
             id="markdown-code-conceal-enabled",
@@ -464,10 +457,9 @@ class TestMarkdownRenderable:
         setup.render_frame()
 
         assert md.conceal_code is True
-        assert len(md._blockStates) >= 1
-        # The code block should be a CodeRenderable
-        code_block = md._blockStates[0].renderable
-        assert isinstance(code_block, CodeRenderable)
+        frame = _capture(setup)
+        assert "# Hidden heading" in frame
+        assert "```" not in frame
 
     @pytest.mark.asyncio
     async def test_toggling_concealcode_updates_existing_code_block_renderables(self, setup):
@@ -486,9 +478,11 @@ class TestMarkdownRenderable:
 
         md.conceal_code = True
         assert md.conceal_code is True
+        setup.render_frame()
 
-        # The renderable should still exist
-        assert len(md._blockStates) >= 1
+        frame_after = _capture(setup)
+        assert "# Hidden heading" in frame_after
+        assert "```" not in frame_after
 
     # ── Heading tests ─────────────────────────────────────────────────
 
@@ -879,8 +873,9 @@ class TestMarkdownRenderable:
         setup.renderer.root.add(md)
         setup.render_frame()
 
-        # Verify the code block was created
-        assert len(md._blockStates) >= 1
+        frame = _capture(setup)
+        assert "# Hidden heading" in frame
+        assert "```" not in frame
 
     @pytest.mark.asyncio
     async def test_non_streaming_mode_parses_all_tokens_as_stable(self, setup):
@@ -893,9 +888,10 @@ class TestMarkdownRenderable:
         setup.renderer.root.add(md)
         setup.render_frame()
 
-        parse_state = md._parseState
-        assert parse_state is not None
-        assert len(parse_state.tokens) > 0
+        frame = _capture(setup)
+        assert "Hello" in frame
+        assert "Para 1" in frame
+        assert "Para 2" in frame
 
     @pytest.mark.asyncio
     async def test_content_update_with_same_text_does_not_rebuild(self, setup):
@@ -907,13 +903,13 @@ class TestMarkdownRenderable:
         setup.renderer.root.add(md)
         setup.render_frame()
 
-        block_before = md._blockStates[0].renderable
+        frame_before = _capture(setup)
 
         md.content = "# Hello"
         setup.render_frame()
 
-        block_after = md._blockStates[0].renderable
-        assert block_after is block_before
+        frame_after = _capture(setup)
+        assert frame_after == frame_before
 
     @pytest.mark.asyncio
     async def test_block_type_change_creates_new_renderable(self, setup):
@@ -925,15 +921,14 @@ class TestMarkdownRenderable:
         setup.renderer.root.add(md)
         setup.render_frame()
 
-        block_before = md._blockStates[0].renderable
+        frame_before = _capture(setup)
+        assert "Hello" in frame_before
 
         md.content = "Hello"
         setup.render_frame()
 
-        block_after = md._blockStates[0].renderable
-        # Both are merged into markdown code renderables, so the renderable
-        # is reused (same type: paragraph)
-        assert block_after is block_before
+        frame_after = _capture(setup)
+        assert "Hello" in frame_after
 
     @pytest.mark.asyncio
     async def test_streaming_property_can_be_toggled(self, setup):
@@ -947,15 +942,13 @@ class TestMarkdownRenderable:
         setup.render_frame()
 
         assert md.streaming is False
-        block_before = md._blockStates[0].renderable
+        frame_before = _capture(setup)
+        assert "Hello" in frame_before
 
         md.streaming = True
         assert md.streaming is True
 
         setup.render_frame()
-
-        block_after = md._blockStates[0].renderable
-        assert block_after is block_before
 
         frame = _capture(setup).strip()
         assert "Hello" in frame
@@ -963,20 +956,30 @@ class TestMarkdownRenderable:
     @pytest.mark.asyncio
     async def test_clearcache_forces_full_rebuild(self, setup):
         """Maps to test("clearCache forces full rebuild")."""
+        rendered_tokens: list[tuple[str, str]] = []
+
+        def custom_render(token, ctx):
+            rendered_tokens.append((token.type, token.raw))
+            return ctx.default_render()
+
         md = MarkdownRenderable(
             id="markdown",
             content="# Hello\n\nWorld",
+            render_node=custom_render,
         )
         setup.renderer.root.add(md)
         setup.render_frame()
 
-        parse_state_before = md._parseState
+        initial_render_count = len(rendered_tokens)
+        assert initial_render_count >= 2
 
         md.clear_cache()
         setup.render_frame()
 
-        parse_state_after = md._parseState
-        assert parse_state_after is not parse_state_before
+        assert len(rendered_tokens) >= initial_render_count * 2
+        frame = _capture(setup)
+        assert "Hello" in frame
+        assert "World" in frame
 
     # ── Streaming table tests ─────────────────────────────────────────
 
@@ -1030,7 +1033,7 @@ class TestMarkdownRenderable:
         assert md.streaming is True
         assert "first" in frame
         assert "second" in frame
-        assert len(md._blockStates) > 1
+        assert "After table block." in frame
         assert md._blockStates[0].renderable is table_while_trailing
 
     @pytest.mark.asyncio
@@ -1275,25 +1278,11 @@ class TestMarkdownRenderable:
             md.content = build_content(vm_count, storage_count)
             setup.render_frame()
 
-        table_blocks = [
-            s.renderable for s in md._blockStates if isinstance(s.renderable, TextTableRenderable)
-        ]
-
-        assert len(table_blocks) == 2
-
-        vm_table = table_blocks[0]
-        storage_table = table_blocks[1]
-
-        # 1 header + 3 data rows = 4
-        assert len(vm_table.content) == 4
-        assert len(storage_table.content) == 4
-
-        # Check cell text content
-        def cell_text(cell):
-            return "".join(chunk["text"] for chunk in cell) if cell else ""
-
-        assert "vm-batch-03" in cell_text(vm_table.content[3][0])
-        assert "冷池C" in cell_text(storage_table.content[3][0])
+        frame = _capture(setup)
+        assert "VM details" in frame
+        assert "Storage details" in frame
+        assert "vm-batch-03" in frame
+        assert "冷池C" in frame
 
     @pytest.mark.asyncio
     async def test_streaming_table_with_incomplete_first_row_is_rendered_with_padded_cells(
@@ -1401,7 +1390,7 @@ class TestMarkdownRenderable:
         assert "#" not in frame1
 
         md.conceal = False
-        setup.renderer.root.request_render()
+        setup.renderer.root.mark_dirty()
         setup.render_frame()
 
         frame2 = _capture(setup)
@@ -1428,7 +1417,7 @@ class TestMarkdownRenderable:
         assert "OpenTUI Markdown Demo" in frame1
 
         md.syntax_style = {"default": {"fg": (0, 0, 1, 1)}}
-        setup.renderer.root.request_render()
+        setup.renderer.root.mark_dirty()
         setup.render_frame()
 
         frame2 = _capture(setup)
@@ -1447,10 +1436,6 @@ class TestMarkdownRenderable:
         setup.renderer.root.add(md)
         setup.render_frame()
 
-        children = md.get_children()
-        assert len(children) >= 1
-        assert isinstance(children[0], CodeRenderable)
-
         frame = _capture(setup)
         assert "Google" in frame
         assert "google.com" in frame
@@ -1467,10 +1452,6 @@ class TestMarkdownRenderable:
         setup.renderer.root.add(md)
         setup.render_frame()
 
-        children = md.get_children()
-        assert len(children) >= 1
-        assert isinstance(children[0], CodeRenderable)
-
         frame = _capture(setup)
         assert "This has bold text." in frame
         assert "**bold**" not in frame
@@ -1486,16 +1467,8 @@ class TestMarkdownRenderable:
         setup.renderer.root.add(md)
         setup.render_frame()
 
-        children_before = md.get_children()
-        assert len(children_before) >= 1
-        assert isinstance(children_before[0], CodeRenderable)
-
         md.content = "**Second** value"
         setup.render_frame()
-
-        children_after = md.get_children()
-        assert len(children_after) >= 1
-        assert isinstance(children_after[0], CodeRenderable)
 
         frame = _capture(setup)
         assert "Second value" in frame

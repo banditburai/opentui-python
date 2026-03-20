@@ -1,9 +1,4 @@
-"""TextTableRenderable - table with per-cell native text buffers.
-
-Table component for tabular text layout.
-Each cell has its own NativeTextBuffer + NativeTextBufferView for
-measurement, wrapping, and rendering.
-"""
+"""TextTableRenderable - table with per-cell native text buffers."""
 
 from __future__ import annotations
 
@@ -11,6 +6,7 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..enums import RenderStrategy
 from ..native import NativeTextBuffer, NativeTextBufferView, _nb
 from .base import Renderable
 
@@ -71,8 +67,6 @@ _BORDER_CHARS = {
 
 
 class _CellState:
-    """State for a single table cell."""
-
     __slots__ = ("text_buffer", "text_buffer_view")
 
     def __init__(self, text_buffer: NativeTextBuffer, text_buffer_view: NativeTextBufferView):
@@ -81,8 +75,6 @@ class _CellState:
 
 
 class _TableLayout:
-    """Computed table layout."""
-
     __slots__ = (
         "column_widths",
         "row_heights",
@@ -102,8 +94,6 @@ class _TableLayout:
 
 
 class _BorderLayout:
-    """Resolved border layout flags."""
-
     __slots__ = ("left", "right", "top", "bottom", "inner_vertical", "inner_horizontal")
 
     def __init__(
@@ -161,23 +151,26 @@ class TextTableRenderable(Renderable):
         "_selectable_flag",
         "_selection_bg_color",
         "_selection_fg_color",
-        # Cell storage
         "_cells",
         "_prev_cell_content",
         "_row_count",
         "_column_count",
-        # Layout
         "_table_layout",
         "_layout_dirty",
         "_raster_dirty",
         "_cached_measure_layout",
         "_cached_measure_width",
-        # Selection
+        "_raster_buffer",
+        "_raster_buffer_ptr",
+        "_raster_buffer_size",
         "_last_local_selection",
         "_last_selection_mode",
         "_is_selecting",
         "_selection_anchor",
     )
+
+    def get_render_strategy(self) -> RenderStrategy:
+        return RenderStrategy.HEAVY_WIDGET
 
     def __init__(
         self,
@@ -247,6 +240,9 @@ class TextTableRenderable(Renderable):
         self._raster_dirty: bool = True
         self._cached_measure_layout: _TableLayout | None = None
         self._cached_measure_width: int | None = None
+        self._raster_buffer: Buffer | None = None
+        self._raster_buffer_ptr: Any = None
+        self._raster_buffer_size: tuple[int, int] | None = None
 
         self._last_local_selection: dict | None = None
         self._last_selection_mode: str | None = None
@@ -257,7 +253,16 @@ class TextTableRenderable(Renderable):
         self._rebuild_cells()
         self._setup_mouse_handlers()
 
-    # ── Properties ──────────────────────────────────────────────────
+        # Chain _on_size_change: invalidate table layout when dimensions change.
+        # Preserve any user-provided on_size_change callback from kwargs.
+        _prev_on_size_change = self._on_size_change
+
+        def _on_table_size_change(w, h):
+            self._invalidate_layout_and_raster(mark_yoga_dirty=False)
+            if _prev_on_size_change is not None:
+                _prev_on_size_change(w, h)
+
+        self._on_size_change = _on_table_size_change
 
     @property
     def content(self) -> TextTableContent:
@@ -326,7 +331,7 @@ class TextTableRenderable(Renderable):
         if self._show_borders == value:
             return
         self._show_borders = value
-        self._invalidate_raster_only()
+        self._invalidate_layout_and_raster()
 
     @property
     def outer_border(self) -> bool:
@@ -373,7 +378,6 @@ class TextTableRenderable(Renderable):
     def selectable(self, value: bool) -> None:
         self._selectable_flag = value
 
-    # Width/height return computed layout values
     @property
     def width(self) -> int:
         return self._layout_width
@@ -392,14 +396,7 @@ class TextTableRenderable(Renderable):
         self._height = value
         self.mark_dirty()
 
-    # ── Selection ───────────────────────────────────────────────────
-
     def should_start_selection(self, x: int, y: int) -> bool:
-        """Return True if a selection should start at global (x, y).
-
-        Only returns True when the point falls on actual cell content,
-        not on border lines.
-        """
         if not self._selectable_flag:
             return False
         self._ensure_layout_ready()
@@ -408,7 +405,6 @@ class TextTableRenderable(Renderable):
         return self._get_cell_at_local_position(local_x, local_y) is not None
 
     def has_selection(self) -> bool:
-        """Return True if any cell has an active selection."""
         for row in self._cells:
             for cell in row:
                 if cell.text_buffer_view.has_selection():
@@ -416,7 +412,6 @@ class TextTableRenderable(Renderable):
         return False
 
     def get_selection(self) -> dict[str, int] | None:
-        """Get the first cell's selection, or None."""
         for row in self._cells:
             for cell in row:
                 sel = cell.text_buffer_view.get_selection()
@@ -425,7 +420,6 @@ class TextTableRenderable(Renderable):
         return None
 
     def get_selected_text(self) -> str:
-        """Get selected text, tab-separated within rows, newline-separated between rows."""
         selected_rows: list[str] = []
         for row_idx in range(self._row_count):
             row_selections: list[str] = []
@@ -438,18 +432,13 @@ class TextTableRenderable(Renderable):
                 if not cell or not cell.text_buffer_view.has_selection():
                     continue
                 selected_text = cell.text_buffer_view.get_selected_text()
-                if len(selected_text) > 0:
+                if selected_text:
                     row_selections.append(selected_text)
             if row_selections:
                 selected_rows.append("\t".join(row_selections))
         return "\n".join(selected_rows)
 
     def on_selection_changed(self, selection) -> bool:
-        """Handle selection change from the renderer.
-
-        Called by the renderer's selection dispatch with a Selection object
-        (from opentui.selection) or None.
-        """
         self._ensure_layout_ready()
 
         local_selection = self._convert_global_to_local_selection(selection)
@@ -721,11 +710,7 @@ class TextTableRenderable(Renderable):
 
         return (row_idx, col_idx)
 
-    # ── Measure function ────────────────────────────────────────────
-
     def _setup_measure_func(self) -> None:
-        """Set up yoga measure function."""
-
         def measure(
             yoga_node: Any, width: float, width_mode: Any, height: float, height_mode: Any
         ) -> tuple[float, float]:
@@ -751,8 +736,6 @@ class TextTableRenderable(Renderable):
             return (measured_w, measured_h)
 
         self._yoga_node.set_measure_func(measure)
-
-    # ── Mouse handlers (selection) ─────────────────────────────────
 
     def _setup_mouse_handlers(self) -> None:
         """Wire mouse events to drive the selection system.
@@ -810,8 +793,6 @@ class TextTableRenderable(Renderable):
         self._on_mouse_drag = _on_drag
         self._on_mouse_drag_end = _on_drag_end
         self._on_mouse_up = _on_up
-
-    # ── Cell management ─────────────────────────────────────────────
 
     def _rebuild_cells(self) -> None:
         new_row_count = len(self._content)
@@ -920,8 +901,6 @@ class TextTableRenderable(Renderable):
                     parts.append(str(chunk))
             return "".join(parts)
         return str(content)
-
-    # ── Layout computation ──────────────────────────────────────────
 
     def _ensure_layout_ready(self) -> None:
         if not self._layout_dirty:
@@ -1240,15 +1219,10 @@ class TextTableRenderable(Renderable):
                 content_width = max(1, col_width - horizontal_padding)
                 content_height = max(1, row_height - vertical_padding)
 
-                if self._wrap_mode_str == "none":
-                    # Don't set wrap width in no-wrap mode
-                    pass
-                else:
+                if self._wrap_mode_str != "none":
                     cell.text_buffer_view.set_wrap_width(content_width)
 
                 cell.text_buffer_view.set_viewport(0, 0, content_width, content_height)
-
-    # ── Border layout resolution ────────────────────────────────────
 
     def _resolve_border_layout(self) -> _BorderLayout:
         return _BorderLayout(
@@ -1280,15 +1254,11 @@ class TextTableRenderable(Renderable):
             count += max(0, self._row_count - 1)
         return count
 
-    # ── Padding helpers ─────────────────────────────────────────────
-
     def _get_horizontal_cell_padding(self) -> int:
         return self._cell_padding * 2
 
     def _get_vertical_cell_padding(self) -> int:
         return self._cell_padding * 2
-
-    # ── Resolution helpers ──────────────────────────────────────────
 
     def _resolve_layout_width_constraint(self, width: int | None) -> int | None:
         if width is None or width <= 0:
@@ -1307,8 +1277,6 @@ class TextTableRenderable(Renderable):
             return 0
         return max(0, int(value))
 
-    # ── Invalidation ────────────────────────────────────────────────
-
     def _invalidate_layout_and_raster(self, mark_yoga_dirty: bool = True) -> None:
         self._layout_dirty = True
         self._raster_dirty = True
@@ -1316,24 +1284,11 @@ class TextTableRenderable(Renderable):
         self._cached_measure_width = None
         if mark_yoga_dirty and self._yoga_node is not None:
             self._yoga_node.mark_dirty()
-        self.request_render()
+        self.mark_dirty()
 
     def _invalidate_raster_only(self) -> None:
         self._raster_dirty = True
-        self.request_render()
-
-    # ── Resize ──────────────────────────────────────────────────────
-
-    def _apply_yoga_layout(self) -> None:
-        old_w = self._layout_width
-        old_h = self._layout_height
-        super()._apply_yoga_layout()
-        if old_w != self._layout_width or old_h != self._layout_height:
-            self._invalidate_layout_and_raster(mark_yoga_dirty=False)
-            if self._on_size_change:
-                self._on_size_change(self._layout_width, self._layout_height)
-
-    # ── Rendering ───────────────────────────────────────────────────
+        self.mark_paint_dirty()
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         if not self._visible:
@@ -1342,24 +1297,106 @@ class TextTableRenderable(Renderable):
         if self._layout_dirty:
             self._rebuild_layout_for_current_width()
 
+        raster = self._ensure_raster_buffer()
+        if raster is not None and self._layout_width and self._layout_height:
+            if self._raster_dirty:
+                raster.clear(0.0)
+                raster.push_offset(-self._x, -self._y)
+                try:
+                    self._render_table_contents(raster)
+                finally:
+                    raster.pop_offset()
+                self._raster_dirty = False
+
+            try:
+                buffer._native.draw_frame_buffer(buffer._ptr, self._x, self._y, raster._ptr)
+                return
+            except Exception:
+                pass
+
+        self._render_table_contents(buffer)
+        self._raster_dirty = False
+
+    def _render_table_contents(self, buffer: Buffer) -> None:
         x = self._x
         y = self._y
-
         if self._show_borders:
             self._draw_borders(buffer, x, y)
 
         self._draw_cells(buffer, x, y)
 
-        self._raster_dirty = False
+    def _ensure_raster_buffer(self) -> Buffer | None:
+        width = max(0, int(self._layout_width or 0))
+        height = max(0, int(self._layout_height or 0))
+        if width <= 0 or height <= 0:
+            return None
+
+        if self._raster_buffer_ptr is None:
+            ptr = _nb.buffer.create_optimized_buffer(
+                width, height, True, 0, f"text-table-{self.id}"
+            )
+            from ..renderer import Buffer as RenderBuffer
+
+            self._raster_buffer_ptr = ptr
+            self._raster_buffer = RenderBuffer(ptr, _nb.buffer, _nb.graphics)
+            self._raster_buffer_size = (width, height)
+            self._raster_dirty = True
+            return self._raster_buffer
+
+        if self._raster_buffer_size != (width, height):
+            assert self._raster_buffer is not None
+            self._raster_buffer.resize(width, height)
+            self._raster_buffer_size = (width, height)
+            self._raster_dirty = True
+
+        return self._raster_buffer
+
+    def _release_raster_buffer(self) -> None:
+        if self._raster_buffer_ptr is None:
+            return
+        try:
+            _nb.buffer.destroy_optimized_buffer(self._raster_buffer_ptr)
+        except Exception:
+            pass
+        finally:
+            self._raster_buffer = None
+            self._raster_buffer_ptr = None
+            self._raster_buffer_size = None
 
     def _draw_borders(self, buffer: Buffer, base_x: int, base_y: int) -> None:
-        """Draw grid borders using Python-level drawing."""
+        """Draw grid borders, preferring the core native grid primitive."""
         border_layout = self._resolve_border_layout()
         vcount = self._get_vertical_border_count(border_layout)
         hcount = self._get_horizontal_border_count(border_layout)
 
         if vcount == 0 and hcount == 0:
             return
+
+        if border_layout.left == border_layout.right == border_layout.top == border_layout.bottom:
+            try:
+                _nb.buffer.buffer_draw_grid(
+                    buffer._ptr,
+                    self._border_style_str,
+                    (
+                        self._border_color_val.r,
+                        self._border_color_val.g,
+                        self._border_color_val.b,
+                        self._border_color_val.a,
+                    ),
+                    (
+                        self._border_bg_color.r,
+                        self._border_bg_color.g,
+                        self._border_bg_color.b,
+                        self._border_bg_color.a,
+                    ),
+                    self._table_layout.column_offsets,
+                    self._table_layout.row_offsets,
+                    border_layout.inner_vertical or border_layout.inner_horizontal,
+                    border_layout.left,
+                )
+                return
+            except Exception:
+                pass
 
         chars = _BORDER_CHARS.get(self._border_style_str, _BORDER_CHARS["single"])
         fg = self._border_color_val
@@ -1484,7 +1521,6 @@ class TextTableRenderable(Renderable):
     def _get_intersection_char(
         self, chars: dict, is_top: bool, is_bottom: bool, is_left: bool, is_right: bool
     ) -> str:
-        """Get the appropriate intersection character based on position."""
         if is_top and is_left:
             return chars["tl"]
         if is_top and is_right:
@@ -1504,7 +1540,6 @@ class TextTableRenderable(Renderable):
         return chars["cross"]
 
     def _draw_cells(self, buffer: Buffer, base_x: int, base_y: int) -> None:
-        """Draw all cell contents using native text buffer views."""
         col_offsets = self._table_layout.column_offsets
         row_offsets = self._table_layout.row_offsets
         cell_padding = self._cell_padding
@@ -1531,9 +1566,8 @@ class TextTableRenderable(Renderable):
                             text, base_x + cell_x, base_y + cell_y, self._default_fg, None
                         )
 
-    # ── Destruction ─────────────────────────────────────────────────
-
     def destroy(self) -> None:
+        self._release_raster_buffer()
         self._cells.clear()
         self._prev_cell_content.clear()
         self._row_count = 0

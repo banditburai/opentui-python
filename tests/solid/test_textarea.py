@@ -14,13 +14,18 @@ from opentui.signals import Signal
 from opentui.structs import TEXT_ATTRIBUTE_BOLD
 
 
+def _strict_render(component_fn, options=None):
+    options = dict(options or {})
+    return _test_render(component_fn, options)
+
+
 class TestTextareaLayoutBasicTextareaRendering:
     """Maps to describe("Textarea Layout Tests") > describe("Basic Textarea Rendering")."""
 
     async def test_should_render_simple_textarea_correctly(self):
         """Maps to it("should render simple textarea correctly")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Textarea(
                 initial_value="Hello World",
                 width=20,
@@ -37,7 +42,7 @@ class TestTextareaLayoutBasicTextareaRendering:
     async def test_should_render_multiline_textarea_content(self):
         """Maps to it("should render multiline textarea content")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Textarea(
                 initial_value="Line 1\nLine 2\nLine 3",
                 width=20,
@@ -57,7 +62,7 @@ class TestTextareaLayoutBasicTextareaRendering:
     async def test_should_render_textarea_with_word_wrapping(self):
         """Maps to it("should render textarea with word wrapping")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Textarea(
                 initial_value="This is a very long line that should wrap to multiple lines when word wrapping is enabled",
                 wrap_mode="word",
@@ -80,7 +85,7 @@ class TestTextareaLayoutBasicTextareaRendering:
     async def test_should_render_textarea_with_placeholder(self):
         """Maps to it("should render textarea with placeholder")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Textarea(
                 initial_value="",
                 placeholder="Type something here...",
@@ -103,7 +108,7 @@ class TestTextareaLayoutPromptLikeLayout:
     async def test_should_render_textarea_in_prompt_style_layout_with_indicator(self):
         """Maps to it("should render textarea in prompt-style layout with indicator")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 # Main row
                 Box(
@@ -155,7 +160,7 @@ class TestTextareaLayoutPromptLikeLayout:
     async def test_should_render_textarea_with_long_wrapping_text_in_prompt_layout(self):
         """Maps to it("should render textarea with long wrapping text in prompt layout")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -201,7 +206,7 @@ class TestTextareaLayoutPromptLikeLayout:
     async def test_should_render_textarea_in_shell_mode_with_different_indicator(self):
         """Maps to it("should render textarea in shell mode with different indicator")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -249,7 +254,7 @@ class TestTextareaLayoutComplexLayoutsWithMultipleTextareas:
     async def test_should_render_multiple_textareas_in_a_column_layout(self):
         """Maps to it("should render multiple textareas in a column layout")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 # Message 1
                 Box(
@@ -315,7 +320,7 @@ class TestTextareaLayoutComplexLayoutsWithMultipleTextareas:
     async def test_should_handle_nested_boxes_with_textareas_at_different_positions(self):
         """Maps to it("should handle nested boxes with textareas at different positions")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     # Left panel
@@ -385,7 +390,7 @@ class TestTextareaLayoutTextComponentComparison:
     async def test_should_render_text_in_prompt_style_layout_with_indicator(self):
         """Maps to it("should render text in prompt-style layout with indicator")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     # Indicator box
@@ -438,7 +443,7 @@ class TestTextareaLayoutTextComponentComparison:
     async def test_should_render_text_with_long_wrapping_content_in_prompt_layout(self):
         """Maps to it("should render text with long wrapping content in prompt layout")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -493,7 +498,7 @@ class TestTextareaLayoutTextComponentComparison:
             bg="#1e1e1e",
             fg="#ffffff",
         )
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -533,7 +538,7 @@ class TestTextareaLayoutTextComponentComparison:
     async def test_should_render_text_in_shell_mode_with_different_indicator(self):
         """Maps to it("should render text in shell mode with different indicator")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -571,7 +576,7 @@ class TestTextareaLayoutTextComponentComparison:
     async def test_should_render_full_prompt_layout_with_text_component(self):
         """Maps to it("should render full prompt layout with text component")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 # Main prompt box
                 Box(
@@ -646,7 +651,7 @@ class TestTextareaLayoutTextComponentComparison:
     async def test_should_handle_very_long_single_line_text_in_prompt_layout(self):
         """Maps to it("should handle very long single-line text in prompt layout")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -689,7 +694,7 @@ class TestTextareaLayoutTextComponentComparison:
         newlines in the content string.
         """
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -754,7 +759,7 @@ class TestTextareaLayoutFlexShrinkRegressionTests:
             background_color="#00ff00",
             flex_grow=1,
         )
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     indicator_box,
@@ -769,9 +774,7 @@ class TestTextareaLayoutFlexShrinkRegressionTests:
         setup.render_frame()
 
         # Set width on indicator box (like createSignal setter).
-        # _configure_yoga_properties() is called every frame, so just
-        # setting _width is sufficient — no mark_dirty needed.
-        indicator_box._width = 5
+        indicator_box.width = 5
 
         frame = setup.capture_char_frame()
         assert ">" in frame
@@ -785,7 +788,7 @@ class TestTextareaLayoutFlexShrinkRegressionTests:
             Text("Header"),
             background_color="#ff0000",
         )
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     header_box,
@@ -814,7 +817,7 @@ class TestTextareaLayoutFlexShrinkRegressionTests:
         setup.render_frame()
 
         # Set height on header box
-        header_box._height = 3
+        header_box.height = 3
 
         frame = setup.capture_char_frame()
         assert "Header" in frame
@@ -830,7 +833,7 @@ class TestTextareaLayoutEdgeCasesAndStyling:
     async def test_should_render_textarea_with_focused_colors(self):
         """Maps to it("should render textarea with focused colors")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -866,7 +869,7 @@ class TestTextareaLayoutEdgeCasesAndStyling:
     async def test_should_render_empty_textarea_with_placeholder_in_prompt_layout(self):
         """Maps to it("should render empty textarea with placeholder in prompt layout")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -911,7 +914,7 @@ class TestTextareaLayoutEdgeCasesAndStyling:
     async def test_should_render_textarea_with_very_long_single_line(self):
         """Maps to it("should render textarea with very long single line")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     Box(
@@ -949,7 +952,7 @@ class TestTextareaLayoutEdgeCasesAndStyling:
     async def test_should_render_full_prompt_like_layout_with_all_components(self):
         """Maps to it("should render full prompt-like layout with all components")."""
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 # Main prompt box
                 Box(
@@ -1036,7 +1039,7 @@ class TestTextareaLayoutMeasureCacheEdgeCases:
             bg="#1e1e1e",
             fg="#ffffff",
         )
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 text_comp,
                 border=True,
@@ -1067,7 +1070,7 @@ class TestTextareaLayoutMeasureCacheEdgeCases:
             bg="#1e1e1e",
             fg="#ffffff",
         )
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 text_comp,
                 border=True,
@@ -1098,7 +1101,7 @@ class TestTextareaLayoutMeasureCacheEdgeCases:
             border=True,
             width=30,
         )
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: container,
             {"width": 60, "height": 15},
         )
@@ -1107,12 +1110,12 @@ class TestTextareaLayoutMeasureCacheEdgeCases:
         assert "Content" in frame30
 
         # Change width
-        container._width = 50
+        container.width = 50
         frame50 = setup.capture_char_frame()
         assert "Content" in frame50
 
         # Change width again
-        container._width = 20
+        container.width = 20
         frame20 = setup.capture_char_frame()
         assert "Content" in frame20
 
@@ -1130,7 +1133,7 @@ class TestTextareaLayoutMeasureCacheEdgeCases:
             bg="#1e1e1e",
             fg="#ffffff",
         )
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 text_comp,
                 border=True,
@@ -1159,7 +1162,7 @@ class TestTextareaLayoutMeasureCacheEdgeCases:
         Upstream uses <br /> tags. In Python, we use newlines.
         """
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Text(
                     "Hello 世界\nこんにちは\n🌟 Emoji 🚀",

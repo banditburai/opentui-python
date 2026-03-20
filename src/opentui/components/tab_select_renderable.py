@@ -1,9 +1,4 @@
-"""TabSelectRenderable - horizontal tab-style selection renderable.
-
-Tab selection component with keyboard navigation.
-Manages a list of TabSelectOption items with keyboard navigation,
-wrap selection, and event emission for horizontal tab selection.
-"""
+"""TabSelectRenderable - horizontal tab-style selection renderable."""
 
 from __future__ import annotations
 
@@ -16,6 +11,7 @@ from ..keymapping import (
     KeyAliasMap,
     KeyBinding,
     build_key_bindings_map,
+    lookup_action,
     merge_key_aliases,
     merge_key_bindings,
 )
@@ -25,26 +21,17 @@ if TYPE_CHECKING:
     from ..renderer import Buffer
 
 
-# ── Types ────────────────────────────────────────────────────────────────
-
-
 @dataclass
 class TabSelectOption:
-    """An option for the tab select component."""
-
     name: str
     description: str = ""
     value: Any = None
 
 
 class TabSelectRenderableEvents:
-    """Event names emitted by TabSelectRenderable."""
-
     SELECTION_CHANGED = "selectionChanged"
     ITEM_SELECTED = "itemSelected"
 
-
-# ── Default key bindings ─────────────────────────────────────────────────
 
 _DEFAULT_TAB_SELECT_BINDINGS: list[KeyBinding] = [
     KeyBinding(name="left", action="move-left"),
@@ -81,11 +68,9 @@ class TabSelectRenderable(Renderable):
         "_show_description",
         "_show_underline",
         "_wrap_selection",
-        # Key binding infrastructure
         "_key_bindings",
         "_key_alias_map",
         "_key_map",
-        # State
         "_is_destroyed",
     )
 
@@ -126,8 +111,6 @@ class TabSelectRenderable(Renderable):
         self._key_map = build_key_bindings_map(merged, self._key_alias_map)
 
         self._is_destroyed = False
-
-    # ── Properties ─────────────────────────────────────────────────────
 
     @property
     def options(self) -> list[TabSelectOption]:
@@ -171,8 +154,6 @@ class TabSelectRenderable(Renderable):
         merged = merge_key_bindings(_DEFAULT_TAB_SELECT_BINDINGS, self._key_bindings)
         self._key_map = build_key_bindings_map(merged, self._key_alias_map)
 
-    # ── Selection methods ─────────────────────────────────────────────
-
     def get_selected_index(self) -> int:
         return self._selected_index
 
@@ -190,7 +171,7 @@ class TabSelectRenderable(Renderable):
         self._selected_index = index
         self._update_scroll_offset()
         self.emit(TabSelectRenderableEvents.SELECTION_CHANGED, index, self._options[index])
-        self.mark_dirty()
+        self.mark_paint_dirty()
 
     def move_left(self) -> None:
         """Move selection left by one. Respects wrap_selection."""
@@ -204,7 +185,7 @@ class TabSelectRenderable(Renderable):
             return
 
         self._update_scroll_offset()
-        self.mark_dirty()
+        self.mark_paint_dirty()
         self.emit(
             TabSelectRenderableEvents.SELECTION_CHANGED,
             self._selected_index,
@@ -223,7 +204,7 @@ class TabSelectRenderable(Renderable):
             return
 
         self._update_scroll_offset()
-        self.mark_dirty()
+        self.mark_paint_dirty()
         self.emit(
             TabSelectRenderableEvents.SELECTION_CHANGED,
             self._selected_index,
@@ -237,8 +218,6 @@ class TabSelectRenderable(Renderable):
         option = self._options[self._selected_index]
         self.emit(TabSelectRenderableEvents.ITEM_SELECTED, self._selected_index, option)
 
-    # ── Scroll offset ────────────────────────────────────────────────
-
     def _update_scroll_offset(self) -> None:
         half_visible = self._max_visible_tabs // 2
         new_offset = max(
@@ -250,12 +229,9 @@ class TabSelectRenderable(Renderable):
         )
         if new_offset != self._scroll_offset:
             self._scroll_offset = new_offset
-            self.mark_dirty()
-
-    # ── Key handling ──────────────────────────────────────────────────
+            self.mark_paint_dirty()
 
     def handle_key(self, event: KeyEvent) -> bool:
-        """Handle a key event. Returns True if event was consumed."""
         if event.default_prevented:
             return False
 
@@ -266,53 +242,31 @@ class TabSelectRenderable(Renderable):
         return False
 
     def _lookup_action(self, event: KeyEvent) -> str | None:
-        key_name = event.key
-
-        binding_key = (
-            f"{key_name}:"
-            f"{1 if event.ctrl else 0}:"
-            f"{1 if event.shift else 0}:"
-            f"{1 if event.alt else 0}:"
-            f"{1 if event.meta else 0}"
+        return lookup_action(
+            event.key,
+            event.ctrl,
+            event.shift,
+            event.alt,
+            event.meta,
+            self._key_map,
+            self._key_alias_map,
         )
-        action = self._key_map.get(binding_key)
-        if action:
-            return action
-
-        for alias, canonical in self._key_alias_map.items():
-            if key_name == alias:
-                alias_key = (
-                    f"{canonical}:"
-                    f"{1 if event.ctrl else 0}:"
-                    f"{1 if event.shift else 0}:"
-                    f"{1 if event.alt else 0}:"
-                    f"{1 if event.meta else 0}"
-                )
-                action = self._key_map.get(alias_key)
-                if action:
-                    return action
-
-        return None
 
     def _dispatch_action(self, action: str) -> bool:
         if action == "move-left":
             self.move_left()
             return True
-        elif action == "move-right":
+        if action == "move-right":
             self.move_right()
             return True
-        elif action == "select-current":
+        if action == "select-current":
             self.select_current()
             return True
         return False
 
-    # ── Rendering ─────────────────────────────────────────────────────
-
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         if not self._visible:
             return
-
-    # ── Cleanup ───────────────────────────────────────────────────────
 
     def destroy(self) -> None:
         self._is_destroyed = True

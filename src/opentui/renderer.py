@@ -6,6 +6,7 @@ import asyncio
 import enum
 import logging
 import shutil
+import time as _time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +15,194 @@ from .structs import char_width as _char_width
 from .structs import display_width as _display_width
 
 _log = logging.getLogger(__name__)
+
+_CUSTOM_UPDATE_LAYOUT_CACHE: dict[type, bool] = {}
+
+LayoutRepaintFact = tuple[Any, int, bool, bool, int, int, int, int, int, int, int, int]
+
+# Lazy-loaded native layout apply entrypoint from yoga-python.
+_NOT_LOADED = object()
+_NATIVE_LAYOUT_CACHE: dict[str, Any] = {
+    "fn": _NOT_LOADED,
+    "offsets": None,
+}
+_COMMON_RENDER_CACHE: dict[str, Any] = {
+    "validate_fn": _NOT_LOADED,
+    "render_fn": _NOT_LOADED,
+    "hybrid_fn": _NOT_LOADED,
+    "offsets": None,
+    "root_type": None,
+    "box_type": None,
+    "text_type": None,
+    "portal_type": None,
+}
+
+
+def _load_native_layout_apply(root) -> None:
+
+    _NATIVE_LAYOUT_CACHE["fn"] = None  # mark as loaded (no longer _NOT_LOADED)
+    try:
+        import sys
+
+        nb = sys.modules.get("opentui_bindings")
+        if nb is None or not hasattr(nb, "native_signals"):
+            # Bindings not loaded or namespace package — try FFI loader
+            from .ffi import get_native
+
+            nb = get_native()
+        discover = (
+            getattr(getattr(nb, "native_signals", None), "discover_slot_offset", None)
+            if nb
+            else None
+        )
+        if discover is None:
+            _log.debug("_load_native_layout_apply: opentui_bindings=%s, discover=%s", nb, discover)
+            return
+        import yoga
+
+        fn = getattr(yoga, "apply_layout_tree", None)
+        if fn is None:
+            _log.debug("_load_native_layout_apply: yoga.apply_layout_tree not found")
+            return
+        tp = type(root)
+        offsets = {
+            "_x": discover(tp, "_x"),
+            "_y": discover(tp, "_y"),
+            "_layout_width": discover(tp, "_layout_width"),
+            "_layout_height": discover(tp, "_layout_height"),
+            "_dirty": discover(tp, "_dirty"),
+            "_subtree_dirty": discover(tp, "_subtree_dirty"),
+            "_children": discover(tp, "_children"),
+            "_parent": discover(tp, "_parent"),
+            "_yoga_node": discover(tp, "_yoga_node"),
+            "_on_size_change": -1,
+        }
+        required_offsets = (
+            "_x",
+            "_y",
+            "_layout_width",
+            "_layout_height",
+            "_dirty",
+            "_subtree_dirty",
+            "_children",
+            "_parent",
+            "_yoga_node",
+        )
+        missing = [name for name in required_offsets if offsets[name] < 0]
+        if missing:
+            _log.debug("_load_native_layout_apply: missing offsets for %s on %s", missing, tp)
+            return
+        _NATIVE_LAYOUT_CACHE["fn"] = fn
+        _NATIVE_LAYOUT_CACHE["offsets"] = offsets
+        _log.debug("_load_native_layout_apply: SUCCESS fn=%s", fn)
+    except Exception:
+        _log.debug("_load_native_layout_apply: exception", exc_info=True)
+
+
+def _load_common_render(root) -> None:
+    _COMMON_RENDER_CACHE["validate_fn"] = None
+    _COMMON_RENDER_CACHE["render_fn"] = None
+    _COMMON_RENDER_CACHE["hybrid_fn"] = None
+    try:
+        import sys
+
+        nb = sys.modules.get("opentui_bindings")
+        discover = nb.native_signals.discover_slot_offset if nb else None
+        validate_fn = nb.common_render.validate_common_tree if nb else None
+        render_fn = nb.common_render.render_common_tree_unchecked if nb else None
+        hybrid_fn = getattr(nb.common_render, "render_hybrid_tree", None) if nb else None
+        if discover is None or validate_fn is None or render_fn is None:
+            return
+
+        from .components.box import Box
+        from .components.control_flow import Portal
+        from .components.text import Text
+
+        root_type = type(root)
+        offsets = {
+            "_visible": discover(Text, "_visible"),
+            "_children": discover(Text, "_children"),
+            "_x": discover(Text, "_x"),
+            "_y": discover(Text, "_y"),
+            "_layout_width": discover(Text, "_layout_width"),
+            "_layout_height": discover(Text, "_layout_height"),
+            "_padding_left": discover(Text, "_padding_left"),
+            "_padding_right": discover(Text, "_padding_right"),
+            "_padding_top": discover(Text, "_padding_top"),
+            "_content": discover(Text, "_content"),
+            "_fg": discover(Text, "_fg"),
+            "_background_color": discover(Text, "_background_color"),
+            "_wrap_mode": discover(Text, "_wrap_mode"),
+            "_selection_start": discover(Text, "_selection_start"),
+            "_selection_end": discover(Text, "_selection_end"),
+            "_bold": discover(Text, "_bold"),
+            "_italic": discover(Text, "_italic"),
+            "_underline": discover(Text, "_underline"),
+            "_strikethrough": discover(Text, "_strikethrough"),
+            "_border": discover(Box, "_border"),
+            "_border_style": discover(Box, "_border_style"),
+            "_border_color": discover(Box, "_border_color"),
+            "_title": discover(Box, "_title"),
+            "_title_alignment": discover(Box, "_title_alignment"),
+            "_border_top": discover(Box, "_border_top"),
+            "_border_right": discover(Box, "_border_right"),
+            "_border_bottom": discover(Box, "_border_bottom"),
+            "_border_left": discover(Box, "_border_left"),
+            "_focused": discover(Box, "_focused"),
+            "_overflow": discover(Box, "_overflow"),
+            "_render_before": discover(Box, "_render_before"),
+            "_render_after": discover(Box, "_render_after"),
+        }
+        required = (
+            "_visible",
+            "_children",
+            "_x",
+            "_y",
+            "_layout_width",
+            "_layout_height",
+            "_padding_left",
+            "_padding_right",
+            "_padding_top",
+            "_content",
+            "_wrap_mode",
+            "_selection_start",
+            "_selection_end",
+            "_bold",
+            "_italic",
+            "_underline",
+            "_strikethrough",
+            "_border",
+            "_border_style",
+            "_border_color",
+            "_title",
+            "_title_alignment",
+            "_border_top",
+            "_border_right",
+            "_border_bottom",
+            "_border_left",
+            "_focused",
+            "_overflow",
+            "_render_before",
+            "_render_after",
+        )
+        if any(offsets[name] < 0 for name in required):
+            return
+        _COMMON_RENDER_CACHE["validate_fn"] = validate_fn
+        _COMMON_RENDER_CACHE["render_fn"] = render_fn
+        _COMMON_RENDER_CACHE["hybrid_fn"] = hybrid_fn
+        _COMMON_RENDER_CACHE["offsets"] = offsets
+        _COMMON_RENDER_CACHE["root_type"] = root_type
+        _COMMON_RENDER_CACHE["box_type"] = Box
+        _COMMON_RENDER_CACHE["text_type"] = Text
+        _COMMON_RENDER_CACHE["portal_type"] = Portal
+    except Exception:
+        pass
+
+
+def _has_instance_render_override(node) -> bool:
+    if node is None or not hasattr(node, "__dict__"):
+        return False
+    return "render" in node.__dict__
 
 
 # Mouse event type → handler attribute name (hoisted from _dispatch_mouse_to_tree
@@ -30,9 +219,22 @@ import contextlib
 
 from . import hooks
 from . import structs as s
-from .components.base import BaseRenderable
+from .components.base import BaseRenderable, Renderable
 from .console import TerminalConsole
+from .enums import RenderStrategy
 from .ffi import get_native, is_native_available
+
+# Cursor style DECSCUSR codes (hoisted from set_cursor_style to avoid per-call dict allocation)
+_CURSOR_STYLE_MAP = {
+    "block": 1,
+    "underline": 3,
+    "bar": 5,
+    "steady_block": 2,
+    "steady_underline": 4,
+    "steady_bar": 6,
+}
+
+_DEFAULT_UPDATE_LAYOUT_FN = Renderable.update_layout
 
 
 @dataclass
@@ -91,6 +293,28 @@ class TerminalCapabilities:
     term_version: str = ""
 
 
+@dataclass(slots=True)
+class FrameTimingBuckets:
+    """Per-frame renderer timings in nanoseconds."""
+
+    signal_handling_ns: int = 0
+    layout_ns: int = 0
+    configure_yoga_ns: int = 0
+    compute_yoga_ns: int = 0
+    apply_layout_ns: int = 0
+    update_layout_hooks_ns: int = 0
+    mount_callbacks_ns: int = 0
+    buffer_prepare_ns: int = 0
+    buffer_lookup_ns: int = 0
+    repaint_plan_ns: int = 0
+    buffer_replay_ns: int = 0
+    render_tree_ns: int = 0
+    flush_ns: int = 0
+    post_render_ns: int = 0
+    frame_finish_ns: int = 0
+    total_ns: int = 0
+
+
 class Buffer:
     """Wrapper around native buffer using nanobind."""
 
@@ -104,6 +328,16 @@ class Buffer:
         self._opacity_stack: list[float] = []
         self._cached_opacity: float = 1.0
         self._offset_stack: list[tuple[int, int]] = []
+
+    def _retarget(self, ptr: Any) -> Buffer:
+        self._ptr = ptr
+        self._width = None
+        self._height = None
+        self._scissor_stack.clear()
+        self._opacity_stack.clear()
+        self._cached_opacity = 1.0
+        self._offset_stack.clear()
+        return self
 
     @property
     def width(self) -> int:
@@ -127,7 +361,6 @@ class Buffer:
         self._height = height
 
     def _apply_opacity_to_color(self, color: s.RGBA | None) -> s.RGBA | None:
-        """Apply current opacity stack to a color's alpha channel."""
         if color is None or not self._opacity_stack:
             return color
         opacity = self.get_current_opacity()
@@ -135,14 +368,9 @@ class Buffer:
             return color
         return s.RGBA(color.r, color.g, color.b, color.a * opacity)
 
-    # Drawing offset stack (equivalent to OpenCode's translateX/translateY)
     def push_offset(self, dx: int, dy: int) -> None:
-        """Push a drawing offset. All draw/scissor operations shift by (dx, dy).
-
-        Offsets are cumulative — pushing (0, -5) then (0, -3) results in
-        an effective offset of (0, -8).  This mirrors OpenCode's translateY
-        which is a pure render-time transform that never triggers layout.
-        """
+        # Cumulative: pushing (0, -5) then (0, -3) yields (0, -8).
+        # Mirrors OpenCode's translateY — pure render-time, no layout.
         if self._offset_stack:
             cur_dx, cur_dy = self._offset_stack[-1]
             self._offset_stack.append((cur_dx + dx, cur_dy + dy))
@@ -150,7 +378,6 @@ class Buffer:
             self._offset_stack.append((dx, dy))
 
     def pop_offset(self) -> None:
-        """Pop the most recent drawing offset."""
         if self._offset_stack:
             self._offset_stack.pop()
 
@@ -204,7 +431,6 @@ class Buffer:
             if not text:
                 return
 
-        # Guard against negative x after scissor clipping (off-screen left).
         if x < 0:
             return
 
@@ -254,23 +480,16 @@ class Buffer:
                 return
             x, y, width, height = nx, ny, nw, nh
 
-        # Apply opacity
         bg = self._apply_opacity_to_color(bg)
 
         bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
         self._native.buffer_fill_rect(self._ptr, x, y, width, height, bg_tuple)
 
     def _check_bounds(self, x: int, y: int) -> None:
-        """Validate (x, y) is within buffer dimensions."""
         if x < 0 or x >= self.width or y < 0 or y >= self.height:
             raise IndexError(f"cell ({x}, {y}) out of bounds for {self.width}x{self.height} buffer")
 
     def get_bg_color(self, x: int, y: int) -> s.RGBA:
-        """Read the background color at (x, y) from the native buffer.
-
-        Returns an RGBA tuple with values in [0.0, 1.0].
-        Used for testing line color rendering.
-        """
         import ctypes
 
         self._check_bounds(x, y)
@@ -282,11 +501,6 @@ class Buffer:
         return s.RGBA(arr[0], arr[1], arr[2], arr[3])
 
     def get_fg_color(self, x: int, y: int) -> s.RGBA:
-        """Read the foreground color at (x, y) from the native buffer.
-
-        Returns an RGBA tuple with values in [0.0, 1.0].
-        Used for testing sign color rendering.
-        """
         import ctypes
 
         self._check_bounds(x, y)
@@ -298,16 +512,6 @@ class Buffer:
         return s.RGBA(arr[0], arr[1], arr[2], arr[3])
 
     def draw_editor_view(self, editor_view: Any, x: int = 0, y: int = 0) -> None:
-        """Render an EditorView into this buffer using native drawEditorView.
-
-        This delegates to the native C++ implementation which handles wrapping,
-        scrolling, syntax highlighting, and cursor rendering correctly.
-
-        Args:
-            editor_view: A NativeEditorView instance (must have a .ptr attribute).
-            x: X offset in the buffer.
-            y: Y offset in the buffer.
-        """
         from .native import _nb
 
         if self._offset_stack:
@@ -316,13 +520,16 @@ class Buffer:
             y += dy
         _nb.editor_view.buffer_draw_editor_view(self._ptr, editor_view.ptr, x, y)
 
-    def get_plain_text(self) -> str:
-        """Get buffer contents as plain text string.
+    def draw_text_buffer_view(self, text_buffer_view: Any, x: int = 0, y: int = 0) -> None:
+        from .native import _nb
 
-        Uses native writeResolvedChars to decode the buffer (including
-        grapheme clusters and box-drawing characters) into UTF-8 text.
-        Returns newline-separated lines with trailing spaces stripped.
-        """
+        if self._offset_stack:
+            dx, dy = self._offset_stack[-1]
+            x += dx
+            y += dy
+        _nb.text_buffer.buffer_draw_text_buffer_view(self._ptr, text_buffer_view.ptr, x, y)
+
+    def get_plain_text(self) -> str:
         try:
             raw: bytes = self._native.buffer_write_resolved_chars(self._ptr, True)
             if not raw:
@@ -339,7 +546,6 @@ class Buffer:
         return "\n".join(lines)
 
     def get_attributes(self, x: int, y: int) -> int:
-        """Read the attributes bitmask at (x, y) from the native buffer."""
         import ctypes
 
         self._check_bounds(x, y)
@@ -350,7 +556,6 @@ class Buffer:
         return arr[0]
 
     def get_char_code(self, x: int, y: int) -> int:
-        """Read the character codepoint at (x, y) from the native buffer."""
         import ctypes
 
         self._check_bounds(x, y)
@@ -361,7 +566,6 @@ class Buffer:
         return arr[0]
 
     def get_span_lines(self) -> list[dict]:
-        """Get span lines for diff testing."""
         w = self.width
         h = self.height
 
@@ -383,9 +587,7 @@ class Buffer:
                 result.append({"text": "", "width": 0})
         return result
 
-    # Scissor rect stack
     def push_scissor_rect(self, x: int, y: int, width: int, height: int) -> None:
-        """Push a scissor rectangle. Drawing is clipped to the intersection of all active rects."""
         # Apply drawing offset so nested scissor rects within a scrolled
         # container use the same coordinate space as draw operations.
         if self._offset_stack:
@@ -394,7 +596,6 @@ class Buffer:
             y += dy
 
         if self._scissor_stack:
-            # Intersect with current scissor
             cx, cy, cw, ch = self._scissor_stack[-1]
             nx = max(x, cx)
             ny = max(y, cy)
@@ -417,31 +618,20 @@ class Buffer:
             )
 
     def pop_scissor_rect(self) -> None:
-        """Pop the most recent scissor rectangle."""
         if self._scissor_stack:
             self._scissor_stack.pop()
             if self._graphics is not None:
                 self._graphics.buffer_pop_scissor_rect(self._ptr)
 
     def get_scissor_rect(self) -> tuple[int, int, int, int] | None:
-        """Get the current scissor rectangle, or None if no clipping."""
         return self._scissor_stack[-1] if self._scissor_stack else None
 
-    def _clip_coords(self, x: int, y: int) -> bool:
-        """Check if coordinates are within the current scissor rect."""
-        if not self._scissor_stack:
-            return True
-        sx, sy, sw, sh = self._scissor_stack[-1]
-        return sx <= x < sx + sw and sy <= y < sy + sh
-
-    # Opacity stack (cached product avoids O(n) recomputation per draw call)
+    # Cached product avoids O(n) recomputation per draw call.
     def push_opacity(self, opacity: float) -> None:
-        """Push an opacity value. Combined multiplicatively with the stack."""
         self._opacity_stack.append(opacity)
         self._cached_opacity = max(0.0, min(1.0, self._cached_opacity * opacity))
 
     def pop_opacity(self) -> None:
-        """Pop the most recent opacity value."""
         if self._opacity_stack:
             removed = self._opacity_stack.pop()
             if not self._opacity_stack:
@@ -456,10 +646,8 @@ class Buffer:
                 self._cached_opacity = max(0.0, min(1.0, self._cached_opacity))
 
     def get_current_opacity(self) -> float:
-        """Get the current combined opacity (product of all values in the stack)."""
         return self._cached_opacity
 
-    # Additional drawing methods
     def draw_rectangle(
         self,
         x: int,
@@ -470,29 +658,40 @@ class Buffer:
         border_color: s.RGBA | None = None,
         bg: s.RGBA | None = None,
     ) -> None:
-        """Draw a rectangle outline (no fill)."""
         if width < 2 or height < 2:
             return
 
-        chars = _get_border_chars(border_style)
-        tl, tr, bl, br, h_char, v_char = chars
+        if self._offset_stack:
+            dx, dy = self._offset_stack[-1]
+            x += dx
+            y += dy
 
-        # Top edge
-        self.draw_text(tl, x, y, fg=border_color, bg=bg)
-        for i in range(1, width - 1):
-            self.draw_text(h_char, x + i, y, fg=border_color, bg=bg)
-        self.draw_text(tr, x + width - 1, y, fg=border_color, bg=bg)
+        border_color = self._apply_opacity_to_color(border_color)
+        bg = self._apply_opacity_to_color(bg)
 
-        # Sides
-        for row in range(1, height - 1):
-            self.draw_text(v_char, x, y + row, fg=border_color, bg=bg)
-            self.draw_text(v_char, x + width - 1, y + row, fg=border_color, bg=bg)
-
-        # Bottom edge
-        self.draw_text(bl, x, y + height - 1, fg=border_color, bg=bg)
-        for i in range(1, width - 1):
-            self.draw_text(h_char, x + i, y + height - 1, fg=border_color, bg=bg)
-        self.draw_text(br, x + width - 1, y + height - 1, fg=border_color, bg=bg)
+        border_tuple = (
+            (border_color.r, border_color.g, border_color.b, border_color.a)
+            if border_color
+            else None
+        )
+        bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
+        self._native.buffer_draw_box(
+            self._ptr,
+            x,
+            y,
+            width,
+            height,
+            border_style,
+            True,
+            True,
+            True,
+            True,
+            False,
+            border_tuple,
+            bg_tuple,
+            "",
+            "left",
+        )
 
     def draw_box(
         self,
@@ -505,46 +704,47 @@ class Buffer:
         bg: s.RGBA | None = None,
         title: str | None = None,
         title_alignment: str = "left",
+        *,
+        border_top: bool = True,
+        border_right: bool = True,
+        border_bottom: bool = True,
+        border_left: bool = True,
+        should_fill: bool = True,
     ) -> None:
-        """Draw a full box with border, fill, and optional title."""
-        if width < 2 or height < 2:
+        if width < 1 or height < 1:
             return
 
-        # Fill interior
-        if bg:
-            self.fill_rect(x + 1, y + 1, width - 2, height - 2, bg=bg)
+        if self._offset_stack:
+            dx, dy = self._offset_stack[-1]
+            x += dx
+            y += dy
 
-        # Draw border
-        self.draw_rectangle(x, y, width, height, border_style, border_color, bg)
+        border_color = self._apply_opacity_to_color(border_color)
+        bg = self._apply_opacity_to_color(bg)
 
-        # Draw title
-        if title and width > 4:
-            max_title_len = width - 4
-            display_title = title[:max_title_len]
-            title_text = f" {display_title} "
-
-            if title_alignment == "center":
-                tx = x + (width - len(title_text)) // 2
-            elif title_alignment == "right":
-                tx = x + width - len(title_text) - 1
-            else:
-                tx = x + 1
-
-            self.draw_text(title_text, tx, y, fg=border_color, bg=bg)
-
-
-_BORDER_CHARS = {
-    "single": ("┌", "┐", "└", "┘", "─", "│"),
-    "double": ("╔", "╗", "╚", "╝", "═", "║"),
-    "round": ("╭", "╮", "╰", "╯", "─", "│"),
-    "bold": ("┏", "┓", "┗", "┛", "━", "┃"),
-    "block": ("█", "█", "█", "█", "█", "█"),
-}
-
-
-def _get_border_chars(style: str) -> tuple[str, str, str, str, str, str]:
-    """Get border characters for a style. Returns (tl, tr, bl, br, horizontal, vertical)."""
-    return _BORDER_CHARS.get(style, _BORDER_CHARS["single"])
+        border_tuple = (
+            (border_color.r, border_color.g, border_color.b, border_color.a)
+            if border_color
+            else None
+        )
+        bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
+        self._native.buffer_draw_box(
+            self._ptr,
+            x,
+            y,
+            width,
+            height,
+            border_style,
+            border_top,
+            border_right,
+            border_bottom,
+            border_left,
+            should_fill,
+            border_tuple,
+            bg_tuple,
+            title or "",
+            title_alignment,
+        )
 
 
 class RendererControlState(enum.Enum):
@@ -566,7 +766,6 @@ class CliRenderer:
         self._config = config
         self._native = native
         self._running = False
-        # Control state machine for render loop lifecycle
         self._control_state: RendererControlState = RendererControlState.IDLE
         self._rendering: bool = False
         self._update_scheduled: bool = False
@@ -577,18 +776,19 @@ class CliRenderer:
         self._event_callbacks: list[Callable] = []
         self._component_fn: Callable | None = None
         self._signal_state: Any = None
-        self._last_component: Any = None
+        self._last_frame_timings: FrameTimingBuckets = FrameTimingBuckets()
+        self._tree_has_custom_update_layout: bool | None = None
+        self._tree_custom_update_layout_count: int | None = None
+        self._common_tree_cache_root: Any = None
+        self._common_tree_cache_valid: bool = False
+        self._common_tree_cache_eligible: bool = False
+        self._pending_structural_clear_rects: list[tuple[int, int, int, int]] = []
         # Handler cache
         self._handlers_dirty = True
         self._cached_handlers: dict[str, list[Callable]] = {"key": [], "mouse": [], "paste": []}
-        # Auto-focus: whether left-click should automatically focus focusable elements.
-        # Set to False to prevent click-driven focus changes.
         self._auto_focus: bool = config.auto_focus
-        # Currently focused renderable (for auto-focus tracking).
         self._focused_renderable: Any = None
-        # Whether a drag operation is in progress (prevents auto-focus during drag).
         self._is_dragging: bool = False
-        # Post-processing and frame callbacks
         self._post_process_fns: list[Callable] = []
         self._frame_callbacks: list[Callable] = []
         self._animation_frame_callbacks: dict[int, Callable] = {}
@@ -597,6 +797,8 @@ class CliRenderer:
         self._force_next_render: bool = True  # Force first frame to be a full repaint
         self._clear_color: s.RGBA | None = self._parse_clear_color(config.clear_color)
         self._mouse_enabled: bool = False
+        self._mouse_tracking_dirty: bool = True
+        self._cached_requires_mouse_tracking: bool = False
         self._captured_renderable: Any = None
         # Per-frame cursor state — components call request_cursor() and
         # request_cursor_style() during render_after callbacks;
@@ -632,20 +834,18 @@ class CliRenderer:
         # mouse movement for hover recheck after render.
         self._latest_pointer: dict[str, int] = {"x": 0, "y": 0}
         self._has_pointer: bool = False
+        graphics = getattr(self._native, "graphics", None)
+        self._next_buffer_wrapper = Buffer(None, self._native.buffer, graphics)
+        self._current_buffer_wrapper = Buffer(None, self._native.buffer, graphics)
         self._last_pointer_modifiers: dict[str, bool] = {
             "shift": False,
             "alt": False,
             "ctrl": False,
         }
-        # Event emitter — listeners for renderer-level events like "focus"/"blur".
-        # Event listeners for terminal focus/blur tracking.
         self._event_listeners: dict[str, list[Callable]] = {}
-        # Palette detection state
         self._palette_detector: Any = None
         self._cached_palette: Any = None
         self._palette_detection_promise: asyncio.Task | asyncio.Future | None = None
-        # Selection state — current text selection model.
-        # Current text selection and its container hierarchy.
         self._current_selection: Any = None
         self._selection_containers: list[Any] = []
         # Split-height rendering — when > 0, only the bottom N rows of the
@@ -690,23 +890,13 @@ class CliRenderer:
         elif config.use_mouse is False:
             self._mouse_enabled = False
 
-    @staticmethod
-    def _parse_clear_color(color: s.RGBA | str | None) -> s.RGBA | None:
-        if color is None:
-            return None
-        if isinstance(color, s.RGBA):
-            return color
-        if isinstance(color, str):
-            return s.parse_color(color)
-        return None
+    _parse_clear_color = staticmethod(s.parse_color_opt)
 
     def set_clear_color(self, color: s.RGBA | str | None) -> None:
-        """Set the background color used to fill the buffer before each frame.
-
-        This ensures every cell has an explicit background, preventing the
-        terminal's native background from showing through.
-        """
-        self._clear_color = self._parse_clear_color(color)
+        parsed = self._parse_clear_color(color)
+        if parsed != self._clear_color:
+            self._clear_color = parsed
+            self._force_next_render = True
 
     @property
     def width(self) -> int:
@@ -718,18 +908,10 @@ class CliRenderer:
 
     @property
     def split_height(self) -> int:
-        """Return the current experimental split height (0 = disabled)."""
         return self._split_height
 
     @split_height.setter
     def split_height(self, value: int) -> None:
-        """Set the experimental split height.
-
-        When > 0, only the bottom *value* rows of the terminal are used for
-        rendering.  Mouse events with y < render_offset are ignored and
-        y-coordinates are shifted so that y=0 is the top of the rendered
-        region.
-        """
         value = max(value, 0)
         self._split_height = value
         if value > 0:
@@ -753,48 +935,39 @@ class CliRenderer:
 
     @property
     def root(self) -> RootRenderable:
-        """Get the root renderable."""
         if self._root is None:
             raise RuntimeError("Root not set. Call setup() first.")
         return self._root
 
     def setup(self) -> None:
-        """Set up the terminal."""
         if self._config.testing:
             return
         self._native.renderer.setup_terminal(self._ptr, self._config.use_alternate_screen)
 
     def suspend(self) -> None:
-        """Suspend the renderer (for Ctrl+Z)."""
         self._native.renderer.suspend_renderer(self._ptr)
 
     def resume(self) -> None:
-        """Resume the renderer."""
         self._native.renderer.resume_renderer(self._ptr)
 
     def clear(self) -> None:
-        """Clear the terminal."""
         self._native.renderer.clear_terminal(self._ptr)
 
     def set_title(self, title: str) -> None:
-        """Set the terminal title."""
         self._native.renderer.set_terminal_title(self._ptr, title)
 
     @property
     def use_mouse(self) -> bool:
-        """Whether mouse tracking is currently enabled."""
         return self._mouse_enabled
 
     @use_mouse.setter
     def use_mouse(self, value: bool) -> None:
-        """Enable or disable mouse tracking."""
         if value:
             self.enable_mouse()
         else:
             self.disable_mouse()
 
     def enable_mouse(self, enable_movement: bool = False) -> None:
-        """Enable mouse tracking."""
         if self._config.testing or self._ptr is None:
             self._mouse_enabled = True
             return
@@ -802,7 +975,6 @@ class CliRenderer:
         self._mouse_enabled = True
 
     def disable_mouse(self) -> None:
-        """Disable mouse tracking."""
         if self._config.testing or self._ptr is None:
             self._mouse_enabled = False
             return
@@ -810,34 +982,18 @@ class CliRenderer:
         self._mouse_enabled = False
 
     def enable_keyboard(self, flags: int = 0) -> None:
-        """Enable kitty keyboard protocol."""
         self._native.renderer.enable_kitty_keyboard(self._ptr, flags)
 
     def disable_keyboard(self) -> None:
-        """Disable kitty keyboard protocol."""
         self._native.renderer.disable_kitty_keyboard(self._ptr)
 
     def set_cursor_position(self, x: int, y: int, visible: bool = True) -> None:
-        """Set the cursor position and visibility."""
         self._native.renderer.set_cursor_position(self._ptr, x, y, visible)
 
     def request_cursor(self, x: int, y: int) -> None:
-        """Request the terminal cursor at (x, y) for this frame.
-
-        Components call this from ``render_after`` callbacks when screen
-        coordinates are known.  The last request wins — only one cursor
-        can be active.  After the frame buffer is flushed, ``_apply_cursor``
-        resolves the request via ``set_cursor_position``.
-        """
         self._cursor_request = (x, y)
 
     def request_cursor_style(self, style: str = "block", color: str | None = None) -> None:
-        """Request a cursor style (and optional color) for this frame.
-
-        Components call this from ``render_after`` callbacks alongside
-        ``request_cursor``.  If no position is requested the style is
-        ignored (hidden cursor doesn't need styling).
-        """
         self._cursor_style_request = style
         self._cursor_color_request = color
 
@@ -845,6 +1001,15 @@ class CliRenderer:
         "block": 1,
         "underline": 3,
         "bar": 5,
+        "steady_block": 2,
+        "steady_underline": 4,
+        "steady_bar": 6,
+    }
+
+    _DECSCUSR_STEADY = {
+        "block": 2,
+        "underline": 4,
+        "bar": 6,
         "steady_block": 2,
         "steady_underline": 4,
         "steady_bar": 6,
@@ -895,8 +1060,6 @@ class CliRenderer:
         self.set_cursor_position(0, 0, visible=False)
 
         if req is not None:
-            import time as _time
-
             # Software blink: alternate visible / hidden at ~530 ms.
             blink_on = int(_time.monotonic() * 1000 / 530) % 2 == 0
 
@@ -905,15 +1068,7 @@ class CliRenderer:
                 row = req[1] + 1
                 style = style_req or "block"
                 # Steady DECSCUSR — shape only; blink handled by our timer.
-                _STEADY = {
-                    "block": 2,
-                    "underline": 4,
-                    "bar": 6,
-                    "steady_block": 2,
-                    "steady_underline": 4,
-                    "steady_bar": 6,
-                }
-                code = _STEADY.get(style, 2)
+                code = self._DECSCUSR_STEADY.get(style, 2)
                 self._cursor_style = style
 
                 # CUP (position) → DECSCUSR (shape) → DECTCEM (show)
@@ -934,39 +1089,18 @@ class CliRenderer:
 
     @property
     def graphics_suppressed(self) -> bool:
-        """Whether Kitty/sixel graphics drawing is currently suppressed."""
         return self._graphics_suppressed
 
     def suppress_graphics(self) -> None:
-        """Suppress Kitty/sixel graphics drawing.
-
-        While suppressed, Image components skip their graphics protocol draws
-        and don't register their IDs.  The stale-graphics tracker then clears
-        any previously drawn graphics automatically.  Call
-        ``unsuppress_graphics()`` to resume; Images detect the transition and
-        force a redraw.
-
-        Typical use: overlay managers call this when a dialog opens and
-        ``unsuppress_graphics()`` when it closes.
-        """
         self._graphics_suppressed = True
 
     def unsuppress_graphics(self) -> None:
-        """Resume Kitty/sixel graphics drawing after suppression."""
         self._graphics_suppressed = False
 
     def register_frame_graphics(self, graphics_id: int) -> None:
-        """Register a Kitty graphics ID as active for this frame.
-
-        Image components call this during ``render()`` each frame they draw
-        (or skip drawing due to an unchanged signature).  After the frame
-        buffer is flushed, ``_clear_stale_graphics()`` deletes any IDs that
-        were active last frame but not this frame.
-        """
         self._frame_graphics.add(graphics_id)
 
     def _clear_stale_graphics(self) -> None:
-        """Delete Kitty graphics IDs that went stale since the last frame."""
         stale = self._prev_frame_graphics - self._frame_graphics
         if stale:
             import sys as _sys
@@ -980,63 +1114,45 @@ class CliRenderer:
         self._frame_graphics = set()
 
     def get_cursor_state(self) -> dict:
-        """Get the current cursor state (position, visibility)."""
         return self._native.renderer.get_cursor_state(self._ptr)
 
     def copy_to_clipboard(self, clipboard_type: int, text: str) -> bool:
-        """Copy text to clipboard via OSC 52.
-
-        Returns False without writing if the terminal does not support OSC 52.
-        """
         caps = self.get_capabilities()
         if not caps.osc52:
             return False
         return self._native.renderer.copy_to_clipboard_osc52(self._ptr, clipboard_type, text)
 
     def clear_clipboard(self, clipboard_type: int) -> bool:
-        """Clear clipboard via OSC 52.
-
-        Returns False without writing if the terminal does not support OSC 52.
-        """
         caps = self.get_capabilities()
         if not caps.osc52:
             return False
         return self._native.renderer.clear_clipboard_osc52(self._ptr, clipboard_type)
 
     def set_debug_overlay(self, enable: bool, flags: int = 0) -> None:
-        """Enable or disable the debug overlay."""
         self._native.renderer.set_debug_overlay(self._ptr, enable, flags)
 
     def update_stats(self, fps: float, frame_count: int, avg_frame_time: float) -> None:
-        """Update renderer statistics."""
         self._native.renderer.update_stats(self._ptr, fps, frame_count, avg_frame_time)
 
     def write_out(self, data: bytes) -> None:
-        """Write raw bytes to the output."""
         self._native.renderer.write_out(self._ptr, data)
 
     def set_kitty_keyboard_flags(self, flags: int) -> None:
-        """Set kitty keyboard protocol flags."""
         self._native.renderer.set_kitty_keyboard_flags(self._ptr, flags)
 
     def get_kitty_keyboard_flags(self) -> int:
-        """Get current kitty keyboard protocol flags."""
         return self._native.renderer.get_kitty_keyboard_flags(self._ptr)
 
     def set_background_color(self) -> None:
-        """Set the terminal background color from detected theme."""
         self._native.renderer.set_background_color(self._ptr)
 
     def set_render_offset(self, offset: int) -> None:
-        """Set the render offset for scrolling."""
         self._native.renderer.set_render_offset(self._ptr, offset)
 
     def query_pixel_resolution(self) -> None:
-        """Query the terminal's pixel resolution."""
         self._native.renderer.query_pixel_resolution(self._ptr)
 
     def get_capabilities(self) -> TerminalCapabilities:
-        """Get terminal capabilities."""
         caps_dict = self._native.renderer.get_terminal_capabilities(self._ptr)
         return TerminalCapabilities(
             kitty_keyboard=caps_dict.get("kitty_keyboard", False),
@@ -1059,37 +1175,32 @@ class CliRenderer:
         )
 
     def get_next_buffer(self) -> Buffer:
-        """Get the next buffer."""
         ptr = self._native.renderer.get_next_buffer(self._ptr)
-        return Buffer(ptr, self._native.buffer, self._native.graphics)
+        return self._next_buffer_wrapper._retarget(ptr)
 
     def get_current_buffer(self) -> Buffer:
-        """Get the current buffer."""
         ptr = self._native.renderer.get_current_buffer(self._ptr)
-        return Buffer(ptr, self._native.buffer, self._native.graphics)
+        return self._current_buffer_wrapper._retarget(ptr)
 
     def render(self, force: bool = False) -> None:
-        """Render the current frame."""
         self._native.renderer.render(self._ptr, force)
 
+    @property
+    def last_frame_timings(self) -> FrameTimingBuckets:
+        return self._last_frame_timings
+
     def resize(self, width: int, height: int) -> None:
-        """Resize the renderer and force a full repaint on the next frame."""
         self._native.renderer.resize_renderer(self._ptr, width, height)
         self._width = width
         self._height = height
         self._force_next_render = True
+        if self._root is not None:
+            self._root.mark_dirty()
 
     def clear_terminal(self) -> None:
-        """Clear the terminal screen (wipe reflow artifacts after resize)."""
         self._native.renderer.clear_terminal(self._ptr)
 
     def request_render(self) -> None:
-        """Request a render on the next frame.
-
-        In test mode this is a no-op (tests drive rendering via
-        ``render_frame()``).  In production the control-state machine
-        determines whether a frame is scheduled.
-        """
         if self._control_state == RendererControlState.EXPLICIT_SUSPENDED:
             return
         if self._running:
@@ -1101,18 +1212,9 @@ class CliRenderer:
         self._update_scheduled = True
 
     def set_event_callback(self, callback: Callable) -> None:
-        """Set callback for terminal events."""
         self._event_callbacks.append(callback)
 
     def on(self, event: str, handler: Callable) -> Callable[[], None]:
-        """Register an event listener on the renderer.
-
-        Supported events: ``"focus"``, ``"blur"``.
-
-        Registers handlers for terminal focus/blur events.
-
-        Returns an unsubscribe function.
-        """
         listeners = self._event_listeners.setdefault(event, [])
         listeners.append(handler)
 
@@ -1123,17 +1225,11 @@ class CliRenderer:
         return _unsub
 
     def emit_event(self, event: str, *args: Any) -> None:
-        """Emit a renderer-level event to all registered listeners.
-
-        Called internally when the input handler detects focus-in / focus-out
-        sequences.
-        """
         for handler in list(self._event_listeners.get(event, [])):
             with contextlib.suppress(Exception):
                 handler(*args)
 
     def run(self) -> None:
-        """Run the renderer main loop with event handling."""
         import os as _os
         import select as _sel
         import sys as _sys
@@ -1239,9 +1335,7 @@ class CliRenderer:
         try:
             event_loop.run()
         except KeyboardInterrupt:
-            if self._config.exit_on_ctrl_c:
-                pass
-            else:
+            if not self._config.exit_on_ctrl_c:
                 raise
         finally:
             # Disable kitty keyboard protocol before tearing down the
@@ -1251,13 +1345,11 @@ class CliRenderer:
 
             # Restore terminal default cursor style (DECSCUSR 0) and color
             # (OSC 112) so the shell cursor returns to its normal appearance.
-            try:
+            with contextlib.suppress(Exception):
                 import sys as _csys
 
                 _csys.stdout.write("\x1b[0 q\x1b]112\x07")
                 _csys.stdout.flush()
-            except Exception:
-                pass
 
             # Native destroy_renderer() performs the real renderer shutdown
             # sequence, including alt-screen exit and terminal state reset.
@@ -1282,16 +1374,24 @@ class CliRenderer:
                 pass
 
     def _render_frame(self, delta_time: float) -> None:
-        """Render a single frame."""
         self._rendering = True
         self._update_scheduled = False
         self._immediate_rerender_requested = False
+        timings = FrameTimingBuckets()
+        frame_start = _time.perf_counter_ns()
+        layout_failed = False
+        hover_recheck_needed = self._force_next_render or bool(
+            self._root
+            and (
+                getattr(self._root, "_dirty", False)
+                or getattr(self._root, "_subtree_dirty", False)
+                or getattr(self._root, "_hit_paint_dirty", False)
+            )
+        )
         try:
-            # Run frame callbacks before render
             for cb in self._frame_callbacks:
                 cb(delta_time)
 
-            # Run one-shot animation frame callbacks
             if self._animation_frame_callbacks:
                 pending = dict(self._animation_frame_callbacks)
                 self._animation_frame_callbacks.clear()
@@ -1303,8 +1403,12 @@ class CliRenderer:
                 and self._signal_state is not None
                 and self._signal_state.has_changes()
             ):
+                t_signal = _time.perf_counter_ns()
+                notified = self._signal_state._notified
+                hover_recheck_needed = True
                 self._signal_state.reset()
-                self._rebuild_component_tree()
+                _log.debug("signals handled reactively: %d signal(s)", len(notified))
+                timings.signal_handling_ns = _time.perf_counter_ns() - t_signal
 
             self._refresh_mouse_tracking()
 
@@ -1312,29 +1416,133 @@ class CliRenderer:
             if self._ptr is None:
                 return
 
+            needs_layout = False
+            layout_failed = False
+            layout_repaint_facts: list[LayoutRepaintFact] | None = None
             if self._root:
                 try:
-                    self._update_layout(self._root, delta_time)
+                    t_layout = _time.perf_counter_ns()
+                    (
+                        timings.configure_yoga_ns,
+                        timings.compute_yoga_ns,
+                        timings.apply_layout_ns,
+                        timings.update_layout_hooks_ns,
+                        needs_layout,
+                        layout_repaint_facts,
+                    ) = self._update_layout(self._root, delta_time)  # type: ignore[assignment]
+                    timings.layout_ns = _time.perf_counter_ns() - t_layout
                 except Exception:
                     _log.exception("Error updating layout")
+                    layout_failed = True
                     # Force a full layout recomputation on the next frame so
                     # yoga node state left dirty by the failed pass is reset.
                     self._force_next_render = True
                     if self._root is not None:
                         self._root.mark_dirty()
 
-            buffer = self.get_next_buffer()
-            buffer.clear()
+            if self._force_next_render and self._root and _log.isEnabledFor(logging.DEBUG):
+                _log.debug(
+                    "=== FIRST FRAME === layout=%s failed=%s %dx%d",
+                    needs_layout,
+                    layout_failed,
+                    self._width,
+                    self._height,
+                )
+                self._debug_dump_tree(self._root, max_depth=16)
 
-            # Fill entire buffer with clear color so every cell has an explicit
-            # background.  Without this, transparent cells show the terminal's
-            # native background color (e.g. Ghostty's gray).
-            if self._clear_color:
-                buffer.fill_rect(0, 0, self._width, self._height, self._clear_color)
+            if not layout_failed:
+                t_mount = _time.perf_counter_ns()
+                hooks.flush_mount_callbacks()
+                timings.mount_callbacks_ns = _time.perf_counter_ns() - t_mount
+
+            t_buffer_prepare = _time.perf_counter_ns()
+            t_buffer_lookup = _time.perf_counter_ns()
+            buffer = self.get_next_buffer()
+            timings.buffer_lookup_ns = _time.perf_counter_ns() - t_buffer_lookup
+            reused_current_buffer = False
+            repainted_dirty_common_tree = False
+            repainted_layout_common_tree = False
+            layout_common_plan: list[tuple[Any | None, tuple[int, int, int, int]]] | None = None
+            if not needs_layout and self._can_reuse_current_buffer_frame():
+                t_buffer_lookup = _time.perf_counter_ns()
+                current = self.get_current_buffer()
+                timings.buffer_lookup_ns += _time.perf_counter_ns() - t_buffer_lookup
+                try:
+                    t_replay = _time.perf_counter_ns()
+                    buffer._native.draw_frame_buffer(buffer._ptr, 0, 0, current._ptr)
+                    timings.buffer_replay_ns = _time.perf_counter_ns() - t_replay
+                    reused_current_buffer = True
+                except Exception:
+                    reused_current_buffer = False
+            elif (
+                not needs_layout
+                and not layout_failed
+                and self._can_incremental_common_tree_repaint()
+            ):
+                t_buffer_lookup = _time.perf_counter_ns()
+                current = self.get_current_buffer()
+                timings.buffer_lookup_ns += _time.perf_counter_ns() - t_buffer_lookup
+                try:
+                    t_replay = _time.perf_counter_ns()
+                    buffer._native.draw_frame_buffer(buffer._ptr, 0, 0, current._ptr)
+                    timings.buffer_replay_ns = _time.perf_counter_ns() - t_replay
+                    repainted_dirty_common_tree = True
+                except Exception:
+                    repainted_dirty_common_tree = False
+            elif needs_layout and not layout_failed:
+                t_plan = _time.perf_counter_ns()
+                repaint_plan = self._compute_layout_common_repaint_plan(
+                    layout_repaint_facts or [],
+                )
+                timings.repaint_plan_ns = _time.perf_counter_ns() - t_plan
+                if repaint_plan:
+                    t_buffer_lookup = _time.perf_counter_ns()
+                    current = self.get_current_buffer()
+                    timings.buffer_lookup_ns += _time.perf_counter_ns() - t_buffer_lookup
+                    try:
+                        t_replay = _time.perf_counter_ns()
+                        buffer._native.draw_frame_buffer(buffer._ptr, 0, 0, current._ptr)
+                        timings.buffer_replay_ns = _time.perf_counter_ns() - t_replay
+                        layout_common_plan = repaint_plan
+                        repainted_layout_common_tree = True
+                    except Exception:
+                        layout_common_plan = None
+                        repainted_layout_common_tree = False
+
+            if (
+                not reused_current_buffer
+                and not repainted_dirty_common_tree
+                and not repainted_layout_common_tree
+            ):
+                buffer.clear()
+
+                # Fill entire buffer with clear color so every cell has an explicit
+                # background.  Without this, transparent cells show the terminal's
+                # native background color (e.g. Ghostty's gray).
+                if self._clear_color:
+                    buffer.fill_rect(0, 0, self._width, self._height, self._clear_color)
+            timings.buffer_prepare_ns = _time.perf_counter_ns() - t_buffer_prepare
 
             if self._root:
                 try:
-                    self._root.render(buffer, delta_time)
+                    t_render = _time.perf_counter_ns()
+                    if repainted_dirty_common_tree:
+                        self._render_dirty_common_subtrees_fast(self._root, buffer, delta_time)
+                    elif repainted_layout_common_tree and layout_common_plan is not None:
+                        self._render_common_plan_fast(layout_common_plan, buffer, delta_time)
+                    elif (
+                        not reused_current_buffer
+                        and not self._render_common_tree_fast(self._root, buffer)
+                        and not self._render_hybrid_tree_fast(self._root, buffer, delta_time)
+                    ):
+                        self._root.render(buffer, delta_time)
+                    timings.render_tree_ns = _time.perf_counter_ns() - t_render
+                    # Successful frames clear dirty state after rendering.
+                    # Layout apply clears layout dirtiness in native code, but
+                    # paint dirtiness may still have been propagated by size
+                    # change callbacks or component-local invalidation.
+                    if not layout_failed:
+                        self._clear_all_dirty(self._root)
                 except Exception:
                     _log.exception("Error rendering root")
                     # Ensure yoga state is re-evaluated on the next frame.
@@ -1342,12 +1550,13 @@ class CliRenderer:
                     if self._root is not None:
                         self._root.mark_dirty()
 
-            # Run post-processing functions after render
+            t_post = _time.perf_counter_ns()
             for fn in self._post_process_fns:
                 fn(buffer)
                 # Guard: post-process may have destroyed the renderer.
                 if self._ptr is None:
                     return
+            timings.post_render_ns = _time.perf_counter_ns() - t_post
 
             # Guard: if the renderer was destroyed during one of the callbacks
             # above, skip the native render/flush calls to avoid use-after-free.
@@ -1358,7 +1567,9 @@ class CliRenderer:
             force = self._force_next_render
             if force:
                 self._force_next_render = False
+            t_flush = _time.perf_counter_ns()
             self.render(force=force)
+            timings.flush_ns = _time.perf_counter_ns() - t_flush
 
             # Guard again: destroy() may have been called inside post_process or
             # root.render(), and render() above would then use a live ptr, so we
@@ -1366,6 +1577,7 @@ class CliRenderer:
             if self._ptr is None:
                 return
 
+            t_finish = _time.perf_counter_ns()
             # Clear Kitty graphics that were active last frame but not this one.
             self._clear_stale_graphics()
 
@@ -1378,111 +1590,823 @@ class CliRenderer:
             # is dirty after render.  The guard is _has_pointer (not
             # _mouse_enabled) so that hover recheck fires even when mouse
             # tracking is auto-disabled.
-            self._recheck_hover_state()
+            if hover_recheck_needed:
+                self._recheck_hover_state()
+            timings.frame_finish_ns = _time.perf_counter_ns() - t_finish
         finally:
+            if not layout_failed:
+                self._pending_structural_clear_rects.clear()
+            timings.total_ns = _time.perf_counter_ns() - frame_start
+            self._last_frame_timings = timings
             self._rendering = False
             self._resolve_idle_if_needed()
 
-    def _rebuild_component_tree(self) -> None:
-        """Rebuild the component tree from the component function."""
-        if self._root is None or self._component_fn is None:
+    def queue_structural_clear_rect(self, rect: tuple[int, int, int, int]) -> None:
+        x, y, width, height = rect
+        if width <= 0 or height <= 0:
             return
+        self._pending_structural_clear_rects.append((x, y, width, height))
 
-        import time as _time
+    def evaluate_component(self, component_fn: Callable) -> tuple[Any, set, str]:
+        from .signals import _tracking_context
 
-        from .reconciler import reconcile
+        if getattr(component_fn, "__opentui_template_component__", False):
+            return component_fn(), set(), "template"
 
-        t0 = _time.perf_counter_ns()
-        old_children = list(self._root._children)
+        tracked: set = set()
+        token = _tracking_context.set(tracked)
         try:
-            component = self._component_fn()
-            t1 = _time.perf_counter_ns()
-            new_children = [component]
-            self._root._children.clear()
-            self._root._children_tuple = None
-            reconcile(self._root, old_children, new_children)
-            t2 = _time.perf_counter_ns()
-            _log.debug(
-                "rebuild: component_fn=%.2fms reconcile=%.2fms total=%.2fms",
-                (t1 - t0) / 1e6,
-                (t2 - t1) / 1e6,
-                (t2 - t0) / 1e6,
+            component = component_fn()
+        finally:
+            _tracking_context.reset(token)
+
+        if tracked:
+            signal_names = ", ".join(sorted(s._name for s in tracked if s._name))
+            comp_name = getattr(
+                component_fn, "__qualname__", getattr(component_fn, "__name__", "<unknown>")
             )
-        except Exception:
-            _log.exception("Error rebuilding component tree, restoring previous")
-            self._root._children = old_children
-            self._root._children_tuple = None
-            for child in old_children:
-                child._parent = self._root
-            # Restore yoga children to match restored _children
-            self._root._yoga_node.remove_all_children()
-            for child in old_children:
-                self._root._yoga_node.insert_child(
-                    child._yoga_node, self._root._yoga_node.child_count
-                )
+            short_name = comp_name.split(".")[-1]
+            raise RuntimeError(
+                f"Component '{comp_name}' reads signals in its body: [{signal_names}]\n"
+                f"This triggers a full tree rebuild on every signal change.\n\n"
+                f"Fix: use @template_component + reactive() for reactive props:\n"
+                f"  @template_component\n"
+                f"  def {short_name}():\n"
+                f"      return Text(reactive(lambda: f'value: {{signal_name()}}'))\n\n"
+                f"Alternatives: Show/Switch/For for control flow."
+            )
+
+        return component, set(), "template"
 
     def _refresh_mouse_tracking(self) -> None:
-        """Enable or disable mouse tracking based on the current tree."""
-        should_enable = (
-            bool(hooks.get_mouse_handlers())
-            or self._tree_has_mouse_handlers(self._root)
-            or self._tree_has_scroll_targets(self._root)
-        )
+        if not self._mouse_tracking_dirty:
+            should_enable = self._cached_requires_mouse_tracking
+        else:
+            should_enable = (
+                bool(hooks.get_mouse_handlers())
+                or self._tree_has_mouse_handlers(self._root)
+                or self._tree_has_scroll_targets(self._root)
+            )
+            self._cached_requires_mouse_tracking = should_enable
+            self._mouse_tracking_dirty = False
+
         if should_enable and not self._mouse_enabled:
             self.enable_mouse()
         elif not should_enable and self._mouse_enabled:
             self.disable_mouse()
 
-    def _update_layout(self, renderable, delta_time: float) -> None:
-        """Update layout for a renderable and its children using yoga."""
-        if renderable is self._root and self._root:
-            # Configure yoga properties (children already synced by add/remove/reconciler)
-            self._root._configure_yoga_properties()
+    def _update_layout(
+        self, renderable, delta_time: float
+    ) -> tuple[
+        int,
+        int,
+        int,
+        int,
+        bool,
+        list[LayoutRepaintFact] | None,
+    ]:
+        configure_yoga_ns = 0
+        compute_yoga_ns = 0
+        apply_layout_ns = 0
+        update_layout_hooks_ns = 0
+        needs_layout = False
+        layout_repaint_facts: list[LayoutRepaintFact] | None = None
+        is_root = renderable is self._root and self._root is not None
+        if is_root and self._root:
+            needs_layout = self._root._subtree_dirty
+            if needs_layout:
+                if _NATIVE_LAYOUT_CACHE["fn"] is _NOT_LOADED:
+                    _load_native_layout_apply(self._root)
+                local_subtree = self._collect_local_layout_subtree(self._root)
+                if local_subtree is None:
+                    # Configure yoga properties (children already synced by add/remove/reconciler)
+                    t_configure = _time.perf_counter_ns()
+                    self._root._configure_yoga_properties()
+                    configure_yoga_ns = _time.perf_counter_ns() - t_configure
 
-            from . import layout as yoga_layout
+                    from . import layout as yoga_layout
 
-            yoga_layout.compute_layout(
-                self._root._yoga_node, float(self._width), float(self._height)
-            )
+                    t_compute = _time.perf_counter_ns()
+                    yoga_layout.compute_layout(
+                        self._root._yoga_node, float(self._width), float(self._height)
+                    )
+                    compute_yoga_ns = _time.perf_counter_ns() - t_compute
 
-            self._apply_yoga_layout_recursive(self._root)
+                    t_apply = _time.perf_counter_ns()
+                    layout_repaint_facts = self._apply_yoga_layout_native(self._root)
+                    apply_layout_ns = _time.perf_counter_ns() - t_apply
+                else:
+                    subtree, avail_width, avail_height, origin_x, origin_y = local_subtree
+                    t_configure = _time.perf_counter_ns()
+                    subtree._configure_yoga_properties()
+                    configure_yoga_ns = _time.perf_counter_ns() - t_configure
 
-        if hasattr(renderable, "update_layout"):
+                    from . import layout as yoga_layout
+
+                    t_compute = _time.perf_counter_ns()
+                    yoga_layout.compute_layout(subtree._yoga_node, avail_width, avail_height)
+                    compute_yoga_ns = _time.perf_counter_ns() - t_compute
+
+                    t_apply = _time.perf_counter_ns()
+                    layout_repaint_facts = self._apply_yoga_layout_native(
+                        subtree,
+                        origin_x=origin_x,
+                        origin_y=origin_y,
+                    )
+                    self._clear_handled_layout_dirty_ancestors(subtree)
+                    apply_layout_ns = _time.perf_counter_ns() - t_apply
+
+            if self._tree_has_custom_update_layout is None:
+                self._tree_custom_update_layout_count = self._count_tree_custom_update_layout(
+                    self._root
+                )
+                self._tree_has_custom_update_layout = self._tree_custom_update_layout_count > 0
+
+        t_hooks = _time.perf_counter_ns()
+        if self._has_custom_update_layout(renderable):
             renderable.update_layout(delta_time)
 
-        # Recurse into children (snapshot to guard against mid-update mutations)
-        for child in list(getattr(renderable, "_children", [])):
-            if not getattr(child, "_destroyed", False):
-                self._update_layout(child, delta_time)
+        # Recurse only when a subtree was structurally/layout dirty or a node
+        # defines a real update_layout hook. Yoga layout has already been
+        # applied tree-wide above; this walk is only for post-layout hooks.
+        if self._tree_has_custom_update_layout:
+            for child in list(getattr(renderable, "_children", [])):
+                if not getattr(child, "_destroyed", False):
+                    _, _, _, child_hooks_ns, _, _, _, _ = self._update_layout(child, delta_time)
+                    # unpack shape is intentionally ignored except hook timing
+                    update_layout_hooks_ns += child_hooks_ns
+        update_layout_hooks_ns += _time.perf_counter_ns() - t_hooks
 
-    def _apply_yoga_layout_recursive(
-        self, renderable, offset_x: int = 0, offset_y: int = 0
-    ) -> None:
-        """Apply yoga layout to renderable and all descendants.
+        return (
+            configure_yoga_ns,
+            compute_yoga_ns,
+            apply_layout_ns,
+            update_layout_hooks_ns,
+            needs_layout,
+            layout_repaint_facts,
+        )
 
-        Yoga computes positions relative to the parent. This method converts
-        them to absolute screen coordinates by accumulating parent offsets.
+    def _debug_dump_tree(self, node, depth: int = 0, max_depth: int = 8) -> None:
+        if depth > max_depth:
+            _log.warning("%s  ... (max depth)", "  " * depth)
+            return
+        indent = "  " * depth
+        name = type(node).__name__
+        lw = getattr(node, "_layout_width", "?")
+        lh = getattr(node, "_layout_height", "?")
+        x = getattr(node, "_x", "?")
+        y = getattr(node, "_y", "?")
+        fg = getattr(node, "_flex_grow", "?")
+        vis = getattr(node, "_visible", "?")
+        key = getattr(node, "_key", None)
+        nkids = len(getattr(node, "_children", []))
+        yoga_info = ""
+        yoga_node = getattr(node, "_yoga_node", None)
+        if yoga_node:
+            yoga_info = f" yoga={yoga_node.layout_width}x{yoga_node.layout_height}"
+        key_str = f" key={key}" if key else ""
+        content = ""
+        c = getattr(node, "_content", None)
+        if c is not None:
+            content = f' "{c[:30]}"' if c else ""
+        _log.debug(
+            "%s%s: %sx%s @(%s,%s) fg=%s vis=%s kids=%d%s%s%s",
+            indent,
+            name,
+            lw,
+            lh,
+            x,
+            y,
+            fg,
+            vis,
+            nkids,
+            yoga_info,
+            key_str,
+            content,
+        )
+        for child in getattr(node, "_children", []):
+            self._debug_dump_tree(child, depth + 1, max_depth)
+
+    def _apply_yoga_layout_native(
+        self,
+        root,
+        *,
+        origin_x: int = 0,
+        origin_y: int = 0,
+    ) -> list[LayoutRepaintFact]:
+        fn = _NATIVE_LAYOUT_CACHE["fn"]
+        offsets = _NATIVE_LAYOUT_CACHE["offsets"]
+
+        if fn is _NOT_LOADED:
+            _load_native_layout_apply(root)
+            fn = _NATIVE_LAYOUT_CACHE["fn"]
+            offsets = _NATIVE_LAYOUT_CACHE["offsets"]
+
+        if fn is None or offsets is None:
+            raise RuntimeError("yoga.apply_layout_tree is required")
+
+        facts = list(fn(root, offsets, origin_x, origin_y))
+        # The native walker cannot safely call _on_size_change via slot
+        # offsets because RootRenderable (the root type used to discover
+        # offsets) doesn't have this slot — reading at a Box-derived offset
+        # on a RootRenderable would access out-of-bounds memory.  Fire the
+        # callbacks from Python instead using the geometry-change facts.
+        for fact in facts:
+            node = fact[0]
+            old_w, old_h, new_w, new_h = fact[6], fact[7], fact[10], fact[11]
+            if old_w != new_w or old_h != new_h:
+                cb = getattr(node, "_on_size_change", None)
+                if cb is not None:
+                    with contextlib.suppress(Exception):
+                        cb(new_w, new_h)
+        return facts
+
+    @staticmethod
+    def _collect_top_dirty_layout_nodes(root) -> list[Any]:
+        found: list[Any] = []
+
+        def walk(node) -> None:
+            if getattr(node, "_dirty", False):
+                found.append(node)
+                return
+            for child in getattr(node, "_children", ()):
+                if getattr(child, "_subtree_dirty", False):
+                    walk(child)
+
+        walk(root)
+        return found
+
+    def _collect_local_layout_subtree(
+        self,
+        root,
+    ) -> tuple[Any, float, float, int, int] | None:
+        dirty_nodes = self._collect_top_dirty_layout_nodes(root)
+        if not dirty_nodes:
+            return None
+
+        parents = {getattr(node, "_parent", None) for node in dirty_nodes}
+        if len(parents) != 1:
+            return None
+
+        parent = next(iter(parents))
+        if parent is None or parent is root:
+            return None
+        if getattr(parent, "_dirty", False):
+            return None
+        if not hasattr(parent, "_layout_width") or not hasattr(parent, "_layout_height"):
+            return None
+
+        subtree = parent
+        avail_width = float(int(getattr(subtree, "_layout_width", 0) or 0))
+        avail_height = float(int(getattr(subtree, "_layout_height", 0) or 0))
+        if avail_width <= 0 or avail_height <= 0:
+            return None
+
+        origin_parent = getattr(subtree, "_parent", None)
+        origin_x = int(getattr(origin_parent, "_x", 0) or 0) if origin_parent is not None else 0
+        origin_y = int(getattr(origin_parent, "_y", 0) or 0) if origin_parent is not None else 0
+        return (subtree, avail_width, avail_height, origin_x, origin_y)
+
+    @staticmethod
+    def _clear_handled_layout_dirty_ancestors(node) -> None:
+        current = node
+        while current is not None:
+            if getattr(current, "_subtree_dirty", False):
+                current._subtree_dirty = False
+            current = getattr(current, "_parent", None)
+
+    def _render_common_tree_fast(self, root, buffer: Buffer) -> bool:
+        if not self._prepare_common_tree_render(root):
+            return False
+
+        return self._render_common_tree_unchecked_fast(root, buffer)
+
+    def _render_common_tree_unchecked_fast(self, root, buffer: Buffer) -> bool:
+        render_fn = _COMMON_RENDER_CACHE["render_fn"]
+        offsets = _COMMON_RENDER_CACHE["offsets"]
+        root_type = _COMMON_RENDER_CACHE["root_type"]
+        box_type = _COMMON_RENDER_CACHE["box_type"]
+        text_type = _COMMON_RENDER_CACHE["text_type"]
+        portal_type = _COMMON_RENDER_CACHE["portal_type"]
+
+        if None in (render_fn, offsets, root_type, box_type, text_type, portal_type):
+            return False
+
+        try:
+            return bool(
+                render_fn(buffer._ptr, root, root_type, box_type, text_type, portal_type, offsets)
+            )
+        except Exception:
+            _log.debug("native common render path unavailable", exc_info=True)
+            self._common_tree_cache_root = root
+            self._common_tree_cache_valid = False
+            self._common_tree_cache_eligible = False
+            return False
+
+    def _render_hybrid_tree_fast(self, root, buffer: Buffer, delta_time: float) -> bool:
+        if _has_instance_render_override(root):
+            return False
+
+        hybrid_fn = _COMMON_RENDER_CACHE["hybrid_fn"]
+        offsets = _COMMON_RENDER_CACHE["offsets"]
+        root_type = _COMMON_RENDER_CACHE["root_type"]
+        box_type = _COMMON_RENDER_CACHE["box_type"]
+        text_type = _COMMON_RENDER_CACHE["text_type"]
+        portal_type = _COMMON_RENDER_CACHE["portal_type"]
+
+        if hybrid_fn is _NOT_LOADED:
+            _load_common_render(root)
+            hybrid_fn = _COMMON_RENDER_CACHE["hybrid_fn"]
+            offsets = _COMMON_RENDER_CACHE["offsets"]
+            root_type = _COMMON_RENDER_CACHE["root_type"]
+            box_type = _COMMON_RENDER_CACHE["box_type"]
+            text_type = _COMMON_RENDER_CACHE["text_type"]
+            portal_type = _COMMON_RENDER_CACHE["portal_type"]
+
+        if None in (hybrid_fn, offsets, root_type, box_type, text_type, portal_type):
+            return False
+
+        def py_fallback(node):
+            node.render(buffer, delta_time)
+
+        try:
+            return bool(
+                hybrid_fn(
+                    buffer._ptr,
+                    root,
+                    root_type,
+                    box_type,
+                    text_type,
+                    portal_type,
+                    offsets,
+                    py_fallback,
+                )
+            )
+        except Exception:
+            _log.debug("hybrid render path failed", exc_info=True)
+            return False
+
+    def _prepare_common_tree_render(self, root) -> bool:
+        if _has_instance_render_override(root):
+            return False
+        if not self._supports_common_tree_strategy(root):
+            self._common_tree_cache_root = root
+            self._common_tree_cache_valid = True
+            self._common_tree_cache_eligible = False
+            return False
+
+        validate_fn = _COMMON_RENDER_CACHE["validate_fn"]
+        render_fn = _COMMON_RENDER_CACHE["render_fn"]
+        offsets = _COMMON_RENDER_CACHE["offsets"]
+        root_type = _COMMON_RENDER_CACHE["root_type"]
+        box_type = _COMMON_RENDER_CACHE["box_type"]
+        text_type = _COMMON_RENDER_CACHE["text_type"]
+        portal_type = _COMMON_RENDER_CACHE["portal_type"]
+
+        if validate_fn is _NOT_LOADED or render_fn is _NOT_LOADED:
+            _load_common_render(root)
+            validate_fn = _COMMON_RENDER_CACHE["validate_fn"]
+            render_fn = _COMMON_RENDER_CACHE["render_fn"]
+            offsets = _COMMON_RENDER_CACHE["offsets"]
+            root_type = _COMMON_RENDER_CACHE["root_type"]
+            box_type = _COMMON_RENDER_CACHE["box_type"]
+            text_type = _COMMON_RENDER_CACHE["text_type"]
+            portal_type = _COMMON_RENDER_CACHE["portal_type"]
+
+        if None in (validate_fn, render_fn, offsets, root_type, box_type, text_type, portal_type):
+            return False
+
+        tree_dirty = bool(
+            getattr(root, "_dirty", False)
+            or getattr(root, "_subtree_dirty", False)
+            or getattr(root, "_paint_subtree_dirty", False)
+        )
+        cache_stale = root is not self._common_tree_cache_root or not self._common_tree_cache_valid
+
+        try:
+            if tree_dirty or cache_stale:
+                eligible = bool(
+                    validate_fn(root, root_type, box_type, text_type, portal_type, offsets)
+                )
+                self._common_tree_cache_root = root
+                self._common_tree_cache_valid = True
+                self._common_tree_cache_eligible = eligible
+                if not eligible:
+                    return False
+            elif not self._common_tree_cache_eligible:
+                return False
+            return True
+        except Exception:
+            _log.debug("native common render path unavailable", exc_info=True)
+            self._common_tree_cache_root = root
+            self._common_tree_cache_valid = False
+            self._common_tree_cache_eligible = False
+            return False
+
+    @classmethod
+    def _supports_common_tree_strategy(cls, renderable) -> bool:
+        """Intentionally shallow gate — the native validator already walks the full tree;
+        doing another full Python traversal here doubles the hot path cost for large
+        common trees.
         """
-        if hasattr(renderable, "_apply_yoga_layout"):
-            renderable._apply_yoga_layout()
-            # Convert relative yoga position to absolute screen coordinates
-            renderable._x += offset_x
-            renderable._y += offset_y
+        if isinstance(renderable, RootRenderable):
+            for child in getattr(renderable, "_children", ()):
+                strategy = getattr(child, "get_render_strategy", None)
+                if strategy is None:
+                    continue
+                child_strategy = child.get_render_strategy()
+                if child_strategy in (RenderStrategy.RETAINED_LAYER, RenderStrategy.HEAVY_WIDGET):
+                    return False
+            return True
 
-        # Children's positions will be relative to this renderable's absolute position
-        abs_x = getattr(renderable, "_x", offset_x)
-        abs_y = getattr(renderable, "_y", offset_y)
+        strategy = getattr(renderable, "get_render_strategy", None)
+        if strategy is None:
+            return True
+        node_strategy = renderable.get_render_strategy()
+        if node_strategy in (RenderStrategy.RETAINED_LAYER, RenderStrategy.HEAVY_WIDGET):
+            return False
+        return not (
+            node_strategy is RenderStrategy.PYTHON_FALLBACK
+            and getattr(renderable, "_children", None)
+        )
 
-        if hasattr(renderable, "get_children"):
-            for child in renderable.get_children():
-                self._apply_yoga_layout_recursive(child, abs_x, abs_y)
+    @staticmethod
+    def _clear_all_dirty(renderable) -> None:
+        if (
+            not getattr(renderable, "_dirty", False)
+            and not getattr(renderable, "_subtree_dirty", False)
+            and not getattr(renderable, "_paint_subtree_dirty", False)
+            and not getattr(renderable, "_hit_paint_dirty", False)
+        ):
+            return
+        renderable._dirty = False
+        renderable._subtree_dirty = False
+        renderable._paint_subtree_dirty = False
+        renderable._hit_paint_dirty = False
+        for child in renderable._children:
+            if (
+                getattr(child, "_dirty", False)
+                or getattr(child, "_subtree_dirty", False)
+                or getattr(child, "_paint_subtree_dirty", False)
+                or getattr(child, "_hit_paint_dirty", False)
+            ):
+                CliRenderer._clear_all_dirty(child)
+
+    def _can_reuse_current_buffer_frame(self) -> bool:
+        root = self._root
+        if root is None or self._force_next_render or self._post_process_fns:
+            return False
+        if (
+            getattr(root, "_dirty", False)
+            or getattr(root, "_subtree_dirty", False)
+            or getattr(root, "_paint_subtree_dirty", False)
+        ):
+            return False
+        return self._prepare_common_tree_render(root)
+
+    def _can_incremental_common_tree_repaint(self) -> bool:
+        root = self._root
+        if root is None or self._force_next_render:
+            return False
+        if getattr(root, "_dirty", False) or getattr(root, "_subtree_dirty", False):
+            return False
+        if not getattr(root, "_paint_subtree_dirty", False):
+            return False
+        return self._prepare_common_tree_render(root)
+
+    def _compute_layout_common_repaint_plan(
+        self,
+        layout_repaint_facts: list[LayoutRepaintFact],
+    ) -> list[tuple[Any, tuple[int, int, int, int]]] | None:
+        root = self._root
+        if (
+            root is None
+            or self._force_next_render
+            or self._post_process_fns
+            or self._tree_has_custom_update_layout
+            or not layout_repaint_facts
+        ):
+            return None
+        if not self._prepare_common_tree_render(root):
+            return None
+
+        return self._compute_layout_common_repaint_plan_from_facts(root, layout_repaint_facts)
+
+    def _compute_layout_common_repaint_plan_from_facts(
+        self,
+        root,
+        facts: list[LayoutRepaintFact],
+    ) -> list[tuple[Any | None, tuple[int, int, int, int]]] | None:
+        if len(facts) <= 8:
+            return self._compute_layout_common_repaint_plan_small_facts(root, facts)
+
+        root_id = id(root)
+        facts_by_id: dict[int, LayoutRepaintFact] = {}
+        for fact in facts:
+            node = fact[0]
+            facts_by_id[id(node)] = fact
+        if not facts_by_id:
+            return None
+        if root_id in facts_by_id:
+            return self._compute_structural_common_repaint_plan(root, facts_by_id[root_id])
+
+        promoted: list[Any] = []
+        for fact in facts_by_id.values():
+            promoted_node = self._promote_layout_repaint_root_from_facts(
+                fact, facts_by_id, root_id, root
+            )
+            if promoted_node is root:
+                return None
+            promoted.append(promoted_node)
+
+        roots = self._dedupe_common_roots_from_facts(promoted, facts_by_id, root_id)
+        if not roots:
+            return None
+
+        fact_by_node = {fact[0]: fact for fact in facts}
+        return [
+            (
+                node,
+                self._layout_repaint_rect_from_fact(fact_by_node.get(node))
+                if node in fact_by_node
+                else self._node_bounds_rect(node),
+            )
+            for node in roots
+        ]
+
+    def _compute_layout_common_repaint_plan_small_facts(
+        self,
+        root,
+        facts: list[LayoutRepaintFact],
+    ) -> list[tuple[Any | None, tuple[int, int, int, int]]] | None:
+        root_id = id(root)
+        node_ids = [id(fact[0]) for fact in facts]
+
+        for idx, node_id in enumerate(node_ids):
+            if node_id == root_id:
+                return self._compute_structural_common_repaint_plan(root, facts[idx])
+
+        promoted: list[Any] = []
+        for fact in facts:
+            current_fact = fact
+            current_node = fact[0]
+            parent_id = fact[1]
+            while parent_id and parent_id != root_id:
+                parent_fact = None
+                for idx, node_id in enumerate(node_ids):
+                    if node_id == parent_id:
+                        parent_fact = facts[idx]
+                        break
+                if parent_fact is None:
+                    break
+                current_fact = parent_fact
+                current_node = current_fact[0]
+                parent_id = current_fact[1]
+
+            has_children = bool(current_fact[2])
+            if parent_id == root_id and not has_children:
+                return None
+            if not has_children and parent_id and parent_id != root_id:
+                parent = getattr(current_node, "_parent", None)
+                if parent is not None:
+                    current_node = parent
+            promoted.append(current_node)
+
+        roots = self._dedupe_common_roots(promoted, root)
+        if not roots:
+            return None
+
+        plan: list[tuple[Any | None, tuple[int, int, int, int]]] = []
+        for node in roots:
+            node_fact = None
+            for fact in facts:
+                if fact[0] is node:
+                    node_fact = fact
+                    break
+            rect = (
+                self._layout_repaint_rect_from_fact(node_fact)
+                if node_fact is not None
+                else self._node_bounds_rect(node)
+            )
+            plan.append((node, rect))
+        return plan
+
+    def _compute_structural_common_repaint_plan(
+        self,
+        root,
+        root_fact: LayoutRepaintFact,
+    ) -> list[tuple[Any | None, tuple[int, int, int, int]]] | None:
+        if root_fact[4:8] != root_fact[8:12]:
+            return None
+
+        plan: list[tuple[Any | None, tuple[int, int, int, int]]] = [
+            (None, rect) for rect in self._pending_structural_clear_rects
+        ]
+        dirty_roots: list[Any] = []
+        self._collect_structural_common_roots(root, dirty_roots)
+        for node in self._dedupe_common_roots(dirty_roots, root):
+            plan.append((node, self._node_bounds_rect(node)))
+        return plan or None
+
+    @staticmethod
+    def _promote_layout_repaint_root_from_facts(
+        fact: LayoutRepaintFact,
+        facts_by_id: dict[int, LayoutRepaintFact],
+        root_id: int,
+        root,
+    ) -> Any:
+        current_fact = fact
+        current_node = fact[0]
+        parent_id = fact[1]
+        while parent_id and parent_id != root_id and parent_id in facts_by_id:
+            current_fact = facts_by_id[parent_id]
+            current_node = current_fact[0]
+            parent_id = current_fact[1]
+
+        has_children = bool(current_fact[2])
+        if parent_id == root_id and not has_children:
+            return root
+        if not has_children and parent_id and parent_id != root_id:
+            parent = getattr(current_node, "_parent", None)
+            if parent is not None:
+                return parent
+        return current_node
+
+    @staticmethod
+    def _dedupe_common_roots_from_facts(
+        nodes: list[Any],
+        facts_by_id: dict[int, LayoutRepaintFact],
+        root_id: int,
+    ) -> list[Any]:
+        unique: dict[int, Any] = {}
+        for node in nodes:
+            unique.setdefault(id(node), node)
+        kept: list[Any] = []
+        unique_ids = set(unique)
+        for _node_id, node in unique.items():
+            parent = getattr(node, "_parent", None)
+            while parent is not None and id(parent) not in unique_ids and id(parent) != root_id:
+                parent = getattr(parent, "_parent", None)
+            if parent is None or id(parent) == root_id:
+                kept.append(node)
+        return kept
+
+    @staticmethod
+    def _dedupe_common_roots(nodes: list[Any], root) -> list[Any]:
+        unique: dict[int, Any] = {}
+        for node in nodes:
+            unique.setdefault(id(node), node)
+        kept: list[Any] = []
+        unique_ids = set(unique)
+        root_id = id(root)
+        for node in unique.values():
+            parent = getattr(node, "_parent", None)
+            while parent is not None and id(parent) not in unique_ids and id(parent) != root_id:
+                parent = getattr(parent, "_parent", None)
+            if parent is None or id(parent) == root_id:
+                kept.append(node)
+        return kept
+
+    @staticmethod
+    def _layout_repaint_rect_from_fact(
+        fact: LayoutRepaintFact | None,
+    ) -> tuple[int, int, int, int]:
+        if fact is None:
+            return (0, 0, 0, 0)
+        return CliRenderer._union_rects(
+            (fact[4], fact[5], fact[6], fact[7]),
+            (fact[8], fact[9], fact[10], fact[11]),
+        )
+
+    def _render_common_plan_fast(
+        self,
+        plan: list[tuple[Any | None, tuple[int, int, int, int]]],
+        buffer: Buffer,
+        delta_time: float,
+    ) -> None:
+        for node, rect in plan:
+            self._clear_common_repaint_rect(buffer, rect)
+            if node is None:
+                continue
+            if not self._render_common_tree_unchecked_fast(node, buffer):
+                node.render(buffer, delta_time)
+
+    @staticmethod
+    def _node_bounds_rect(node) -> tuple[int, int, int, int]:
+        return (
+            int(getattr(node, "_x", 0) or 0),
+            int(getattr(node, "_y", 0) or 0),
+            int(getattr(node, "_layout_width", 0) or 0),
+            int(getattr(node, "_layout_height", 0) or 0),
+        )
+
+    @staticmethod
+    def _union_rects(
+        first: tuple[int, int, int, int],
+        second: tuple[int, int, int, int],
+    ) -> tuple[int, int, int, int]:
+        x1, y1, w1, h1 = first
+        x2, y2, w2, h2 = second
+        if w1 <= 0 or h1 <= 0:
+            return second
+        if w2 <= 0 or h2 <= 0:
+            return first
+        left = min(x1, x2)
+        top = min(y1, y2)
+        right = max(x1 + w1, x2 + w2)
+        bottom = max(y1 + h1, y2 + h2)
+        return (left, top, right - left, bottom - top)
+
+    def _clear_common_repaint_rect(
+        self,
+        buffer: Buffer,
+        rect: tuple[int, int, int, int],
+    ) -> None:
+        x, y, width, height = rect
+        if width <= 0 or height <= 0:
+            return
+        buffer.fill_rect(x, y, width, height, self._clear_color)
+
+    def _render_dirty_common_subtrees_fast(self, root, buffer: Buffer, delta_time: float) -> None:
+        dirty_roots: list[Any] = []
+        self._collect_dirty_common_roots(root, dirty_roots)
+        self._render_common_plan_fast(
+            [(node, self._node_bounds_rect(node)) for node in dirty_roots],
+            buffer,
+            delta_time,
+        )
+
+    def _collect_structural_common_roots(self, node, out: list[Any]) -> None:
+        for child in getattr(node, "_children", ()):
+            if getattr(child, "_destroyed", False):
+                continue
+            if not (
+                getattr(child, "_dirty", False)
+                or getattr(child, "_subtree_dirty", False)
+                or getattr(child, "_paint_subtree_dirty", False)
+            ):
+                continue
+            if self._supports_common_tree_strategy(child) and not _has_instance_render_override(
+                child
+            ):
+                out.append(child)
+                continue
+            self._collect_structural_common_roots(child, out)
+
+    def _collect_dirty_common_roots(self, node, out: list[Any]) -> None:
+        if getattr(node, "_dirty", False):
+            out.append(node)
+            return
+        for child in getattr(node, "_children", ()):
+            if getattr(child, "_dirty", False) or getattr(child, "_paint_subtree_dirty", False):
+                self._collect_dirty_common_roots(child, out)
+
+    @staticmethod
+    def _has_custom_update_layout(renderable) -> bool:
+        cls = type(renderable)
+        cached = _CUSTOM_UPDATE_LAYOUT_CACHE.get(cls)
+        if cached is not None:
+            return cached
+        update_layout = getattr(cls, "update_layout", None)
+        result = update_layout is not None and update_layout is not _DEFAULT_UPDATE_LAYOUT_FN
+        _CUSTOM_UPDATE_LAYOUT_CACHE[cls] = result
+        return result
+
+    @classmethod
+    def _compute_tree_has_custom_update_layout(cls, renderable) -> bool:
+        if cls._has_custom_update_layout(renderable):
+            return True
+        for child in getattr(renderable, "_children", ()):
+            if cls._compute_tree_has_custom_update_layout(child):
+                return True
+        return False
+
+    @classmethod
+    def _count_tree_custom_update_layout(cls, renderable) -> int:
+        count = 1 if cls._has_custom_update_layout(renderable) else 0
+        for child in getattr(renderable, "_children", ()):
+            count += cls._count_tree_custom_update_layout(child)
+        return count
 
     def invalidate_handler_cache(self) -> None:
-        """Mark handler cache as dirty (call when tree structure changes)."""
         self._handlers_dirty = True
+        self._mouse_tracking_dirty = True
+
+    def invalidate_layout_hook_cache(self) -> None:
+        self._tree_has_custom_update_layout = None
+        self._tree_custom_update_layout_count = None
+
+    def adjust_layout_hook_cache_for_subtree(self, renderable, delta: int) -> None:
+        if self._tree_custom_update_layout_count is None:
+            return
+        subtree_count = self._count_tree_custom_update_layout(renderable)
+        self._tree_custom_update_layout_count = max(
+            0,
+            self._tree_custom_update_layout_count + (subtree_count * delta),
+        )
+        self._tree_has_custom_update_layout = self._tree_custom_update_layout_count > 0
 
     def _get_event_forwarding(self) -> dict:
-        """Get event handlers from all renderables (cached)."""
         if not self._handlers_dirty:
             return self._cached_handlers
 
@@ -1496,7 +2420,6 @@ class CliRenderer:
         return handlers
 
     def _collect_handlers(self, renderable, handlers: dict) -> None:
-        """Recursively collect event handlers."""
         with contextlib.suppress(AttributeError):
             handlers["key"].append(renderable._key_handler)
 
@@ -1521,7 +2444,6 @@ class CliRenderer:
             pass
 
     def _tree_has_mouse_handlers(self, renderable) -> bool:
-        """Return True when any renderable in the tree handles mouse events."""
         if renderable is None:
             return False
 
@@ -1544,7 +2466,6 @@ class CliRenderer:
             return False
 
     def _tree_has_scroll_targets(self, renderable) -> bool:
-        """Return True when any renderable in the tree owns wheel scrolling."""
         if renderable is None:
             return False
         if getattr(renderable, "_is_scroll_target", False):
@@ -1555,33 +2476,14 @@ class CliRenderer:
             return False
 
     def _dispatch_mouse_event(self, event) -> None:
-        """Dispatch a mouse event through the render tree before global hooks.
-
-        Implements mouse capture: when a drag begins on a renderable, that
-        element receives ALL subsequent drag events directly (skipping tree
-        traversal) until the mouse button is released.          This is required for click-and-drag
-        operations like text selection to work correctly.
-
-        Also integrates text selection:
-        - left-button down on a selectable renderable starts selection
-        - drag while selection active updates selection focus
-        - up while selection active finishes selection (stops dragging)
-        - ctrl+click extends an existing selection
-        - right click does NOT start selection
-        - click without drag clears selection (unless prevented)
-        """
         if self._root is None:
             return
 
-        # --- Split-height coordinate adjustment ---
-        # When split-height is active, ignore events above the render area
-        # and offset y so that y=0 corresponds to the top of the rendered region.
         if self._split_height > 0:
             if event.y < self._render_offset:
                 return
             event.y -= self._render_offset
 
-        # Track latest pointer position and modifiers for hover recheck after render.
         self._latest_pointer["x"] = event.x
         self._latest_pointer["y"] = event.y
         self._has_pointer = True
@@ -1591,8 +2493,6 @@ class CliRenderer:
             "ctrl": getattr(event, "ctrl", False),
         }
 
-        # Console overlay intercept — if visible, check if the event falls
-        # inside the console bounds.  If the console handles it, stop here.
         if self._use_console and self._console.visible:
             cb = self._console.bounds
             if (
@@ -1618,8 +2518,6 @@ class CliRenderer:
                 type(captured).__name__ if captured is not None else None,
             )
 
-        # --- Selection handling (before normal capture) ---
-        # Find the hit target for selection checks.
         hit_renderable = self._find_deepest_hit(self._root, event.x, event.y)
         is_ctrl = getattr(event, "ctrl", False)
         button = getattr(event, "button", 0)
@@ -1639,7 +2537,6 @@ class CliRenderer:
             )
             if can_start:
                 self.start_selection(hit_renderable, event.x, event.y)
-                # Still dispatch the mouse-down event to the renderable
                 self._dispatch_mouse_to_tree(self._root, event)
                 return
 
@@ -1703,8 +2600,6 @@ class CliRenderer:
             self.update_selection(hit_renderable, event.x, event.y)
             return
 
-        # --- Normal capture-based dispatch ---
-
         # Route drag/move events directly to captured element (skip tree walk).
         if captured is not None and event.type not in ("up", "down"):
             handler = getattr(captured, "_on_mouse_drag", None)
@@ -1740,7 +2635,6 @@ class CliRenderer:
         elif event.type == "up":
             self._is_dragging = False
 
-        # Normal tree dispatch for down/other events.
         self._dispatch_mouse_to_tree(self._root, event)
 
         target = getattr(event, "target", None)
@@ -1816,20 +2710,9 @@ class CliRenderer:
             self.clear_selection()
 
     def _dispatch_scroll_event(self, event) -> None:
-        """Route wheel input through the render tree with parent propagation.
-
-        The deepest
-        renderable under the pointer receives the event first, then the
-        event bubbles up through parents until something calls
-        ``stop_propagation()`` (typically a ScrollBox).
-
-        When nothing in the tree handles the event, falls back to the
-        currently focused renderable.
-        """
         if self._root is None:
             return
 
-        # Dispatch through the normal tree (propagates from deepest to root).
         self._dispatch_mouse_to_tree(self._root, event)
 
         if event.propagation_stopped:
@@ -1852,18 +2735,12 @@ class CliRenderer:
 
     @property
     def has_selection(self) -> bool:
-        """Return True if there is an active selection."""
         return self._current_selection is not None
 
     def get_selection(self):
-        """Return the current Selection object, or None."""
         return self._current_selection
 
     def start_selection(self, renderable, x: int, y: int) -> None:
-        """Start a new selection at the given coordinates.
-
-        Used by both mouse and keyboard selection.
-        """
         if not getattr(renderable, "selectable", False):
             return
 
@@ -1881,7 +2758,6 @@ class CliRenderer:
     def update_selection(
         self, current_renderable, x: int, y: int, *, finish_dragging: bool = False
     ) -> None:
-        """Update the focus of the current selection."""
         if self._current_selection is None:
             return
 
@@ -1919,7 +2795,6 @@ class CliRenderer:
         self._notify_selectables_of_selection_change()
 
     def clear_selection(self) -> None:
-        """Clear the current selection."""
         if self._current_selection is not None:
             for renderable in self._current_selection.touched_renderables:
                 if getattr(renderable, "selectable", False) and not getattr(
@@ -1930,13 +2805,11 @@ class CliRenderer:
         self._selection_containers = []
 
     def _finish_selection(self) -> None:
-        """Finish the current selection (stop dragging)."""
         if self._current_selection is not None:
             self._current_selection.is_dragging = False
             self._notify_selectables_of_selection_change()
 
     def _is_within_container(self, renderable, container) -> bool:
-        """Check if renderable is a descendant of container."""
         current = renderable
         while current is not None:
             if current is container:
@@ -1945,7 +2818,6 @@ class CliRenderer:
         return False
 
     def _notify_selectables_of_selection_change(self) -> None:
-        """Walk the tree and notify selectable renderables of selection changes."""
         selected_renderables: list = []
         touched_renderables: list = []
         current_container = (
@@ -1977,14 +2849,12 @@ class CliRenderer:
         selected_renderables: list,
         touched_renderables: list,
     ) -> None:
-        """Walk the tree within container and check selectable renderables against bounds."""
         try:
             children = list(container.get_children())
         except AttributeError:
             return
 
         for child in children:
-            # Check if child overlaps with selection bounds
             cx = getattr(child, "_x", 0)
             cy = getattr(child, "_y", 0)
             cw = int(getattr(child, "_layout_width", 0) or 0)
@@ -1995,10 +2865,9 @@ class CliRenderer:
             sw = selection_bounds["width"]
             sh = selection_bounds["height"]
 
-            # Check overlap
             if cx + cw <= sx or cx >= sx + sw or cy + ch <= sy or cy >= sy + sh:
-                # No overlap — but still walk children
-                if getattr(child, "get_children_count", lambda: 0)() > 0:
+                gcc = getattr(child, "get_children_count", None)
+                if gcc is not None and gcc() > 0:
                     self._walk_selectable_renderables(
                         child, selection_bounds, selected_renderables, touched_renderables
                     )
@@ -2010,29 +2879,29 @@ class CliRenderer:
                     selected_renderables.append(child)
                 touched_renderables.append(child)
 
-            if getattr(child, "get_children_count", lambda: 0)() > 0:
+            gcc = getattr(child, "get_children_count", None)
+            if gcc is not None and gcc() > 0:
                 self._walk_selectable_renderables(
                     child, selection_bounds, selected_renderables, touched_renderables
                 )
 
     def request_selection_update(self) -> None:
-        """Request a selection update using the latest pointer position."""
         if self._current_selection is not None and self._current_selection.is_dragging:
             px = self._latest_pointer["x"]
             py = self._latest_pointer["y"]
             hit = self._find_deepest_hit(self._root, px, py)
             self.update_selection(hit, px, py)
 
+    @staticmethod
+    def _iter_children_front_to_back(children) -> list:
+        indexed = list(enumerate(children))
+        indexed.sort(
+            key=lambda pair: (getattr(pair[1], "_z_index", 0), pair[0]),
+            reverse=True,
+        )
+        return [child for _, child in indexed]
+
     def _recheck_hover_state(self) -> None:
-        """Recheck hover state after the hit-grid may have changed.
-
-        Called after render when the pointer is tracked.  Fires synthetic
-        ``_on_mouse_out`` / ``_on_mouse_over`` events when the element
-        under the cursor has changed (e.g. because a ScrollBox scrolled
-        and different content is now under the stationary pointer).
-
-        Fires synthetic over/out when the element under the cursor has changed.
-        """
         if self.is_destroyed or not self._has_pointer:
             return
         # Skip recheck while a renderable is captured (drag in progress).
@@ -2092,15 +2961,6 @@ class CliRenderer:
         scroll_adjust_x: int = 0,
         scroll_adjust_y: int = 0,
     ) -> Any:
-        """Return the deepest renderable in the tree whose bounds contain (x, y).
-
-        *scroll_adjust_x/y* accumulate scroll offsets from ancestor
-        ScrollBoxes so that children are checked in content-space
-        coordinates (matching _dispatch_mouse_to_tree).
-
-        Also respects ``overflow == "hidden"`` by clipping hits to the
-        renderable's layout bounds.
-        """
         if renderable is None:
             return None
 
@@ -2109,8 +2969,9 @@ class CliRenderer:
 
         contains_point = getattr(renderable, "contains_point", None)
         inside = True if contains_point is None else contains_point(check_x, check_y)
+        host = getattr(renderable, "_host", None)
 
-        if not inside:
+        if not inside and host is None:
             return None
 
         # If overflow is hidden, further clip to this renderable's bounds
@@ -2124,7 +2985,6 @@ class CliRenderer:
             if not (rx <= x < rx + rw and ry <= y < ry + rh):
                 return None
 
-        # Accumulate scroll offset for children.
         child_sx = scroll_adjust_x
         child_sy = scroll_adjust_y
         if getattr(renderable, "_scroll_y", False):
@@ -2133,47 +2993,29 @@ class CliRenderer:
         if getattr(renderable, "_scroll_x", False):
             child_sx += int(getattr(renderable, "_scroll_offset_x", 0))
 
-        # Check children first (deepest wins — children are "in front of" parent).
+        # Deepest child wins (children render in front of parent).
         try:
             children = list(renderable.get_children())
         except AttributeError:
             children = []
 
-        # Sort by z_index so higher z renders last / hits first
-        def _z(c):
-            return getattr(c, "_z_index", 0)
-
-        for child in sorted(children, key=_z, reverse=True):
+        for child in self._iter_children_front_to_back(children):
             hit = self._find_deepest_hit(child, x, y, child_sx, child_sy)
             if hit is not None:
                 return hit
 
         # This renderable contains the point.
-        return renderable
+        if inside:
+            return renderable
+        return None
 
     def hit_test(self, x: int, y: int) -> int:
-        """Return the ``num`` of the deepest renderable at screen *(x, y)*.
-
-        Returns 0 when nothing is hit (empty space).
-
-        Walks the render tree via ``_find_deepest_hit`` to find the
-        deepest renderable at the given coordinates.
-
-        The root renderable is excluded (returns 0) because it is a
-        layout container only and does not draw
-        pixels — the root is a layout container only.
-        """
         hit = self._find_deepest_hit(self._root, x, y)
         if hit is None or hit is self._root:
             return 0
         return hit._num
 
     def _find_focusable_ancestor(self, renderable) -> Any:
-        """Walk up the tree from *renderable* to find the nearest focusable ancestor.
-
-        Returns the focusable renderable, or None if no focusable element is found.
-        Walks up the tree to find the nearest focusable ancestor.
-        """
         node = renderable
         while node is not None:
             if getattr(node, "_focusable", False):
@@ -2182,13 +3024,8 @@ class CliRenderer:
         return None
 
     def _do_auto_focus(self, renderable) -> None:
-        """Give focus to *renderable*, blurring any previously focused element.
-
-        Only one element can be focused at a time.
-        """
         if self._focused_renderable is renderable:
             return
-        # Blur previous
         if self._focused_renderable is not None:
             with contextlib.suppress(Exception):
                 self._focused_renderable.blur()
@@ -2199,13 +3036,11 @@ class CliRenderer:
     def _find_scroll_target(
         self, renderable, x: int, y: int, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0
     ):
-        """Return the deepest registered scroll target under *(x, y)*."""
         try:
             children = list(renderable.get_children())
         except AttributeError:
             children = []
 
-        # Accumulate scroll offset for children (same as _dispatch_mouse_to_tree)
         child_sx = scroll_adjust_x
         child_sy = scroll_adjust_y
         if getattr(renderable, "_scroll_y", False):
@@ -2231,15 +3066,6 @@ class CliRenderer:
     def _dispatch_mouse_to_tree(
         self, renderable, event, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0
     ) -> None:
-        """Walk children front-to-back and dispatch to the deepest hit target.
-
-        *scroll_adjust_x/y* accumulate scroll offsets from ancestor ScrollBoxes.
-        Children inside a ScrollBox have layout coordinates in content space
-        (not screen space), so we add the parent's scroll offset to the mouse
-        coordinates when checking ``contains_point``.  Children inside
-        a ScrollBox use content-space coordinates (parent scroll offset
-        is added to mouse coordinates).
-        """
         if event.propagation_stopped:
             return
 
@@ -2264,15 +3090,21 @@ class CliRenderer:
         if getattr(renderable, "_scroll_x", False):
             child_scroll_x += int(getattr(renderable, "_scroll_offset_x", 0))
 
-        for child in reversed(children):
+        for child in self._iter_children_front_to_back(children):
             child_check_x = event.x + child_scroll_x
             child_check_y = event.y + child_scroll_y
             child_contains = getattr(child, "contains_point", None)
-            if child_contains is not None and not child_contains(child_check_x, child_check_y):
+            child_host = getattr(child, "_host", None)
+            if (
+                child_contains is not None
+                and not child_contains(child_check_x, child_check_y)
+                and child_host is None
+            ):
                 continue
             self._dispatch_mouse_to_tree(child, event, child_scroll_x, child_scroll_y)
             if event.propagation_stopped:
                 return
+            break
 
         if not inside:
             return
@@ -2286,52 +3118,31 @@ class CliRenderer:
             event.target = renderable
             handler(event)
 
-    # Post-processing pipeline
     def add_post_process_fn(self, fn: Callable) -> None:
-        """Add a post-processing function called after each render."""
         self._post_process_fns.append(fn)
 
     def remove_post_process_fn(self, fn: Callable) -> None:
-        """Remove a post-processing function."""
-        self._post_process_fns = [f for f in self._post_process_fns if f is not fn]
+        with contextlib.suppress(ValueError):
+            self._post_process_fns.remove(fn)
 
     def set_frame_callback(self, callback: Callable) -> None:
-        """Add a callback called before each frame render."""
         self._frame_callbacks.append(callback)
 
     def remove_frame_callback(self, callback: Callable) -> None:
-        """Remove a frame callback."""
-        self._frame_callbacks = [f for f in self._frame_callbacks if f is not callback]
+        with contextlib.suppress(ValueError):
+            self._frame_callbacks.remove(callback)
 
     def request_animation_frame(self, callback: Callable) -> int:
-        """Request a callback on the next animation frame. Returns handle for cancellation."""
         handle = self._next_animation_id
         self._next_animation_id += 1
         self._animation_frame_callbacks[handle] = callback
         return handle
 
     def cancel_animation_frame(self, handle: int) -> None:
-        """Cancel a previously requested animation frame callback."""
         self._animation_frame_callbacks.pop(handle, None)
 
-    # Cursor and theme
     def set_cursor_style(self, style: str) -> None:
-        """Set cursor style using DECSCUSR escape codes.
-
-        Blinking variants by default:
-          ``"block"`` → 1, ``"underline"`` → 3, ``"bar"`` → 5
-        Steady variants:
-          ``"steady_block"`` → 2, ``"steady_underline"`` → 4, ``"steady_bar"`` → 6
-        """
-        style_map = {
-            "block": 1,
-            "underline": 3,
-            "bar": 5,
-            "steady_block": 2,
-            "steady_underline": 4,
-            "steady_bar": 6,
-        }
-        code = style_map.get(style, 1)
+        code = _CURSOR_STYLE_MAP.get(style, 1)
         if self._cursor_style == style:
             return
         self._cursor_style = style
@@ -2344,7 +3155,6 @@ class CliRenderer:
             pass
 
     def set_cursor_color(self, color: str) -> None:
-        """Set cursor color (hex string).  Cached — skips write if unchanged."""
         if self._cursor_color == color:
             return
         self._cursor_color = color
@@ -2357,19 +3167,9 @@ class CliRenderer:
             pass
 
     def set_mouse_pointer(self, style: str) -> None:
-        """Set the OS-level mouse pointer (cursor) style.
-
-        Valid *style* values: ``"default"``, ``"pointer"``, ``"text"``,
-        ``"crosshair"``, ``"move"``, ``"not-allowed"``.
-
-        In testing mode this only updates ``_current_mouse_pointer_style``
-        (no terminal escape is emitted).  In live mode, the style is also
-        forwarded to the native renderer.
-        """
         self._current_mouse_pointer_style = style
 
     def _reset_cursor_color(self) -> None:
-        """Reset cursor color to terminal default via OSC 112."""
         self._cursor_color = None
         try:
             import sys
@@ -2380,7 +3180,6 @@ class CliRenderer:
             pass
 
     def get_theme_mode(self) -> str | None:
-        """Get terminal theme mode ('dark', 'light', or None if unknown)."""
         # Most terminals default to dark mode
         try:
             import os
@@ -2395,14 +3194,8 @@ class CliRenderer:
             pass
         return None
 
-    # -- Palette detection ------------------
-
     @property
     def palette_detection_status(self) -> str:
-        """Return the current palette detection status.
-
-        Returns one of ``"idle"``, ``"detecting"``, or ``"cached"``.
-        """
         if self._cached_palette is not None:
             return "cached"
         if self._palette_detection_promise is not None:
@@ -2410,7 +3203,6 @@ class CliRenderer:
         return "idle"
 
     def clear_palette_cache(self) -> None:
-        """Invalidate the cached palette so the next ``get_palette()`` re-detects."""
         self._cached_palette = None
 
     async def get_palette(
@@ -2419,19 +3211,6 @@ class CliRenderer:
         size: int = 16,
         **kwargs,
     ) -> Any:
-        """Detect the terminal's colour palette.
-
-        Args:
-            timeout: Timeout in milliseconds.
-            size: Number of indexed colours to query (default 16).
-
-        Returns:
-            A :class:`~opentui.palette.TerminalColors` object.
-
-        Raises:
-            RuntimeError: If the renderer is suspended.
-        """
-        # Accept keyword-style options dict
         if kwargs:
             timeout = kwargs.get("timeout", timeout)
             size = kwargs.get("size", size)
@@ -2485,12 +3264,8 @@ class CliRenderer:
         return await self._palette_detection_promise
 
     def _restore_terminal_modes(self) -> None:
-        """Re-enable terminal modes after a focus-in event.
-
-        When the terminal loses focus and regains it, some terminals
-        (particularly tmux, screen) may drop protocol state.  This
-        re-sends the kitty keyboard flags, mouse tracking, and
-        bracketed paste to ensure the application continues working.
+        """Some terminals (tmux, screen) drop protocol state on focus loss;
+        re-send kitty keyboard flags, mouse tracking, and bracketed paste.
         """
         if self._config.testing:
             return
@@ -2511,20 +3286,15 @@ class CliRenderer:
         except Exception:
             _log.debug("Failed to restore terminal modes on focus", exc_info=True)
 
-    # -- Control state machine ----------------
-
     @property
     def control_state(self) -> RendererControlState:
-        """Current control state of the renderer."""
         return self._control_state
 
     @property
     def is_running(self) -> bool:
-        """Whether the renderer is currently running (alias for _running)."""
         return self._running
 
     def _is_idle_now(self) -> bool:
-        """Return True when the renderer is completely idle."""
         return (
             not self._running
             and not self._rendering
@@ -2533,7 +3303,6 @@ class CliRenderer:
         )
 
     def _resolve_idle_if_needed(self) -> None:
-        """Resolve any pending idle() futures if the renderer is now idle."""
         if not self._is_idle_now():
             return
         futures = self._idle_futures[:]
@@ -2543,14 +3312,6 @@ class CliRenderer:
                 fut.set_result(None)
 
     async def idle(self) -> None:
-        """Return a coroutine that resolves when the renderer becomes idle.
-
-        Resolves immediately if the
-        renderer is already idle or destroyed.  Otherwise, returns an
-        ``asyncio.Future`` that is resolved when the renderer transitions
-        to an idle state (via ``stop()``, ``pause()``, ``dropLive()``,
-        or ``destroy()``).
-        """
         if self.is_destroyed:
             return
         if self._is_idle_now():
@@ -2561,71 +3322,41 @@ class CliRenderer:
         await fut
 
     def _internal_start(self) -> None:
-        """Start the render loop (internal helper)."""
         if not self._running and not self.is_destroyed:
             self._running = True
 
     def _internal_pause(self) -> None:
-        """Pause the render loop (internal helper)."""
         self._running = False
         if not self._rendering:
             self._resolve_idle_if_needed()
 
     def _internal_stop(self) -> None:
-        """Stop the render loop (internal helper)."""
         if self._running and not self.is_destroyed:
             self._running = False
             if not self._rendering:
                 self._resolve_idle_if_needed()
 
     def start(self) -> None:
-        """Explicitly start the renderer.
-
-        Sets the control state to EXPLICIT_STARTED and starts the
-        internal render loop.
-        """
         self._control_state = RendererControlState.EXPLICIT_STARTED
         self._internal_start()
 
     def pause(self) -> None:
-        """Explicitly pause the renderer.
-
-        Sets the control state to EXPLICIT_PAUSED and stops the
-        internal render loop, resolving any pending ``idle()`` futures.
-        """
         self._control_state = RendererControlState.EXPLICIT_PAUSED
         self._internal_pause()
 
     def stop(self) -> None:
-        """Stop the renderer and event loop.
-
-        Sets the control state to EXPLICIT_STOPPED and stops the
-        internal render loop, resolving any pending ``idle()`` futures.
-        """
         self._control_state = RendererControlState.EXPLICIT_STOPPED
         self._internal_stop()
         if self._event_loop is not None:
             self._event_loop.stop()
 
     def request_live(self) -> None:
-        """Request a live render session (auto-start if idle).
-
-        Each call increments the live request counter.  When the counter
-        transitions from 0 to 1 and the renderer is IDLE, the control
-        state changes to AUTO_STARTED and the render loop is started.
-        """
         self._live_request_counter += 1
         if self._control_state == RendererControlState.IDLE and self._live_request_counter > 0:
             self._control_state = RendererControlState.AUTO_STARTED
             self._internal_start()
 
     def drop_live(self) -> None:
-        """Drop a live render session (auto-stop when counter reaches 0).
-
-        Each call decrements the live request counter.  When the counter
-        reaches 0 and the renderer is AUTO_STARTED, the control state
-        returns to IDLE and the render loop is paused.
-        """
         self._live_request_counter = max(0, self._live_request_counter - 1)
         if (
             self._control_state == RendererControlState.AUTO_STARTED
@@ -2636,11 +3367,9 @@ class CliRenderer:
 
     @property
     def is_destroyed(self) -> bool:
-        """Whether this renderer has been destroyed."""
         return self._ptr is None
 
     def destroy(self) -> None:
-        """Destroy the renderer and free resources."""
         # Reset mouse pointer style to default before teardown.
         self._current_mouse_pointer_style = "default"
         self._last_over_renderable = None
@@ -2663,8 +3392,6 @@ class CliRenderer:
 
 
 class RootRenderable(BaseRenderable):
-    """Root renderable - the top-level container."""
-
     def __init__(self, renderer: CliRenderer):
         super().__init__()
         self._renderer = renderer
@@ -2672,20 +3399,15 @@ class RootRenderable(BaseRenderable):
         self._height = renderer.height
 
     def _configure_yoga_node(self, node) -> None:
-        """Configure root yoga node with renderer's dimensions."""
         node.width = float(self._renderer.width)
         node.height = float(self._renderer.height)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render all children."""
         for child in self._children:
-            render_fn = getattr(child, "render", None)
-            if render_fn is not None:
-                render_fn(buffer, delta_time)
+            child.render(buffer, delta_time)
 
 
 async def create_cli_renderer(config: CliRendererConfig | None = None) -> CliRenderer:
-    """Create a new CLI renderer using nanobind."""
     if config is None:
         config = CliRendererConfig()
 
@@ -2710,11 +3432,6 @@ async def create_cli_renderer(config: CliRendererConfig | None = None) -> CliRen
 
     return renderer
 
-
-# ---------------------------------------------------------------------------
-# Kitty keyboard protocol flag constants
-# See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#progressive-enhancement
-# ---------------------------------------------------------------------------
 
 KITTY_FLAG_DISAMBIGUATE = 0b1  # bit 0: disambiguated escape codes
 KITTY_FLAG_EVENT_TYPES = 0b10  # bit 1: press/repeat/release event types

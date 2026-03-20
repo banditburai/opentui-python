@@ -11,7 +11,7 @@ from .advanced import (
     TextTable,
 )
 from .base import BaseRenderable, LayoutOptions, Renderable, StyleOptions
-from .box import Box, LinearScrollAccel, MacOSScrollAccel, ScrollBox
+from .box import Box, LinearScrollAccel, MacOSScrollAccel, ScrollBox, ScrollContent
 from .code_renderable import (
     CodeRenderable,
     MockTreeSitterClient,
@@ -19,7 +19,24 @@ from .code_renderable import (
     TreeSitterClient,
 )
 from .composition import VRenderable
-from .control_flow import For, Match, Portal, Show, Switch
+from .control_flow import (
+    Dynamic,
+    ErrorBoundary,
+    For,
+    Match,
+    MemoBlock,
+    MountedTemplate,
+    Portal,
+    Show,
+    Suspense,
+    Switch,
+    Template,
+    TemplateBinding,
+    bind,
+    reactive,
+    template,
+    template_component,
+)
 from .diff_renderable import DiffRenderable
 from .framebuffer import FrameBuffer
 from .image import Image
@@ -49,6 +66,7 @@ __all__ = [
     "StyleOptions",
     # Box
     "Box",
+    "ScrollContent",
     "LinearScrollAccel",
     "MacOSScrollAccel",
     "ScrollBox",
@@ -76,11 +94,22 @@ __all__ = [
     "Slider",
     "TextTable",
     # Control flow
+    "Dynamic",
     "For",
+    "MemoBlock",
+    "MountedTemplate",
     "Portal",
     "Show",
     "Switch",
     "Match",
+    "Template",
+    "TemplateBinding",
+    "bind",
+    "reactive",
+    "template",
+    "template_component",
+    "ErrorBoundary",
+    "Suspense",
     # New components
     "ScrollBar",
     "FrameBuffer",

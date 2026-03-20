@@ -24,14 +24,10 @@ class Code(Renderable):
     def __init__(
         self,
         content: str = "",
-        *children: Any,
-        # Code options
         filetype: str = "plaintext",
         tree_sitter_client: Any = None,
-        # Display options
         show_line_numbers: bool = True,
         highlight_current_line: bool = False,
-        # Style
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -51,12 +47,11 @@ class Code(Renderable):
     @content.setter
     def content(self, value: str) -> None:
         self._content = value
+        self.mark_dirty()
         if self._yoga_node is not None:
             self._yoga_node.mark_dirty()
 
     def _setup_measure_func(self) -> None:
-        """Set up yoga measure function for code layout."""
-
         def measure(yoga_node, width, width_mode, height, height_mode):
             import yoga
 
@@ -66,7 +61,6 @@ class Code(Renderable):
             lines = self._content.split("\n") if self._content else []
             num_lines = len(lines)
 
-            # Gutter width: 4 chars (3 for number + 1 space) when showing line numbers
             gutter = 4 if self._show_line_numbers else 0
             max_line_width = max((len(line) for line in lines), default=0)
             content_w = max_line_width + gutter
@@ -82,7 +76,6 @@ class Code(Renderable):
         self._yoga_node.set_measure_func(measure)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the code block."""
         if not self._visible or not self._content:
             return
 
@@ -91,16 +84,18 @@ class Code(Renderable):
         width = self._layout_width or (buffer.width - x)
         height = self._layout_height or (buffer.height - y)
 
-        # Draw background
         if self._background_color:
             buffer.fill_rect(x, y, width, height, self._background_color)
 
-        # Render code lines
         lines = self._content.split("\n")
+        offset_dy = buffer._offset_stack[-1][1] if buffer._offset_stack else 0
         for i, line in enumerate(lines[:height]):
             line_y = y + i
-            if line_y >= buffer.height:
+            render_y = line_y + offset_dy
+            if render_y >= buffer.height:
                 break
+            if render_y < 0:
+                continue
 
             if self._show_line_numbers:
                 line_num = str(i + 1).rjust(3)
@@ -128,11 +123,8 @@ class Diff(Renderable):
         self,
         old_text: str = "",
         new_text: str = "",
-        *children: Any,
-        # Diff options
         mode: str = "unified",  # "unified" or "split"
         context_lines: int = 3,
-        # Style
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -153,13 +145,11 @@ class Diff(Renderable):
 
             old_lines = self._old_text.split("\n") if self._old_text else []
             new_lines = self._new_text.split("\n") if self._new_text else []
-            # Diff output can have at most old + new lines
             num_lines = len(old_lines) + len(new_lines)
             max_line_width = max(
                 max((len(line) for line in old_lines), default=0),
                 max((len(line) for line in new_lines), default=0),
             )
-            # "+2" for the status prefix ("+ " or "- ")
             content_w = max_line_width + 2
 
             measured_w = content_w + total_padding
@@ -173,13 +163,6 @@ class Diff(Renderable):
         self._yoga_node.set_measure_func(measure)
 
     def _compute_diff(self) -> list[tuple[str, str, int]]:
-        """Compute diff using difflib.SequenceMatcher.
-
-        Returns list of (status, line, line_num) tuples:
-        - status: '-', '+', or ' '
-        - line: the text content
-        - line_num: line number in original/new
-        """
         import difflib
 
         old_lines = self._old_text.split("\n")
@@ -207,7 +190,6 @@ class Diff(Renderable):
         return diff_lines
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the diff."""
         if not self._visible:
             return
 
@@ -242,11 +224,8 @@ class Markdown(Renderable):
     def __init__(
         self,
         content: str = "",
-        *children: Any,
-        # Options
         enable_syntax_highlight: bool = True,
         enable_math: bool = True,
-        # Style
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -258,8 +237,6 @@ class Markdown(Renderable):
         self._setup_measure_func()
 
     def _setup_measure_func(self) -> None:
-        """Set up yoga measure function for markdown layout."""
-
         def measure(yoga_node, width, width_mode, height, height_mode):
             import yoga
 
@@ -281,7 +258,6 @@ class Markdown(Renderable):
         self._yoga_node.set_measure_func(measure)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render markdown (simplified - full implementation would parse markdown)."""
         if not self._visible or not self._content:
             return
 
@@ -313,11 +289,8 @@ class LineNumber(Renderable):
     def __init__(
         self,
         content: str = "",
-        *children: Any,
-        # Options
         start: int = 1,
         width: int = 4,
-        # Style
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -382,10 +355,7 @@ class AsciiFont(Renderable):
     def __init__(
         self,
         content: str = "",
-        *children: Any,
-        # Options
         font: str = "standard",
-        # Style
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -394,7 +364,6 @@ class AsciiFont(Renderable):
         self._font = font
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render ASCII art (simplified - would use figlet in full impl)."""
         if not self._visible or not self._content:
             return
 
@@ -417,14 +386,9 @@ class TabSelect(Renderable):
     def __init__(
         self,
         tabs: list[str] | None = None,
-        *children: Any,
-        # Selection
         selected: int = 0,
-        # Focus
         focused: bool = False,
-        # Events
         on_change: Any = None,
-        # Style
         **kwargs,
     ):
         super().__init__(focused=focused, **kwargs)
@@ -446,13 +410,12 @@ class TabSelect(Renderable):
         return self._selected
 
     def select(self, index: int) -> None:
-        """Select a tab by index."""
         if 0 <= index < len(self._tabs):
             self._selected = index
+            self.mark_paint_dirty()
             self.emit("change", index, self._tabs[index])
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the tabs."""
         if not self._visible or not self._tabs:
             return
 
@@ -486,17 +449,12 @@ class Slider(Renderable):
 
     def __init__(
         self,
-        *children: Any,
-        # Value
         value: float = 0,
         min_val: float = 0,
         max_val: float = 100,
         step: float = 1,
-        # Focus
         focused: bool = False,
-        # Events
         on_change: Any = None,
-        # Style
         **kwargs,
     ):
         super().__init__(focused=focused, **kwargs)
@@ -517,23 +475,18 @@ class Slider(Renderable):
 
     @value.setter
     def value(self, v: float) -> None:
-        clamped = v
-        clamped = max(clamped, self._min)
-        clamped = min(clamped, self._max)
-        self._value = clamped
+        self._value = max(self._min, min(self._max, v))
+        self.mark_paint_dirty()
 
     def increment(self, amount: float = 1) -> None:
-        """Increment the value."""
         new_value = self._value + (amount * self._step)
         self.value = new_value
         self.emit("change", self._value)
 
     def decrement(self, amount: float = 1) -> None:
-        """Decrement the value."""
         self.increment(-amount)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the slider."""
         if not self._visible:
             return
 
@@ -570,13 +523,9 @@ class TextTable(Renderable):
 
     def __init__(
         self,
-        *children: Any,
-        # Data
         columns: list[str] | None = None,
         rows: list[list[str]] | None = None,
-        # Options
         auto_width: bool = True,
-        # Style
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -594,7 +543,6 @@ class TextTable(Renderable):
         return self._rows
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the table."""
         if not self._visible:
             return
 
@@ -615,13 +563,13 @@ class TextTable(Renderable):
 
         y += 1
         current_x = x
-        for _i, w in enumerate(col_widths):
+        for w in col_widths:
             buffer.draw_text(
                 "-" * (w + 1), current_x, y, s.RGBA(0.5, 0.5, 0.5, 1), self._background_color
             )
             current_x += w + 1
 
-        for _row_idx, row in enumerate(self._rows):
+        for row in self._rows:
             y += 1
             current_x = x
             for i, cell in enumerate(row):

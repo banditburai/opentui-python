@@ -150,6 +150,41 @@ def _frame(setup: TestSetup) -> str:
 class TestDiffRenderable:
     """Maps to top-level test() calls in Diff.test.ts (no describe blocks)."""
 
+    async def test_reuses_raster_cache_when_diff_is_clean(self):
+        setup = await create_test_renderer(80, 20)
+        try:
+            class _CountingDiff(DiffRenderable):
+                __slots__ = ("unified_calls",)
+
+                def __init__(self, **kwargs):
+                    super().__init__(**kwargs)
+                    self.unified_calls = 0
+
+                def _render_unified(self, buffer, x, y, width, height):
+                    self.unified_calls += 1
+                    return super()._render_unified(buffer, x, y, width, height)
+
+            diff = _CountingDiff(
+                id="counting-diff",
+                diff=SIMPLE_DIFF,
+                view="unified",
+                width="100%",
+                height="100%",
+            )
+            setup.renderer.root.add(diff)
+
+            setup.render_frame()
+            assert diff.unified_calls == 1
+
+            setup.render_frame()
+            assert diff.unified_calls == 1
+
+            diff.fg = "#ffcc00"
+            setup.render_frame()
+            assert diff.unified_calls == 2
+        finally:
+            setup.destroy()
+
     async def test_basic_construction_with_unified_view(self):
         """Maps to test("DiffRenderable - basic construction with unified view")."""
         setup, dr = await _make(diff=SIMPLE_DIFF, view="unified")

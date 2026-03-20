@@ -5,7 +5,7 @@ Tests ported: 2/2 (0 skipped)
 """
 
 from opentui import create_test_renderer
-from opentui.components.box import ScrollBox
+from opentui.components.box import ScrollBox, ScrollContent
 from opentui.components.code_renderable import CodeRenderable, SyntaxStyle
 from opentui.components.line_number_renderable import LineNumberRenderable
 from opentui.structs import RGBA
@@ -53,7 +53,7 @@ class TestLineNumberInScrollBoxSimpleCoreTest:
             )
 
             scroll = ScrollBox(
-                ln,
+                content=ScrollContent(ln),
                 width=40,
                 height=40,
                 scroll_y=True,
@@ -132,8 +132,7 @@ class TestLineNumberInScrollBoxSimpleCoreTest:
             )
 
             scroll = ScrollBox(
-                ln1,
-                ln2,
+                content=ScrollContent(ln1, ln2),
                 width=40,
                 height=40,
                 scroll_y=True,

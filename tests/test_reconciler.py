@@ -291,6 +291,23 @@ class TestReconciler:
         assert old._width == 20
         assert old._dirty is True, "mark_dirty should be called when an attribute changed"
 
+    def test_text_change_detection_skips_mark_dirty_for_equal_values(self):
+        """Equal Text values should not dirty just because fresh objects were created."""
+        from opentui.components.text import Text
+
+        parent = BaseRenderable()
+        old = Text("same", key="x")
+        parent._children = [old]
+        old._parent = parent
+        old._dirty = False
+
+        new = Text("same", key="x")
+        reconcile(parent, [old], [new])
+
+        assert parent._children[0] is old
+        assert old._content == "same"
+        assert old._dirty is False
+
     def test_template_yoga_children_detached_before_recursive_reconcile(self):
         """New template children added via add() don't cause 'already has owner' errors.
 

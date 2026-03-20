@@ -20,19 +20,23 @@ from opentui import MouseButton, MouseEvent, Signal, test_render as render_for_t
 
 
 def _items_component(items, *, sticky_scroll: bool = False, sticky_start: str | None = None):
-    from opentui import Box, ScrollBox, Text
+    from opentui import Box, ScrollBox, ScrollContent, Text
+    from opentui.components.control_flow import For
 
-    children = [
-        Box(
-            Text(f"row {idx}"),
-            height=1,
-            flex_shrink=0,
-            key=f"row-{idx}",
-        )
-        for idx, _ in enumerate(items())
-    ]
     return ScrollBox(
-        *children,
+        content=ScrollContent(
+            For(
+                each=items,
+                render=lambda idx: Box(
+                    Text(f"row {idx}"),
+                    height=1,
+                    flex_shrink=0,
+                    key=f"row-{idx}",
+                ),
+                key_fn=lambda idx: idx,
+                key="rows",
+            ),
+        ),
         width=20,
         height=4,
         scroll_y=True,
@@ -57,7 +61,7 @@ def _find_by_key(node, key):
 
 
 async def test_scrollbox_wheel_at_top_does_not_leave_stale_accumulator():
-    items = Signal("items", list(range(10)))
+    items = Signal(list(range(10)), name="items")
     setup = await render_for_test(lambda: _items_component(items), {"width": 20, "height": 6})
     setup.render_frame()
 
@@ -94,7 +98,7 @@ async def test_scrollbox_wheel_at_top_does_not_leave_stale_accumulator():
 
 
 async def test_scrollbox_wheel_at_bottom_clears_accumulator():
-    items = Signal("items", list(range(10)))
+    items = Signal(list(range(10)), name="items")
     setup = await render_for_test(
         lambda: _items_component(items, sticky_scroll=True, sticky_start="bottom"),
         {"width": 20, "height": 6},
@@ -127,7 +131,7 @@ async def test_scrollbox_wheel_at_bottom_clears_accumulator():
 
 
 async def test_scrollbox_wheel_that_crosses_bottom_lands_cleanly():
-    items = Signal("items", list(range(10)))
+    items = Signal(list(range(10)), name="items")
     setup = await render_for_test(
         lambda: _items_component(items, sticky_scroll=True, sticky_start="bottom"),
         {"width": 20, "height": 6},
@@ -157,7 +161,7 @@ async def test_scrollbox_wheel_that_crosses_bottom_lands_cleanly():
 
 
 async def test_scrollbox_sticky_bottom_tracks_new_content():
-    items = Signal("items", list(range(8)))
+    items = Signal(list(range(8)), name="items")
     setup = await render_for_test(
         lambda: _items_component(items, sticky_scroll=True, sticky_start="bottom"),
         {"width": 20, "height": 6},
@@ -178,7 +182,7 @@ async def test_scrollbox_sticky_bottom_tracks_new_content():
 
 
 async def test_scrollbox_manual_scroll_disables_sticky_bottom():
-    items = Signal("items", list(range(10)))
+    items = Signal(list(range(10)), name="items")
     setup = await render_for_test(
         lambda: _items_component(items, sticky_scroll=True, sticky_start="bottom"),
         {"width": 20, "height": 6},
@@ -201,22 +205,24 @@ async def test_scrollbox_manual_scroll_disables_sticky_bottom():
 
 
 async def test_scrollbox_measures_nested_content_height():
-    from opentui import Box, Text
+    from opentui import Box, ScrollBox, ScrollContent, Text
     from opentui.components.control_flow import For
 
-    items = Signal("items", list(range(12)))
+    items = Signal(list(range(12)), name="items")
 
     def component():
         return ScrollBox(
-            For(
-                each=items,
-                render=lambda item: Box(
-                    Text(f"row {item}"), height=1, flex_shrink=0, key=f"row-{item}"
+            content=ScrollContent(
+                For(
+                    each=items,
+                    render=lambda item: Box(
+                        Text(f"row {item}"), height=1, flex_shrink=0, key=f"row-{item}"
+                    ),
+                    key_fn=lambda item: item,
+                    key="rows",
+                    flex_direction="column",
+                    flex_shrink=0,
                 ),
-                key_fn=lambda item: item,
-                key="rows",
-                flex_direction="column",
-                flex_shrink=0,
             ),
             width=20,
             height=4,
@@ -225,9 +231,6 @@ async def test_scrollbox_measures_nested_content_height():
             sticky_start="bottom",
             key="scrollbox-nested",
         )
-
-    from opentui import ScrollBox
-
     setup = await render_for_test(component, {"width": 20, "height": 6})
     setup.render_frame()
 
@@ -238,22 +241,24 @@ async def test_scrollbox_measures_nested_content_height():
 
 
 async def test_scrollbox_uses_direct_child_layout_for_nested_content_extent():
-    from opentui import Box, ScrollBox, Text
+    from opentui import Box, ScrollBox, ScrollContent, Text
     from opentui.components.control_flow import For
 
-    items = Signal("items", list(range(12)))
+    items = Signal(list(range(12)), name="items")
 
     def component():
         return ScrollBox(
-            For(
-                each=items,
-                render=lambda item: Box(
-                    Text(f"row {item}"), height=1, flex_shrink=0, key=f"row-{item}"
+            content=ScrollContent(
+                For(
+                    each=items,
+                    render=lambda item: Box(
+                        Text(f"row {item}"), height=1, flex_shrink=0, key=f"row-{item}"
+                    ),
+                    key_fn=lambda item: item,
+                    key="rows",
+                    flex_direction="column",
+                    flex_shrink=0,
                 ),
-                key_fn=lambda item: item,
-                key="rows",
-                flex_direction="column",
-                flex_shrink=0,
             ),
             width=20,
             height=4,
@@ -276,22 +281,24 @@ async def test_scrollbox_uses_direct_child_layout_for_nested_content_extent():
 
 
 async def test_scrollbox_nested_content_scrolls_up_from_bottom_on_wheel():
-    from opentui import Box, MouseButton, MouseEvent, Text
+    from opentui import Box, MouseButton, MouseEvent, ScrollBox, ScrollContent, Text
     from opentui.components.control_flow import For
 
-    items = Signal("items", list(range(12)))
+    items = Signal(list(range(12)), name="items")
 
     def component():
         return ScrollBox(
-            For(
-                each=items,
-                render=lambda item: Box(
-                    Text(f"row {item}"), height=1, flex_shrink=0, key=f"row-{item}"
+            content=ScrollContent(
+                For(
+                    each=items,
+                    render=lambda item: Box(
+                        Text(f"row {item}"), height=1, flex_shrink=0, key=f"row-{item}"
+                    ),
+                    key_fn=lambda item: item,
+                    key="rows",
+                    flex_direction="column",
+                    flex_shrink=0,
                 ),
-                key_fn=lambda item: item,
-                key="rows",
-                flex_direction="column",
-                flex_shrink=0,
             ),
             width=20,
             height=4,
@@ -300,9 +307,6 @@ async def test_scrollbox_nested_content_scrolls_up_from_bottom_on_wheel():
             sticky_start="bottom",
             key="scrollbox-nested",
         )
-
-    from opentui import ScrollBox
-
     setup = await render_for_test(component, {"width": 20, "height": 6})
     setup.render_frame()
     scrollbox = _get_scrollbox(setup)
@@ -324,7 +328,7 @@ async def test_scrollbox_nested_content_scrolls_up_from_bottom_on_wheel():
 
 
 async def test_scrollbox_ignores_horizontal_wheel_for_vertical_transcript():
-    items = Signal("items", list(range(12)))
+    items = Signal(list(range(12)), name="items")
     setup = await render_for_test(
         lambda: _items_component(items, sticky_scroll=True, sticky_start="bottom"),
         {"width": 20, "height": 6},
@@ -349,11 +353,13 @@ async def test_scrollbox_ignores_horizontal_wheel_for_vertical_transcript():
 
 
 async def test_scrollbox_shift_wheel_maps_vertical_to_horizontal():
-    from opentui import Box, ScrollBox, Text
+    from opentui import Box, ScrollBox, ScrollContent, Text
 
     setup = await render_for_test(
         lambda: ScrollBox(
-            Box(Text("wide"), width=40, height=1, flex_shrink=0, key="row-wide"),
+            content=ScrollContent(
+                Box(Text("wide"), width=40, height=1, flex_shrink=0, key="row-wide"),
+            ),
             width=10,
             height=4,
             scroll_x=True,
@@ -383,25 +389,34 @@ async def test_scrollbox_shift_wheel_maps_vertical_to_horizontal():
 
 
 async def test_scrollbox_route_change_enables_mouse_and_wheel_scroll():
-    from opentui import Box, ScrollBox, Signal, Text
+    from opentui import Box, ScrollBox, ScrollContent, Signal, Text, effect
+    from opentui.components.control_flow import For, Show
 
-    show_session = Signal("show_session", False)
-    items = Signal("items", list(range(12)))
+    show_session = Signal(False, name="show_session")
+    items = Signal(list(range(12)), name="items")
 
     def component():
-        if not show_session():
-            return Box(Text("home"), width=20, height=4)
-        return ScrollBox(
-            *[
-                Box(Text(f"row {item}"), height=1, flex_shrink=0, key=f"row-{item}")
-                for item in items()
-            ],
-            width=20,
-            height=4,
-            scroll_y=True,
-            sticky_scroll=True,
-            sticky_start="bottom",
-            key="scrollbox-route",
+        return Show(
+            when=show_session,
+            render=lambda: ScrollBox(
+                content=ScrollContent(
+                    For(
+                        each=items,
+                        render=lambda item: Box(
+                            Text(f"row {item}"), height=1, flex_shrink=0, key=f"row-{item}"
+                        ),
+                        key_fn=lambda item: item,
+                        key="route-rows",
+                    ),
+                ),
+                width=20,
+                height=4,
+                scroll_y=True,
+                sticky_scroll=True,
+                sticky_start="bottom",
+                key="scrollbox-route",
+            ),
+            fallback=lambda: Box(Text("home"), width=20, height=4),
         )
 
     setup = await render_for_test(component, {"width": 20, "height": 6})
@@ -411,7 +426,7 @@ async def test_scrollbox_route_change_enables_mouse_and_wheel_scroll():
     show_session.set(True)
     setup.render_frame()
 
-    scrollbox = _get_scrollbox(setup)
+    scrollbox = _find_by_key(setup.renderer.root, "scrollbox-route")
     bottom = scrollbox.scroll_offset_y
     assert setup.renderer._mouse_enabled is True
 
@@ -438,7 +453,7 @@ async def test_scrollbox_wheel_dispatch_ignores_stale_ancestor_hit_test():
     contains_point, so a wrapper that says it doesn't contain the point
     prevents dispatch to children within it.
     """
-    from opentui import Box, ScrollBox, Text
+    from opentui import Box, ScrollBox, ScrollContent, Text
 
     class BrokenWrapper(Box):
         def contains_point(self, x: int, y: int) -> bool:
@@ -448,10 +463,12 @@ async def test_scrollbox_wheel_dispatch_ignores_stale_ancestor_hit_test():
         return Box(
             BrokenWrapper(
                 ScrollBox(
-                    *[
-                        Box(Text(f"row {idx}"), height=1, flex_shrink=0, key=f"row-{idx}")
-                        for idx in range(12)
-                    ],
+                    content=ScrollContent(
+                        *[
+                            Box(Text(f"row {idx}"), height=1, flex_shrink=0, key=f"row-{idx}")
+                            for idx in range(12)
+                        ],
+                    ),
                     width=20,
                     height=4,
                     scroll_y=True,
@@ -496,32 +513,36 @@ async def test_scrollbox_wheel_dispatch_ignores_stale_ancestor_hit_test():
 
 
 async def test_scrollbox_nested_target_owns_wheel_over_parent():
-    from opentui import Box, ScrollBox, Text
+    from opentui import Box, ScrollBox, ScrollContent, Text
 
     def component():
         return Box(
             ScrollBox(
-                Box(
-                    ScrollBox(
-                        *[
-                            Box(Text(f"inner {idx}"), height=1, flex_shrink=0, key=f"inner-{idx}")
-                            for idx in range(8)
-                        ],
+                content=ScrollContent(
+                    Box(
+                        ScrollBox(
+                            content=ScrollContent(
+                                *[
+                                    Box(Text(f"inner {idx}"), height=1, flex_shrink=0, key=f"inner-{idx}")
+                                    for idx in range(8)
+                                ],
+                            ),
+                            width=10,
+                            height=3,
+                            scroll_y=True,
+                            sticky_scroll=True,
+                            sticky_start="bottom",
+                            key="inner-scrollbox",
+                        ),
                         width=10,
                         height=3,
-                        scroll_y=True,
-                        sticky_scroll=True,
-                        sticky_start="bottom",
-                        key="inner-scrollbox",
+                        key="inner-wrapper",
                     ),
-                    width=10,
-                    height=3,
-                    key="inner-wrapper",
+                    *[
+                        Box(Text(f"outer {idx}"), height=1, flex_shrink=0, key=f"outer-{idx}")
+                        for idx in range(8)
+                    ],
                 ),
-                *[
-                    Box(Text(f"outer {idx}"), height=1, flex_shrink=0, key=f"outer-{idx}")
-                    for idx in range(8)
-                ],
                 width=20,
                 height=6,
                 scroll_y=True,
@@ -566,14 +587,16 @@ async def test_scrollbox_nested_target_owns_wheel_over_parent():
 
 async def test_desired_scroll_y_applied_and_cleared_on_render():
     """desired_scroll_y sets scroll position at render time, then clears itself."""
-    from opentui import Box, ScrollBox, Text
+    from opentui import Box, ScrollBox, ScrollContent, Text
 
     def component():
         return ScrollBox(
-            *[
-                Box(Text(f"row {idx}"), height=1, flex_shrink=0, key=f"row-{idx}")
-                for idx in range(20)
-            ],
+            content=ScrollContent(
+                *[
+                    Box(Text(f"row {idx}"), height=1, flex_shrink=0, key=f"row-{idx}")
+                    for idx in range(20)
+                ],
+            ),
             width=20,
             height=4,
             scroll_y=True,
@@ -595,14 +618,16 @@ async def test_desired_scroll_y_applied_and_cleared_on_render():
 
 async def test_desired_scroll_y_mouse_wheel_still_works():
     """Mouse wheel scrolling works after desired_scroll_y has been applied."""
-    from opentui import Box, ScrollBox, Text
+    from opentui import Box, ScrollBox, ScrollContent, Text
 
     def component():
         return ScrollBox(
-            *[
-                Box(Text(f"row {idx}"), height=1, flex_shrink=0, key=f"row-{idx}")
-                for idx in range(20)
-            ],
+            content=ScrollContent(
+                *[
+                    Box(Text(f"row {idx}"), height=1, flex_shrink=0, key=f"row-{idx}")
+                    for idx in range(20)
+                ],
+            ),
             width=20,
             height=4,
             scroll_y=True,
@@ -634,69 +659,76 @@ async def test_desired_scroll_y_mouse_wheel_still_works():
 
 async def test_desired_scroll_y_updates_across_reconciliation_frames():
     """desired_scroll_y must be re-applied on each frame when driven by a signal."""
-    from opentui import Box, ScrollBox, Signal, Text
+    from opentui import Box, ScrollBox, ScrollContent, Signal, Text, effect
 
-    selected = Signal("selected", 0)
+    selected = Signal(0, name="selected")
     NUM_ITEMS = 40
+    max_list_height = 6
+    items = [Box(Text(f"row {i}"), flex_direction="row", min_width=0) for i in range(NUM_ITEMS)]
 
-    def component():
+    def scroll_offset():
         idx = selected()
-        items = [Box(Text(f"row {i}"), flex_direction="row", min_width=0) for i in range(NUM_ITEMS)]
         n_children = len(items)
         content_height = n_children + max(0, n_children - 1)
         sel_visual = idx * 2 if n_children > 1 else idx
-        max_list_height = 6
         max_scroll = max(0, content_height - max_list_height)
         center_offset = max_list_height // 2
-        scroll_offset = max(0, min(sel_visual - center_offset, max_scroll))
+        return max(0, min(sel_visual - center_offset, max_scroll))
 
-        return ScrollBox(
+    scrollbox = ScrollBox(
+        content=ScrollContent(
             Box(
                 *items,
                 flex_direction="column",
                 min_width=0,
                 gap=1,
-                key=f"wrapper-{idx}",
-            ),
-            scroll_y=True,
-            desired_scroll_y=scroll_offset,
-            key="select-list",
-            flex_direction="column",
-            min_width=0,
-            flex_grow=1,
-            max_height=max_list_height,
-            overflow="hidden",
-        )
+                key="wrapper",
+            )
+        ),
+        scroll_y=True,
+        desired_scroll_y=0,
+        key="select-list",
+        min_width=0,
+        flex_grow=1,
+        max_height=max_list_height,
+        overflow="hidden",
+    )
+    cleanup = effect(lambda: setattr(scrollbox, "_desired_scroll_y", scroll_offset()), selected)
+
+    def component():
+        return scrollbox
 
     setup = await render_for_test(component, {"width": 40, "height": 20})
-    setup.render_frame()
-
-    scrollbox = _get_scrollbox(setup)
-    assert scrollbox.scroll_offset_y == 0
-
-    for press in range(1, 15):
-        selected.set(press)
+    try:
         setup.render_frame()
 
         scrollbox = _get_scrollbox(setup)
-        sel_visual = press * 2
-        expected = max(0, min(sel_visual - 3, 79 - 6))
-        assert scrollbox.scroll_offset_y == expected, (
-            f"After index={press}: "
-            f"expected scroll_offset_y={expected}, got {scrollbox.scroll_offset_y}; "
-            f"scroll_height={scrollbox.scroll_height}, viewport_height={scrollbox.viewport_height}, "
-            f"max_scroll_y={scrollbox._max_scroll_y()}"
-        )
-        assert scrollbox._desired_scroll_y is None
+        assert scrollbox.scroll_offset_y == 0
 
-    setup.destroy()
+        for press in range(1, 15):
+            selected.set(press)
+            setup.render_frame()
+
+            scrollbox = _get_scrollbox(setup)
+            sel_visual = press * 2
+            expected = max(0, min(sel_visual - 3, 79 - 6))
+            assert scrollbox.scroll_offset_y == expected, (
+                f"After index={press}: "
+                f"expected scroll_offset_y={expected}, got {scrollbox.scroll_offset_y}; "
+                f"scroll_height={scrollbox.scroll_height}, viewport_height={scrollbox.viewport_height}, "
+                f"max_scroll_y={scrollbox._max_scroll_y()}"
+            )
+            assert scrollbox._desired_scroll_y is None
+    finally:
+        cleanup()
+        setup.destroy()
 
 
 async def test_viewport_culling_skips_offscreen_children():
     """ScrollBox only renders children within the visible viewport."""
     from unittest.mock import MagicMock
 
-    from opentui import Box, ScrollBox, Text
+    from opentui import Box, ScrollBox, ScrollContent, Text
 
     NUM_CHILDREN = 50
     VIEWPORT_HEIGHT = 5
@@ -707,7 +739,7 @@ async def test_viewport_culling_skips_offscreen_children():
 
     def component():
         return ScrollBox(
-            *children,
+            content=ScrollContent(*children),
             width=20,
             height=VIEWPORT_HEIGHT,
             scroll_y=True,
@@ -718,16 +750,16 @@ async def test_viewport_culling_skips_offscreen_children():
     setup.render_frame()
 
     scrollbox = _get_scrollbox(setup)
-    assert len(scrollbox._children) == NUM_CHILDREN
+    assert len(scrollbox._scroll_content._children) == NUM_CHILDREN
 
     original_renders = {}
-    for child in scrollbox._children:
+    for child in scrollbox._scroll_content._children:
         original_renders[id(child)] = child.render
         child.render = MagicMock(wraps=child.render)
 
     setup.render_frame()
 
-    rendered_count = sum(1 for child in scrollbox._children if child.render.call_count > 0)
+    rendered_count = sum(1 for child in scrollbox._scroll_content._children if child.render.call_count > 0)
 
     assert rendered_count <= VIEWPORT_HEIGHT + 1, (
         f"Expected at most {VIEWPORT_HEIGHT + 1} children rendered, "
@@ -736,17 +768,88 @@ async def test_viewport_culling_skips_offscreen_children():
     assert rendered_count > 0, "At least some children should be rendered"
 
     scrollbox.scroll_to(y=20)
-    for child in scrollbox._children:
+    for child in scrollbox._scroll_content._children:
         child.render.reset_mock()
 
     setup.render_frame()
 
-    rendered_after_scroll = sum(1 for child in scrollbox._children if child.render.call_count > 0)
+    rendered_after_scroll = sum(
+        1 for child in scrollbox._scroll_content._children if child.render.call_count > 0
+    )
     assert rendered_after_scroll <= VIEWPORT_HEIGHT + 1
     assert rendered_after_scroll > 0
 
-    for child in scrollbox._children:
+    for child in scrollbox._scroll_content._children:
         child.render = original_renders[id(child)]
+
+    setup.destroy()
+
+
+async def test_viewport_culling_skips_offscreen_for_grandchildren():
+    """ScrollBox culls row children when content is wrapped by a direct For."""
+    from unittest.mock import MagicMock
+
+    from opentui import Box, ScrollBox, ScrollContent, Text
+    from opentui.components.control_flow import For
+
+    NUM_CHILDREN = 50
+    VIEWPORT_HEIGHT = 5
+
+    def component():
+        return ScrollBox(
+            content=ScrollContent(
+                For(
+                    each=list(range(NUM_CHILDREN)),
+                    render=lambda i: Box(
+                        Text(f"row {i}"),
+                        height=1,
+                        flex_shrink=0,
+                        key=f"row-{i}",
+                    ),
+                    key_fn=lambda i: i,
+                    key="rows",
+                ),
+            ),
+            width=20,
+            height=VIEWPORT_HEIGHT,
+            scroll_y=True,
+            key="scrollbox-for-cull",
+        )
+
+    setup = await render_for_test(component, {"width": 20, "height": VIEWPORT_HEIGHT + 2})
+    setup.render_frame()
+
+    scrollbox = _get_scrollbox(setup)
+    assert len(scrollbox._scroll_content._children) == 1
+    rows = scrollbox._scroll_content._children[0]._children
+    assert len(rows) == NUM_CHILDREN
+
+    original_renders = {}
+    for row in rows:
+        original_renders[id(row)] = row.render
+        row.render = MagicMock(wraps=row.render)
+
+    setup.render_frame()
+
+    rendered_count = sum(1 for row in rows if row.render.call_count > 0)
+    assert rendered_count <= VIEWPORT_HEIGHT + 1, (
+        f"Expected at most {VIEWPORT_HEIGHT + 1} For rows rendered, "
+        f"got {rendered_count} out of {NUM_CHILDREN}"
+    )
+    assert rendered_count > 0
+
+    scrollbox.scroll_to(y=20)
+    for row in rows:
+        row.render.reset_mock()
+
+    setup.render_frame()
+
+    rendered_after_scroll = sum(1 for row in rows if row.render.call_count > 0)
+    assert rendered_after_scroll <= VIEWPORT_HEIGHT + 1
+    assert rendered_after_scroll > 0
+
+    for row in rows:
+        row.render = original_renders[id(row)]
 
     setup.destroy()
 
@@ -773,9 +876,8 @@ class ConstantScrollAccel:
 class TestScrollBoxRenderableChildDelegation:
     """Maps to describe("ScrollBoxRenderable - child delegation").
 
-    The Python ScrollBox delegates add/remove/insert_before directly
-    to its internal children list (there is no separate content wrapper
-    in the Python architecture).
+    ScrollBox now owns an explicit internal content wrapper and delegates
+    logical child operations to that node.
     """
 
     def test_delegates_add_to_content_wrapper(self):
@@ -790,7 +892,7 @@ class TestScrollBoxRenderableChildDelegation:
         children = scrollbox.get_children()
         assert len(children) == 1
         assert children[0].id == "child"
-        assert child._parent is scrollbox
+        assert child._parent is scrollbox._scroll_content
 
     def test_delegates_remove_to_content_wrapper(self):
         """Maps to test("delegates remove to content wrapper")."""
@@ -830,7 +932,7 @@ class TestScrollBoxRenderableClipping:
 
     async def test_clips_nested_scrollbox_content_to_inner_viewport(self):
         """Maps to test("clips nested scrollbox content to inner viewport (see issue #388)")."""
-        from opentui import Box, ScrollBox, Text, create_test_renderer
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
 
         setup = await create_test_renderer(width=32, height=16)
 
@@ -893,7 +995,7 @@ class TestScrollBoxRenderablePaddingBehavior:
         Verifies that a ScrollBox with padding=2 insets its child content
         by 2 cells on each side.
         """
-        from opentui import Box, ScrollBox, Text, create_test_renderer
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
 
         setup = await create_test_renderer(width=40, height=20)
 
@@ -901,7 +1003,7 @@ class TestScrollBoxRenderablePaddingBehavior:
             width=20,
             height=10,
             scroll_y=True,
-            padding=2,
+            content=ScrollContent(padding=2),
         )
 
         child = Box(Text("HELLO"), height=1, flex_shrink=0, key="content-child")
@@ -930,13 +1032,52 @@ class TestScrollBoxRenderablePaddingBehavior:
 
         setup.destroy()
 
+    async def test_explicit_scroll_content_owns_layout_props(self):
+        """Canonical API: content layout belongs on ScrollContent, not the shell."""
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
+
+        setup = await create_test_renderer(width=40, height=20)
+
+        child = Box(Text("HELLO"), height=1, flex_shrink=0, key="content-child")
+        content = ScrollContent(child, padding=2, gap=1)
+        scroll_box = ScrollBox(
+            width=20,
+            height=10,
+            scroll_y=True,
+            content=content,
+        )
+
+        setup.renderer.root.add(scroll_box)
+        setup.render_frame()
+
+        assert scroll_box.content is content
+        assert scroll_box.get_children() == (child,)
+        assert scroll_box._children == [content]
+        assert child._x == scroll_box._x + 2
+        assert child._y == scroll_box._y + 2
+
+        setup.destroy()
+
+    def test_explicit_scroll_content_rejects_shell_content_layout_props(self):
+        """Once content is explicit, content-layout props must move there too."""
+        from opentui import ScrollBox, ScrollContent
+
+        with pytest.raises(TypeError, match="Move these props to ScrollContent"):
+            ScrollBox(
+                width=20,
+                height=10,
+                scroll_y=True,
+                padding=2,
+                content=ScrollContent(),
+            )
+
     async def test_padding_setter_updates_content_inset(self):
         """Maps to test("padding setter updates content inset without moving scrollbar").
 
         Verifies that changing padding at runtime (via the property setter)
         updates the child inset after the next render frame.
         """
-        from opentui import Box, ScrollBox, Text, create_test_renderer
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
 
         setup = await create_test_renderer(width=40, height=20)
 
@@ -944,7 +1085,7 @@ class TestScrollBoxRenderablePaddingBehavior:
             width=20,
             height=10,
             scroll_y=True,
-            padding=0,
+            content=ScrollContent(padding=0),
         )
 
         child = Box(Text("WORLD"), height=1, flex_shrink=0, key="content-child")
@@ -1008,13 +1149,15 @@ class TestScrollBoxRenderableMouseInteraction:
 
     async def test_scrolls_with_mouse_wheel(self):
         """Maps to test("scrolls with mouse wheel")."""
-        from opentui import Box, ScrollBox, Text, create_test_renderer
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
         from opentui.components.box import MacOSScrollAccel
 
         setup = await create_test_renderer(width=80, height=24)
 
         scroll_box = ScrollBox(
-            *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(50)],
+            content=ScrollContent(
+                *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(50)],
+            ),
             width=50,
             height=20,
             scroll_y=True,
@@ -1030,13 +1173,15 @@ class TestScrollBoxRenderableMouseInteraction:
 
     async def test_single_isolated_scroll_has_same_distance_as_linear(self):
         """Maps to test("single isolated scroll has same distance as linear")."""
-        from opentui import Box, ScrollBox, Text, create_test_renderer
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
         from opentui.components.box import LinearScrollAccel, MacOSScrollAccel
 
         # Linear box
         setup1 = await create_test_renderer(width=80, height=24)
         linear_box = ScrollBox(
-            *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(100)],
+            content=ScrollContent(
+                *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(100)],
+            ),
             width=50,
             height=20,
             scroll_y=True,
@@ -1053,7 +1198,9 @@ class TestScrollBoxRenderableMouseInteraction:
         # Accelerated box (single scroll should be same as linear)
         setup2 = await create_test_renderer(width=80, height=24)
         accel_box = ScrollBox(
-            *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(100)],
+            content=ScrollContent(
+                *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(100)],
+            ),
             width=50,
             height=20,
             scroll_y=True,
@@ -1071,12 +1218,14 @@ class TestScrollBoxRenderableMouseInteraction:
         """Maps to test("acceleration makes rapid scrolls cover more distance")."""
         import time
 
-        from opentui import Box, ScrollBox, Text, create_test_renderer
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
         from opentui.components.box import MacOSScrollAccel
 
         setup = await create_test_renderer(width=80, height=24)
         scroll_box = ScrollBox(
-            *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(200)],
+            content=ScrollContent(
+                *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(200)],
+            ),
             width=50,
             height=20,
             scroll_y=True,
@@ -1109,13 +1258,15 @@ class TestScrollBoxRenderableMouseInteraction:
         """Maps to test("multiplier < 1 slows down scroll distance")."""
         import time
 
-        from opentui import Box, ScrollBox, Text, create_test_renderer
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
         from opentui.components.box import LinearScrollAccel
 
         # Slowdown box
         setup1 = await create_test_renderer(width=80, height=24)
         slowdown_box = ScrollBox(
-            *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(200)],
+            content=ScrollContent(
+                *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(200)],
+            ),
             width=50,
             height=20,
             scroll_y=True,
@@ -1134,7 +1285,9 @@ class TestScrollBoxRenderableMouseInteraction:
         # Linear box
         setup2 = await create_test_renderer(width=80, height=24)
         linear_box = ScrollBox(
-            *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(200)],
+            content=ScrollContent(
+                *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(200)],
+            ),
             width=50,
             height=20,
             scroll_y=True,
@@ -1155,11 +1308,13 @@ class TestScrollBoxRenderableMouseInteraction:
 
     async def test_multiplier_less_than_1_accumulates_fractional_scroll_amounts(self):
         """Maps to test("multiplier < 1 accumulates fractional scroll amounts")."""
-        from opentui import Box, ScrollBox, Text, create_test_renderer
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
 
         setup = await create_test_renderer(width=80, height=24)
         scroll_box = ScrollBox(
-            *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(200)],
+            content=ScrollContent(
+                *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(200)],
+            ),
             width=50,
             height=20,
             scroll_y=True,
@@ -1183,11 +1338,13 @@ class TestScrollBoxRenderableMouseInteraction:
 
     async def test_horizontal_scroll_with_multiplier_less_than_1_works_correctly(self):
         """Maps to test("horizontal scroll with multiplier < 1 works correctly")."""
-        from opentui import Box, ScrollBox, Text, create_test_renderer
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
 
         setup = await create_test_renderer(width=80, height=24)
         scroll_box = ScrollBox(
-            Box(Text("wide"), width=300, height=10, flex_shrink=0),
+            content=ScrollContent(
+                Box(Text("wide"), width=300, height=10, flex_shrink=0),
+            ),
             width=50,
             height=20,
             scroll_x=True,
@@ -1220,11 +1377,13 @@ class TestScrollBoxRenderableMouseInteraction:
 
     async def test_multiplier_less_than_1_with_acceleration_work_together(self):
         """Maps to test("multiplier < 1 with acceleration work together")."""
-        from opentui import Box, ScrollBox, Text, create_test_renderer
+        from opentui import Box, ScrollBox, ScrollContent, Text, create_test_renderer
 
         setup = await create_test_renderer(width=80, height=24)
         scroll_box = ScrollBox(
-            *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(200)],
+            content=ScrollContent(
+                *[Box(Text(f"Line {i}"), height=1, flex_shrink=0) for i in range(200)],
+            ),
             width=50,
             height=20,
             scroll_y=True,
@@ -1620,7 +1779,7 @@ class TestScrollBoxRenderableContentVisibility:
         """Maps to test("scrolls CodeRenderable with LineNumberRenderable using mouse wheel")."""
         import re
 
-        from opentui import Box, MouseButton, MouseEvent, ScrollBox, create_test_renderer
+        from opentui import Box, MouseButton, MouseEvent, ScrollBox, ScrollContent, create_test_renderer
         from opentui.components.code_renderable import CodeRenderable
         from opentui.components.line_number_renderable import LineNumberRenderable
 
@@ -1639,7 +1798,7 @@ class TestScrollBoxRenderableContentVisibility:
 
         # Put in ScrollBox
         scroll_box = ScrollBox(
-            line_nums,
+            content=ScrollContent(line_nums),
             width=60,
             height=10,
             scroll_y=True,

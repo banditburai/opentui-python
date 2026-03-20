@@ -13,21 +13,26 @@ Notes on Python adaptation:
 - Upstream `<For each={messages}>` with JSX fragments (`<>...</>`) producing
   multiple sibling elements per item is mapped to `For(render=...)` returning
   a wrapper `Box` that contains the per-item children.
-- The scroll-behavior test (test 7) uses Signal-driven For reconciliation with
-  ScrollBox.scroll_to(), verified to work through the test harness's
-  render_frame() -> _rebuild_component_tree() path.
+- The scroll-behavior test (test 7) uses Signal-driven `For` reconciliation with
+  `ScrollBox.scroll_to()`, verified through the strict reactive test harness
+  without relying on fallback rebuilds.
 """
 
 import re
 
 from opentui import test_render as _test_render
 from opentui.components.advanced import Code
-from opentui.components.box import Box, ScrollBox
+from opentui.components.box import Box, ScrollBox, ScrollContent
 from opentui.components.control_flow import For, Show
 from opentui.components.text import Text
 from opentui.signals import Signal
 
 import pytest
+
+
+def _strict_render(component_fn, options=None):
+    options = dict(options or {})
+    return _test_render(component_fn, options)
 
 
 # ---------------------------------------------------------------------------
@@ -61,14 +66,16 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
         empty-to-content ratio is > 5. We replicate that observation here.
         """
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 ScrollBox(
-                    Code(
-                        HELLO_CODE,
-                        filetype="javascript",
-                        show_line_numbers=True,
-                        fg="#ffffff",
+                    content=ScrollContent(
+                        Code(
+                            HELLO_CODE,
+                            filetype="javascript",
+                            show_line_numbers=True,
+                            fg="#ffffff",
+                        )
                     ),
                     flex_grow=1,
                 ),
@@ -109,15 +116,17 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
         should be reasonable (< 7 per upstream).
         """
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 ScrollBox(
-                    Code(
-                        HELLO_CODE,
-                        filetype="javascript",
-                        show_line_numbers=True,
-                        fg="#ffffff",
-                        flex_shrink=0,
+                    content=ScrollContent(
+                        Code(
+                            HELLO_CODE,
+                            filetype="javascript",
+                            show_line_numbers=True,
+                            fg="#ffffff",
+                            flex_shrink=0,
+                        ),
                     ),
                     flex_grow=1,
                 ),
@@ -158,31 +167,33 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
             "});"
         )
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 ScrollBox(
-                    # Message 1: tool write
-                    Box(Text("Wrote src/hello.ts", fg="#00aaff"), flex_shrink=0),
-                    Code(
-                        hello_code,
-                        filetype="typescript",
-                        show_line_numbers=True,
-                        fg="#ffffff",
-                        flex_grow=1,
+                    content=ScrollContent(
+                        # Message 1: tool write
+                        Box(Text("Wrote src/hello.ts", fg="#00aaff"), flex_shrink=0),
+                        Code(
+                            hello_code,
+                            filetype="typescript",
+                            show_line_numbers=True,
+                            fg="#ffffff",
+                            flex_grow=1,
+                        ),
+                        # Message 2: text
+                        Box(Text("I've created the hello function.", fg="#ffffff"), flex_shrink=0),
+                        # Message 3: tool write
+                        Box(Text("Wrote src/test.ts", fg="#00aaff"), flex_shrink=0),
+                        Code(
+                            test_code,
+                            filetype="typescript",
+                            show_line_numbers=True,
+                            fg="#ffffff",
+                            flex_grow=1,
+                        ),
+                        # Message 4: text
+                        Box(Text("I've also added a test file.", fg="#ffffff"), flex_shrink=0),
                     ),
-                    # Message 2: text
-                    Box(Text("I've created the hello function.", fg="#ffffff"), flex_shrink=0),
-                    # Message 3: tool write
-                    Box(Text("Wrote src/test.ts", fg="#00aaff"), flex_shrink=0),
-                    Code(
-                        test_code,
-                        filetype="typescript",
-                        show_line_numbers=True,
-                        fg="#ffffff",
-                        flex_grow=1,
-                    ),
-                    # Message 4: text
-                    Box(Text("I've also added a test file.", fg="#ffffff"), flex_shrink=0),
                     sticky_scroll=True,
                     sticky_start="bottom",
                     flex_grow=1,
@@ -221,7 +232,7 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
         excessive height).
         """
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(Text("--- START MARKER ---"), flex_shrink=0),
                 Code(
@@ -265,23 +276,25 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
         The distance between Message 1 and Message 2 should be < 12 lines.
         """
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     ScrollBox(
-                        Box(Text("Message 1", fg="#888888"), flex_shrink=0),
-                        Box(
-                            Code(
-                                TEST_FUNC_CODE,
-                                filetype="typescript",
-                                show_line_numbers=True,
-                                fg="#ffffff",
-                                flex_grow=1,
+                        content=ScrollContent(
+                            Box(Text("Message 1", fg="#888888"), flex_shrink=0),
+                            Box(
+                                Code(
+                                    TEST_FUNC_CODE,
+                                    filetype="typescript",
+                                    show_line_numbers=True,
+                                    fg="#ffffff",
+                                    flex_grow=1,
+                                ),
+                                border=True,
+                                border_color="#333333",
                             ),
-                            border=True,
-                            border_color="#333333",
+                            Box(Text("Message 2", fg="#888888"), flex_shrink=0),
                         ),
-                        Box(Text("Message 2", fg="#888888"), flex_shrink=0),
                         sticky_scroll=True,
                         sticky_start="bottom",
                         flex_grow=1,
@@ -331,43 +344,45 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
         greet_code = "export const greet = (name: string) => {\n  return `Hello, ${name}!`;\n};"
         index_code = 'import { greet } from "./greet";\n\nconsole.log(greet("World"));'
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Box(
                     ScrollBox(
+                        content=ScrollContent(
                         # Text message 1
-                        Box(
-                            Text("Let me create a file for you.", fg="#ffffff"),
-                            flex_shrink=0,
-                        ),
+                            Box(
+                                Text("Let me create a file for you.", fg="#ffffff"),
+                                flex_shrink=0,
+                            ),
                         # Tool message 1: greet.ts
-                        Box(Text("Wrote src/greet.ts", fg="#00aaff"), flex_shrink=0),
-                        Code(
-                            greet_code,
-                            filetype="typescript",
-                            show_line_numbers=True,
-                            fg="#ffffff",
-                            flex_grow=1,
-                        ),
+                            Box(Text("Wrote src/greet.ts", fg="#00aaff"), flex_shrink=0),
+                            Code(
+                                greet_code,
+                                filetype="typescript",
+                                show_line_numbers=True,
+                                fg="#ffffff",
+                                flex_grow=1,
+                            ),
                         # Text message 2
-                        Box(
-                            Text("I've created the greet function.", fg="#ffffff"),
-                            flex_shrink=0,
-                        ),
+                            Box(
+                                Text("I've created the greet function.", fg="#ffffff"),
+                                flex_shrink=0,
+                            ),
                         # Tool message 2: index.ts + diagnostic
-                        Box(Text("Wrote src/index.ts", fg="#00aaff"), flex_shrink=0),
-                        Code(
-                            index_code,
-                            filetype="typescript",
-                            show_line_numbers=True,
-                            fg="#ffffff",
-                            flex_grow=1,
-                        ),
-                        Text("Error [2:5]: Unused variable", fg="#ff0000"),
+                            Box(Text("Wrote src/index.ts", fg="#00aaff"), flex_shrink=0),
+                            Code(
+                                index_code,
+                                filetype="typescript",
+                                show_line_numbers=True,
+                                fg="#ffffff",
+                                flex_grow=1,
+                            ),
+                            Text("Error [2:5]: Unused variable", fg="#ff0000"),
                         # Text message 3
-                        Box(
-                            Text("And here's the main file.", fg="#ffffff"),
-                            flex_shrink=0,
+                            Box(
+                                Text("And here's the main file.", fg="#ffffff"),
+                                flex_shrink=0,
+                            ),
                         ),
                         sticky_scroll=True,
                         sticky_start="bottom",
@@ -421,7 +436,7 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
         and checks content is visible at each position.
         """
 
-        messages = Signal("messages", [])
+        messages = Signal([], name="messages")
 
         def _render_message(msg):
             """Render a single message — text messages get a Text, tool messages get Code."""
@@ -449,11 +464,13 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
         def component():
             return Box(
                 ScrollBox(
-                    For(
-                        each=messages,
-                        render=_render_message,
-                        key_fn=lambda m: f"msg-{m['id']}",
-                        key="message-list",
+                    content=ScrollContent(
+                        For(
+                            each=messages,
+                            render=_render_message,
+                            key_fn=lambda m: f"msg-{m['id']}",
+                            key="message-list",
+                        ),
                     ),
                     sticky_scroll=True,
                     sticky_start="bottom",
@@ -463,7 +480,7 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
                 flex_direction="column",
             )
 
-        setup = await _test_render(component, {"width": 60, "height": 30})
+        setup = await _strict_render(component, {"width": 60, "height": 30})
         setup.render_frame()
 
         # Add 20 messages dynamically
@@ -540,7 +557,7 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
         code1 = "const x = 1;\nconst y = 2;\nconst z = 3;"
         code2 = "function test() {\n  return 42;\n}"
 
-        setup = await _test_render(
+        setup = await _strict_render(
             lambda: Box(
                 Text("Code Block 1", fg="#00aaff"),
                 Box(

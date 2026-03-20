@@ -1,57 +1,37 @@
-"""Dashboard example — exercises multiple signals, conditional rendering,
-dynamic styles, list reconciliation, and OpenCode-like auto-scroll.
-
-Scroll behavior (ported from upstream OpenCode TypeScript):
-    - All entries stay in the component tree (no slicing)
-    - ScrollBox applies a buffer-level translateY offset (no yoga changes)
-    - Viewport overflow="hidden" clips via scissor rect
-    - Mouse scroll to navigate (traditional direction)
-    - Auto-scroll to bottom when new entries arrive (unless user scrolled up)
-    - "New below" indicator when entries arrive while scrolled up
-    - Scroll-to-bottom on 'b' key
-    - Proportional vertical scrollbar via VRenderable
-
-Component tree:
-    dashboard()
-    └── Box (root, border)
-        ├── tab_bar()
-        ├── Text (separator)
-        ├── counter_panel() | log_panel()
-        │   [log_panel:]
-        │   └── Box (column, flex_grow, overflow=hidden)
-        │       ├── Text ("Log Panel")
-        │       ├── Box (row, flex_grow)
-        │       │   ├── ScrollBox (flex_grow, overflow=hidden, scroll_offset_y)
-        │       │   │   └── log_entry(e, key=...) × N  (ALL entries)
-        │       │   └── VRenderable (scrollbar, width=1)
-        │       ├── VRenderable (scroll indicator, height=1)
-        │       └── VRenderable (footer, height=1)
-        ├── Text (separator)
-        ├── status_bar()
-        └── Text (controls)
+"""Dashboard example — signals, conditional rendering, list reconciliation,
+and OpenCode-style auto-scrolling with a proportional scrollbar.
 
 Controls:
-    Tab        Switch between panels
+    Tab        Switch between counter / log panels
     +/-        Increment/decrement counter
-    a          Add a log entry
-    d          Delete last log entry
+    a/d        Add / delete log entry
     scroll     Mouse scroll on log panel
     b          Scroll to bottom (resume auto-scroll)
-    space      Expand/collapse selected entry
+    space      Expand/collapse last entry
     t          Toggle border style
     c          Cycle status color
     q          Quit
 """
 
 import asyncio
-import logging
+import dataclasses
 import time
 
 import opentui
-from opentui import Box, Signal, Text, use_keyboard, use_mouse, use_renderer
-from opentui.components.box import MacOSScrollAccel, ScrollBox
-from opentui.components.composition import VRenderable
-from opentui.components.control_flow import For, Switch
+from opentui import (
+    Box,
+    For,
+    MacOSScrollAccel,
+    ScrollBox,
+    ScrollContent,
+    Signal,
+    Switch,
+    Text,
+    VRenderable,
+    use_keyboard,
+    use_mouse,
+    use_renderer,
+)
 from opentui.structs import RGBA
 
 # ── Theme ─────────────────────────────────────────────────────────────────
@@ -107,22 +87,29 @@ DETAILS = [
 
 # ── Signals ──────────────────────────────────────────────────────────────
 
-count = Signal("count", 0)
-active_tab = Signal("active_tab", 0)  # 0 = counter, 1 = log
-log_entries = Signal("log_entries", [])  # list of entry dicts
-border_round = Signal("border_round", False)
-status_color_idx = Signal("status_color_idx", 0)
-entry_counter = Signal("entry_counter", 0)  # auto-increment ID
+count = Signal(0, name="count")
+active_tab = Signal(0, name="active_tab")  # 0 = counter, 1 = log
+log_entries = Signal([], name="log_entries")  # list of entry dicts
+border_round = Signal(False, name="border_round")
+status_color_idx = Signal(0, name="status_color_idx")
+entry_counter = Signal(0, name="entry_counter")  # auto-increment ID
 
-# OpenCode-like scroll state
-# These are plain Python variables — NOT Signals.  Mutating them does not
-# trigger _rebuild_component_tree(); VRenderables read them at render time,
-# so only the cheap render path runs.  This matches OpenCode's approach
-# where scroll state NEVER triggers full component rebuilds.
-_scroll_offset: int = 0
-_user_scrolled: bool = False  # True = user scrolled away from bottom
-_new_below: int = 0  # entries added while scrolled up
-selected_entry = Signal("selected_entry", None)  # entry ID for expand/collapse
+selected_entry = Signal(None, name="selected_entry")  # entry ID for expand/collapse
+
+
+# OpenCode-like scroll state — plain Python, NOT Signals.
+# VRenderables read these at render time so only the cheap paint path runs.
+@dataclasses.dataclass
+class _ScrollState:
+    offset: int = 0
+    user_scrolled: bool = False
+    new_below: int = 0
+    accumulator_y: float = 0.0
+
+
+_scroll = _ScrollState()
+
+_border_style = border_round.map(lambda v: "round" if v else "single")
 
 STATUS_COLORS = [
     COLOR_SUCCESS,  # green
@@ -143,12 +130,11 @@ EXPANDED_EXTRA_ROWS = 4  # border + 2 detail lines + border
 # Source: reference/opentui/packages/core/src/lib/scroll-acceleration.ts
 #
 _scroll_accel = MacOSScrollAccel()
-_scroll_accumulator_y: float = 0.0  # fractional precision across frames
 
 
 def _get_scroll_offset() -> int:
     """Render-time callback for ScrollBox — reads plain int, no Signal."""
-    return _scroll_offset
+    return _scroll.offset
 
 
 # ── Scroll helpers (offset-based, matching OpenCode) ─────────────────────
@@ -181,12 +167,11 @@ def _max_scroll():
 
 def _scroll_to_bottom():
     """Scroll to show the newest entries (sticky bottom)."""
-    global _scroll_offset, _scroll_accumulator_y, _user_scrolled, _new_below
-    _scroll_offset = _max_scroll()
-    _scroll_accumulator_y = 0.0
+    _scroll.offset = _max_scroll()
+    _scroll.accumulator_y = 0.0
     _scroll_accel.reset()
-    _user_scrolled = False
-    _new_below = 0
+    _scroll.user_scrolled = False
+    _scroll.new_below = 0
 
 
 def _scroll_up(base_delta: float = 1.0):
@@ -201,20 +186,19 @@ def _scroll_up(base_delta: float = 1.0):
     fractional remainders from the previous direction must be overcome
     before movement occurs, acting as a 1-tick bounce filter.
     """
-    global _scroll_offset, _scroll_accumulator_y, _user_scrolled
     multiplier = _scroll_accel.tick()
     scroll_amount = base_delta * multiplier
-    _scroll_accumulator_y -= scroll_amount
-    int_part = int(_scroll_accumulator_y)
+    _scroll.accumulator_y -= scroll_amount
+    int_part = int(_scroll.accumulator_y)
     if int_part != 0:
-        _scroll_accumulator_y -= int_part
-        new_scroll = max(0, _scroll_offset + int_part)
-        if new_scroll != _scroll_offset:
-            _scroll_offset = new_scroll
-            _user_scrolled = True
-        elif _scroll_offset == 0:
+        _scroll.accumulator_y -= int_part
+        new_offset = max(0, _scroll.offset + int_part)
+        if new_offset != _scroll.offset:
+            _scroll.offset = new_offset
+            _scroll.user_scrolled = True
+        elif _scroll.offset == 0:
             # At top boundary — flush accumulator so reversing is immediate
-            _scroll_accumulator_y = 0.0
+            _scroll.accumulator_y = 0.0
 
 
 def _scroll_down(base_delta: float = 1.0):
@@ -225,65 +209,78 @@ def _scroll_down(base_delta: float = 1.0):
       accumulator += scrollAmount
       integerScroll = trunc(accumulator)  → apply
     """
-    global _scroll_offset, _scroll_accumulator_y, _user_scrolled, _new_below
     multiplier = _scroll_accel.tick()
     scroll_amount = base_delta * multiplier
-    _scroll_accumulator_y += scroll_amount
-    int_part = int(_scroll_accumulator_y)
+    _scroll.accumulator_y += scroll_amount
+    int_part = int(_scroll.accumulator_y)
     if int_part != 0:
-        _scroll_accumulator_y -= int_part
+        _scroll.accumulator_y -= int_part
         ms = _max_scroll()
-        old_offset = _scroll_offset
-        _scroll_offset = min(ms, _scroll_offset + int_part)
-        if _scroll_offset == old_offset:
+        old_offset = _scroll.offset
+        _scroll.offset = min(ms, _scroll.offset + int_part)
+        if _scroll.offset == old_offset:
             # At bottom boundary — flush accumulator so reversing is immediate
-            _scroll_accumulator_y = 0.0
-        if _scroll_offset >= ms:
-            _user_scrolled = False
-            _new_below = 0
+            _scroll.accumulator_y = 0.0
+        if _scroll.offset >= ms:
+            _scroll.user_scrolled = False
+            _scroll.new_below = 0
 
 
 # ── Components ───────────────────────────────────────────────────────────
 
 
 def tab_bar():
-    """Tab bar — active tab gets a highlight."""
+    """Tab bar — active tab gets a highlight.
+
+    Uses reactive props so this component runs once — active_tab changes
+    update Text styling via bindings, not full tree rebuild.
+    """
     tabs = []
     for i, name in enumerate(TAB_NAMES):
-        is_active = active_tab() == i
+        idx = i  # capture loop variable for closures
         tabs.append(
             Text(
                 f" {name} ",
-                bold=is_active,
-                fg=TEXT_BRIGHT if is_active else TEXT_DIM,
-                bg=TAB_ACTIVE_BG if is_active else BG,
+                bold=active_tab.map(lambda v, _i=idx: v == _i),
+                fg=active_tab.map(lambda v, _i=idx: TEXT_BRIGHT if v == _i else TEXT_DIM),
+                bg=active_tab.map(lambda v, _i=idx: TAB_ACTIVE_BG if v == _i else BG),
             )
         )
     return Box(*tabs, flex_direction="row", gap=1)
 
 
-def counter_panel():
-    """Counter panel — tests numeric signal + conditional style."""
-    val = count()
+def _count_color(val):
+    """Map count value to display color."""
     if val > 0:
-        color = RGBA(0.3, 0.9, 0.3, 1.0)
+        return RGBA(0.3, 0.9, 0.3, 1.0)
     elif val < 0:
-        color = RGBA(0.9, 0.3, 0.3, 1.0)
-    else:
-        color = TEXT_NORMAL
+        return RGBA(0.9, 0.3, 0.3, 1.0)
+    return TEXT_NORMAL
 
+
+def counter_panel():
+    """Counter panel — tests numeric signal + conditional style.
+
+    Uses reactive props so this component runs once — count/border_round
+    changes update via bindings, not full tree rebuild.
+    """
     return Box(
         Text("Counter Panel", bold=True, fg=TEXT_BRIGHT, bg=BG),
         Box(
-            Text(f"Value: {val}", fg=color, bold=True, bg=BG_SURFACE),
+            Text(
+                count.map(lambda v: f"Value: {v}"),
+                fg=count.map(_count_color),
+                bold=True,
+                bg=BG_SURFACE,
+            ),
             border=True,
-            border_style="round" if border_round() else "single",
+            border_style=_border_style,
             border_color=BORDER_COLOR,
             background_color=BG_SURFACE,
             padding=1,
         ),
         Text(
-            f"{'positive' if val > 0 else 'negative' if val < 0 else 'zero'}",
+            count.map(lambda v: "positive" if v > 0 else "negative" if v < 0 else "zero"),
             italic=True,
             fg=TEXT_DIM,
             bg=BG,
@@ -296,7 +293,13 @@ def counter_panel():
 
 
 def log_entry(entry):
-    """Single log entry with stable key for reconciler identity."""
+    """Single log entry with stable key for reconciler identity.
+
+    Note: selected_entry() is still read in the body because the entry
+    needs conditional children (detail box). This component still rebuilds
+    when selected_entry changes — a future improvement could use Show()
+    for the detail box to avoid body reads entirely.
+    """
     etype = ENTRY_TYPES[entry["type_idx"]]
     is_selected = selected_entry() == entry["id"]
 
@@ -347,11 +350,11 @@ def _render_scrollbar(buffer, _dt, node):
     Uses the VRenderable node's computed _height as viewport size
     and updates _last_viewport_height for scroll clamping.
 
-    Only clamps _scroll_offset when viewport height changes (e.g.,
+    Only clamps scroll offset when viewport height changes (e.g.,
     first frame, terminal resize).  Avoids per-frame render-time
     mutation that can cause "bobble" artifacts.
     """
-    global _last_viewport_height, _scroll_offset
+    global _last_viewport_height
 
     height = node._height or 0
     if height <= 0:
@@ -361,10 +364,10 @@ def _render_scrollbar(buffer, _dt, node):
     if height != _last_viewport_height:
         _last_viewport_height = height
         ms = _max_scroll()
-        _scroll_offset = min(_scroll_offset, ms)
+        _scroll.offset = min(_scroll.offset, ms)
 
     total = _content_height()
-    scroll = _scroll_offset
+    scroll = _scroll.offset
 
     if total <= height:
         # No scrollbar needed — fill with track
@@ -390,11 +393,11 @@ def _render_scroll_indicator(buffer, _dt, node):
     Always occupies 1 row (stable viewport height).  Shows contextual
     text based on scroll state, or blank when at bottom.
     """
-    if _user_scrolled and _new_below > 0:
-        n = _new_below
+    if _scroll.user_scrolled and _scroll.new_below > 0:
+        n = _scroll.new_below
         text = f" ↓ {n} new {'entry' if n == 1 else 'entries'} below — press 'b' "
         buffer.draw_text(text, node._x, node._y, TEXT_BRIGHT, COLOR_INFO)
-    elif _user_scrolled:
+    elif _scroll.user_scrolled:
         buffer.draw_text(" ↓ press 'b' to scroll to bottom", node._x, node._y, TEXT_DIM, BG)
     # else: blank row (at bottom, no indicator needed)
 
@@ -402,7 +405,7 @@ def _render_scroll_indicator(buffer, _dt, node):
 def _render_footer(buffer, _dt, node):
     """Render-time footer — reads plain variables, no rebuild."""
     ents = log_entries.get()
-    scr = _scroll_offset
+    scr = _scroll.offset
     text = f"{len(ents)} entries"
     if scr > 0:
         text += f" | scrolled {scr} rows"
@@ -415,9 +418,8 @@ def log_panel():
     All entries stay in the tree.  Scrolling is handled by ScrollBox
     which applies a buffer-level translateY (no yoga layout changes).
 
-    Scroll state (_user_scrolled, _new_below, _scroll_offset) are plain
-    variables read at render time by VRenderables.  This means scrolling
-    NEVER triggers a full tree rebuild — only the cheap render path runs.
+    Scroll state (_scroll dataclass) uses plain variables read at render
+    time by VRenderables — scrolling never triggers a tree rebuild.
     """
     entries = log_entries()
 
@@ -430,10 +432,9 @@ def log_panel():
         flex_shrink=0,  # Don't compress — let ScrollBox clip/scroll
     )
 
-    # ScrollBox: scroll_offset_y_fn reads _scroll_offset at render time,
-    # bypassing the signal system entirely (no tree rebuild on scroll).
+    # ScrollBox reads _scroll.offset at render time — no tree rebuild on scroll.
     entry_list = ScrollBox(
-        entry_for,
+        content=ScrollContent(entry_for),
         key="scroll-box",
         scroll_y=True,
         scroll_offset_y_fn=_get_scroll_offset,
@@ -462,7 +463,7 @@ def log_panel():
         panel_children.append(content_row)
 
         # Scroll indicator — fixed 1-row VRenderable (stable viewport height).
-        # Reads _user_scrolled/_new_below at render time — no Signal, no rebuild.
+        # Reads _scroll state at render time — no Signal, no rebuild.
         panel_children.append(
             VRenderable(
                 render_fn=_render_scroll_indicator,
@@ -482,7 +483,7 @@ def log_panel():
 def _render_status_bar(buffer, _dt, node):
     """Render-time status bar — reads plain scroll state, no rebuild on scroll."""
     color = STATUS_COLORS[status_color_idx.get()]
-    scrolled = " SCROLLED" if _user_scrolled else ""
+    scrolled = " SCROLLED" if _scroll.user_scrolled else ""
     text = (
         f" tab={TAB_NAMES[active_tab.get()]}"
         f" | count={count.get()}"
@@ -498,22 +499,24 @@ def status_bar():
 
     Uses VRenderable for the text content so SCROLLED indicator
     updates at render time without requiring a Signal for scroll state.
+    Uses reactive border_color so this component runs once.
     """
-    color = STATUS_COLORS[status_color_idx()]
     return Box(
         VRenderable(render_fn=_render_status_bar, height=1, flex_shrink=0),
         border=True,
-        border_color=color,
+        border_color=status_color_idx.map(lambda i: STATUS_COLORS[i]),
         background_color=BG,
     )
 
 
 def dashboard():
-    """Root component — conditional panel rendering based on active tab."""
-    _setup_debug_logging()
+    """Root component — conditional panel rendering based on active tab.
 
+    Uses reactive border_style so this component runs once — border_round
+    changes update via binding, not full tree rebuild.
+    """
     content = Switch(
-        on=lambda: active_tab(),
+        on=active_tab,
         cases={0: counter_panel, 1: log_panel},
         key="tab-content",
         flex_grow=1,
@@ -531,7 +534,7 @@ def dashboard():
             bg=BG,
         ),
         border=True,
-        border_style="round" if border_round() else "single",
+        border_style=_border_style,
         border_color=BORDER_COLOR,
         background_color=BG,
         padding=1,
@@ -545,7 +548,6 @@ def dashboard():
 
 
 def handle_key(event):
-    global _scroll_offset, _user_scrolled, _new_below
     if event.name == "q":
         use_renderer().stop()
     elif event.name == "tab":
@@ -574,8 +576,8 @@ def handle_key(event):
         log_entries.set(entries)
 
         # Auto-scroll: if not user-scrolled, jump to bottom (sticky bottom)
-        if _user_scrolled:
-            _new_below += 1
+        if _scroll.user_scrolled:
+            _scroll.new_below += 1
         else:
             _scroll_to_bottom()
 
@@ -589,11 +591,11 @@ def handle_key(event):
             log_entries.set(entries)
             # Clamp scroll to new max
             ms = _max_scroll()
-            _scroll_offset = min(_scroll_offset, ms)
+            _scroll.offset = min(_scroll.offset, ms)
             if not entries:
-                _scroll_offset = 0
-                _user_scrolled = False
-                _new_below = 0
+                _scroll.offset = 0
+                _scroll.user_scrolled = False
+                _scroll.new_below = 0
 
     # Scroll to bottom
     elif event.name == "b":
@@ -601,7 +603,7 @@ def handle_key(event):
             _scroll_to_bottom()
 
     # Expand/collapse entry
-    elif event.name in {"space", " "}:
+    elif event.name == "space":
         if active_tab() == 1:
             entries = log_entries()
             if entries:
@@ -627,105 +629,7 @@ def handle_mouse(event):
             _scroll_up()
 
 
-# ── Debug logging ────────────────────────────────────────────────────────
-
-_debug_log = logging.getLogger("dashboard.debug")
-_frame_count = 0
-
-
-def _count_nodes(node, depth=0):
-    """Count total nodes and max depth in the tree."""
-    count = 1
-    max_d = depth
-    for child in getattr(node, "_children", []):
-        c, d = _count_nodes(child, depth + 1)
-        count += c
-        max_d = max(max_d, d)
-    return count, max_d
-
-
-def _debug_frame(dt):
-    """Frame callback — logs key metrics every 60 frames."""
-    global _frame_count
-    _frame_count += 1
-    if _frame_count % 60 != 0:
-        return
-
-    renderer = use_renderer()
-    root = getattr(renderer, "_root", None)
-    if root is None:
-        return
-
-    total_nodes, max_depth = _count_nodes(root)
-    entries = log_entries.get()
-    from opentui.components.control_flow import For
-
-    # Find the For node in the tree
-    for_info = ""
-
-    def _find_for(node):
-        nonlocal for_info
-        if isinstance(node, For):
-            for_info = f"For children={len(node._children)}"
-            if node._yoga_node:
-                for_info += f" yoga_children={node._yoga_node.child_count}"
-                # Check For's computed layout
-                from opentui import layout as yoga_layout
-
-                layout = yoga_layout.get_layout(node._yoga_node)
-                for_info += f" h={int(layout['height'])} w={int(layout['width'])}"
-            return
-        for child in getattr(node, "_children", []):
-            _find_for(child)
-
-    _find_for(root)
-
-    _debug_log.info(
-        "frame=%d nodes=%d depth=%d entries=%d scroll=%d viewport=%d max_scroll=%d content_h=%d %s",
-        _frame_count,
-        total_nodes,
-        max_depth,
-        len(entries),
-        _scroll_offset,
-        _viewport_height(),
-        _max_scroll(),
-        _content_height(),
-        for_info,
-    )
-
-
 # ── Entry point ──────────────────────────────────────────────────────────
-
-
-def _setup_debug_logging():
-    """Register debug frame callback — called once from dashboard() on first render."""
-    global _debug_logging_setup
-    if _debug_logging_setup:
-        return
-    _debug_logging_setup = True
-
-    import os
-
-    level_name = os.environ.get("LOGLEVEL", "WARNING").upper()
-    if level_name == "WARNING":
-        return  # No debug logging requested
-
-    logging.basicConfig(
-        level=getattr(logging, level_name, logging.WARNING),
-        format="%(name)s %(message)s",
-        filename="dashboard_debug.log",
-        filemode="w",
-    )
-
-    try:
-        renderer = use_renderer()
-        renderer.set_frame_callback(_debug_frame)
-        _debug_log.info("Debug logging enabled (level=%s)", level_name)
-    except RuntimeError:
-        pass  # Renderer not ready yet
-
-
-_debug_logging_setup = False
 
 
 async def main():

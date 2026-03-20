@@ -1,11 +1,13 @@
 """Tests for structural control flow primitives — For, Show, Switch.
 
 Tests ported: 26/26 from upstream control-flow.test.tsx
-(Index and ErrorBoundary tests are not applicable — Python has no Index or
-ErrorBoundary components.  Three upstream tests that rely on render-level
-infrastructure are mapped to unit-level equivalents below.)
+(Index tests are not applicable — Python has no Index component.
+ErrorBoundary tests are in tests/solid/test_error_boundary.py.
+Three upstream tests that rely on render-level infrastructure are
+mapped to unit-level equivalents below.)
 """
 
+from opentui import reactive, template_component
 from opentui.components.base import BaseRenderable, Renderable
 from opentui.components.control_flow import For, Match, Show, Switch
 from opentui.reconciler import reconcile
@@ -20,6 +22,14 @@ from opentui.signals import Signal
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _sub_count(signal: Signal) -> int:
+    """Get total binding count (subscribers + prop bindings) for both native and pure-Python."""
+    if signal._native is not None:
+        return signal._native.total_binding_count
+    return len(signal._subscribers)
+
 
 
 def _make_item(id: int, label: str = ""):
@@ -83,6 +93,29 @@ class TestFor:
         assert f._children[1] is old_child_1  # preserved
         assert f._children[2].key == "item-3"  # new
 
+    def test_append_only_skips_rerender_for_unchanged_prefix_items(self):
+        """Append-only updates should not re-render unchanged existing items."""
+        items = [_make_item(1), _make_item(2)]
+        render_calls: list[int] = []
+
+        def render_item(item):
+            render_calls.append(item["id"])
+            return BaseRenderable(key=f"item-{item['id']}")
+
+        f = For(
+            each=lambda: items,
+            render=render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="list",
+        )
+        f._reconcile_children()
+        render_calls.clear()
+
+        items.append(_make_item(3))
+        f._reconcile_children()
+
+        assert render_calls == [3]
+
     def test_item_removed(self):
         """Removed item is destroyed; others preserved."""
         items = [_make_item(1), _make_item(2), _make_item(3)]
@@ -105,6 +138,39 @@ class TestFor:
         assert f._children[0] is child_1  # preserved
         assert f._children[1] is child_3  # preserved
         assert "item-2" in destroyed
+
+    def test_truncate_only_skips_rerender_for_unchanged_prefix_items(self):
+        """Tail removal should preserve and avoid rerendering the shared prefix."""
+        items = [_make_item(1), _make_item(2), _make_item(3)]
+        render_calls: list[int] = []
+
+        def render_item(item):
+            render_calls.append(item["id"])
+            node = BaseRenderable(key=f"item-{item['id']}")
+            return node
+
+        f = For(
+            each=lambda: items,
+            render=render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="list",
+        )
+        f._reconcile_children()
+
+        destroyed: list[str] = []
+        f._children[2].on_cleanup(lambda: destroyed.append("item-3"))
+        render_calls.clear()
+
+        items.pop()
+        prefix_0 = f._children[0]
+        prefix_1 = f._children[1]
+        f._reconcile_children()
+
+        assert render_calls == []
+        assert len(f._children) == 2
+        assert f._children[0] is prefix_0
+        assert f._children[1] is prefix_1
+        assert "item-3" in destroyed
 
     def test_reorder(self):
         """Reorder reuses existing children in new order."""
@@ -690,6 +756,802 @@ class TestSwitch:
 
 
 # ---------------------------------------------------------------------------
+# Reactive subscription tests — signal changes update without full rebuild
+# ---------------------------------------------------------------------------
+
+
+class TestShowReactive:
+    """Show reactively swaps children when tracked signals change."""
+
+    def test_show_reactive_toggle(self):
+        """Signal change swaps Show children without manual reconcile."""
+        visible = Signal(True, name="visible")
+        show = Show(
+            when=lambda: visible(),
+            render=lambda: Renderable(key="content"),
+            fallback=lambda: Renderable(key="hidden"),
+            key="show",
+        )
+        assert show._children[0].key == "content"
+        assert show._current_branch == "render"
+
+        # Signal change → reactive update
+        visible.set(False)
+        assert show._children[0].key == "hidden"
+        assert show._current_branch == "fallback"
+
+        # Toggle back
+        visible.set(True)
+        assert show._children[0].key == "content"
+        assert show._current_branch == "render"
+
+    def test_show_reactive_to_none(self):
+        """Signal becomes falsy with no fallback → empty, inactive."""
+        visible = Signal(True, name="visible")
+        show = Show(
+            when=lambda: visible(),
+            render=lambda: Renderable(key="content"),
+            key="show",
+        )
+        assert len(show._children) == 1
+        assert show._is_active is True
+
+        visible.set(False)
+        assert len(show._children) == 0
+        assert show._is_active is False
+        assert show._current_branch == "none"
+
+    def test_show_reactive_same_branch_noop(self):
+        """Same branch after signal change → no child destruction."""
+        visible = Signal(True, name="visible")
+        show = Show(
+            when=lambda: visible(),
+            render=lambda: Renderable(key="content"),
+            key="show",
+        )
+        child = show._children[0]
+
+        # Set to another truthy value — same branch
+        visible.set(42)
+        assert show._children[0] is child  # Same identity
+
+    def test_show_reactive_caches_old_children(self):
+        """Branch swap caches old children (not destroyed until Show destroys)."""
+        visible = Signal(True, name="visible")
+        destroyed = []
+        show = Show(
+            when=lambda: visible(),
+            render=lambda: Renderable(key="content"),
+            fallback=lambda: Renderable(key="hidden"),
+            key="show",
+        )
+        content_child = show._children[0]
+        content_child.on_cleanup(lambda: destroyed.append("content"))
+
+        visible.set(False)
+        # Branch cached, not destroyed
+        assert "content" not in destroyed
+        assert show._render_cache is not None
+        assert content_child in show._render_cache
+
+        # Destroying Show cleans up cached branches
+        show.destroy()
+        assert "content" in destroyed
+
+    def test_show_destroy_cleans_subscription(self):
+        """Destroying Show unsubscribes from signals."""
+        visible = Signal(True, name="visible")
+        show = Show(
+            when=lambda: visible(),
+            render=lambda: Renderable(key="content"),
+            key="show",
+        )
+        assert show._condition_cleanup is not None
+
+        show.destroy()
+        assert show._condition_cleanup is None
+
+        # Signal change after destroy should not crash
+        visible.set(False)
+
+
+class TestSwitchReactive:
+    """Switch reactively swaps branches when tracked signals change."""
+
+    def test_switch_reactive_value_change(self):
+        """on= signal change swaps Switch branch."""
+        tab = Signal(0, name="tab")
+        switch = Switch(
+            on=lambda: tab(),
+            cases={
+                0: lambda: Renderable(key="panel-0"),
+                1: lambda: Renderable(key="panel-1"),
+                2: lambda: Renderable(key="panel-2"),
+            },
+            key="switch",
+        )
+        assert switch._children[0].key == "panel-0"
+
+        tab.set(1)
+        assert switch._children[0].key == "panel-1"
+
+        tab.set(2)
+        assert switch._children[0].key == "panel-2"
+
+    def test_switch_reactive_to_fallback(self):
+        """Value doesn't match any case → falls back."""
+        tab = Signal(0, name="tab")
+        switch = Switch(
+            on=lambda: tab(),
+            cases={0: lambda: Renderable(key="panel-0")},
+            fallback=lambda: Renderable(key="default"),
+            key="switch",
+        )
+        assert switch._children[0].key == "panel-0"
+
+        tab.set(99)
+        assert switch._children[0].key == "default"
+        assert switch._current_branch_key == ("fallback",)
+
+    def test_switch_reactive_to_none(self):
+        """No match, no fallback → inactive."""
+        tab = Signal(0, name="tab")
+        switch = Switch(
+            on=lambda: tab(),
+            cases={0: lambda: Renderable(key="panel-0")},
+            key="switch",
+        )
+        assert switch._is_active is True
+
+        tab.set(99)
+        assert switch._is_active is False
+        assert len(switch._children) == 0
+
+    def test_switch_reactive_same_branch_noop(self):
+        """Same branch key → no child destruction."""
+        tab = Signal(0, name="tab")
+        switch = Switch(
+            on=lambda: tab(),
+            cases={0: lambda: Renderable(key="panel-0")},
+            key="switch",
+        )
+        child = switch._children[0]
+
+        # Set same value → same branch
+        tab.set(0)
+        assert switch._children[0] is child
+
+    def test_switch_reactive_match_mode(self):
+        """Match-based switch reactively updates on signal change."""
+        score = Signal(95, name="score")
+        switch = Switch(
+            Match(when=lambda: score() >= 90, render=lambda: Renderable(key="A")),
+            Match(when=lambda: score() >= 80, render=lambda: Renderable(key="B")),
+            fallback=lambda: Renderable(key="F"),
+            key="grade",
+        )
+        assert switch._children[0].key == "A"
+
+        score.set(85)
+        assert switch._children[0].key == "B"
+
+        score.set(50)
+        assert switch._children[0].key == "F"
+
+    def test_switch_destroy_cleans_subscription(self):
+        """Destroying Switch unsubscribes from signals."""
+        tab = Signal(0, name="tab")
+        switch = Switch(
+            on=lambda: tab(),
+            cases={0: lambda: Renderable(key="p0")},
+            key="switch",
+        )
+        assert switch._condition_cleanup is not None
+
+        switch.destroy()
+        assert switch._condition_cleanup is None
+        tab.set(1)  # Should not crash
+
+
+class TestForReactive:
+    """For reactively reconciles children when tracked signals change."""
+
+    def test_for_reactive_signal_change(self):
+        """Signal change triggers reactive reconciliation."""
+        items_sig = Signal([_make_item(1), _make_item(2)], name="items")
+        f = For(
+            each=lambda: items_sig(),
+            render=_render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="list",
+        )
+        f._reconcile_children()
+        assert len(f._children) == 2
+
+        # Add item via signal
+        items_sig.set([_make_item(1), _make_item(2), _make_item(3)])
+        assert len(f._children) == 3
+        assert f._children[2].key == "item-3"
+
+    def test_for_reactive_preserves_existing(self):
+        """Reactive update preserves existing children by key."""
+        items_sig = Signal([_make_item(1), _make_item(2)], name="items")
+        f = For(
+            each=lambda: items_sig(),
+            render=_render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="list",
+        )
+        f._reconcile_children()
+        child_1 = f._children[0]
+        child_2 = f._children[1]
+
+        items_sig.set([_make_item(1), _make_item(2), _make_item(3)])
+        assert f._children[0] is child_1
+        assert f._children[1] is child_2
+
+    def test_for_reactive_remove(self):
+        """Reactive update removes and destroys deleted items."""
+        items_sig = Signal([_make_item(1), _make_item(2), _make_item(3)], name="items")
+        f = For(
+            each=lambda: items_sig(),
+            render=_render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="list",
+        )
+        f._reconcile_children()
+
+        destroyed = []
+        f._children[1].on_cleanup(lambda: destroyed.append("item-2"))
+
+        items_sig.set([_make_item(1), _make_item(3)])
+        assert len(f._children) == 2
+        assert "item-2" in destroyed
+
+    def test_for_destroy_cleans_subscription(self):
+        """Destroying For unsubscribes from signals."""
+        items_sig = Signal([_make_item(1)], name="items")
+        f = For(
+            each=lambda: items_sig(),
+            render=_render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="list",
+        )
+        f._reconcile_children()
+        assert f._data_cleanup is not None
+
+        f.destroy()
+        assert f._data_cleanup is None
+        items_sig.set([_make_item(1), _make_item(2)])  # Should not crash
+
+
+# ---------------------------------------------------------------------------
+# Subscription leak prevention tests
+# ---------------------------------------------------------------------------
+
+
+class TestSubscriptionLeakPrevention:
+    """Verify that reconciler cleans up subscriptions on discarded new nodes."""
+
+    def test_show_reconcile_no_leak(self):
+        """Reconciling Show cleans up new node's subscription."""
+        visible = Signal(True, name="visible")
+
+        old_show = Show(
+            when=lambda: visible(),
+            render=lambda: Renderable(key="content"),
+            key="show",
+        )
+        parent = BaseRenderable()
+        parent._children = [old_show]
+        old_show._parent = parent
+
+        initial_sub_count = _sub_count(visible)
+
+        # Simulate full rebuild: create new Show (subscribes in __init__)
+        new_show = Show(
+            when=lambda: visible(),
+            render=lambda: Renderable(key="content"),
+            key="show",
+        )
+        assert _sub_count(visible) == initial_sub_count + 1  # Leaked if not cleaned
+
+        # Reconcile — should clean up new_show's subscription
+        reconcile(parent, [old_show], [new_show])
+
+        assert _sub_count(visible) == initial_sub_count  # No leak
+        assert parent._children[0] is old_show  # Old preserved
+
+    def test_switch_reconcile_no_leak(self):
+        """Reconciling Switch cleans up new node's subscription."""
+        tab = Signal(0, name="tab")
+
+        old_switch = Switch(
+            on=lambda: tab(),
+            cases={0: lambda: Renderable(key="p0")},
+            key="sw",
+        )
+        parent = BaseRenderable()
+        parent._children = [old_switch]
+        old_switch._parent = parent
+
+        initial_sub_count = _sub_count(tab)
+
+        new_switch = Switch(
+            on=lambda: tab(),
+            cases={0: lambda: Renderable(key="p0")},
+            key="sw",
+        )
+        assert _sub_count(tab) == initial_sub_count + 1
+
+        reconcile(parent, [old_switch], [new_switch])
+        assert _sub_count(tab) == initial_sub_count
+
+    def test_for_reconcile_no_leak(self):
+        """Reconciling For cleans up new node's subscription."""
+        items_sig = Signal([_make_item(1)], name="items")
+
+        old_for = For(
+            each=lambda: items_sig(),
+            render=_render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="for",
+        )
+        old_for._reconcile_children()
+        parent = BaseRenderable()
+        parent._children = [old_for]
+        old_for._parent = parent
+
+        initial_sub_count = _sub_count(items_sig)
+
+        new_for = For(
+            each=lambda: items_sig(),
+            render=_render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="for",
+        )
+
+        reconcile(parent, [old_for], [new_for])
+        assert _sub_count(items_sig) == initial_sub_count
+
+    def test_show_no_accumulating_subscribers(self):
+        """Multiple reconciliations don't accumulate subscribers."""
+        visible = Signal(True, name="visible")
+
+        parent = BaseRenderable()
+        old_show = Show(
+            when=lambda: visible(),
+            render=lambda: Renderable(key="c"),
+            key="show",
+        )
+        parent._children = [old_show]
+        old_show._parent = parent
+
+        initial_sub_count = _sub_count(visible)
+
+        # Simulate 10 rebuilds
+        for _ in range(10):
+            new_show = Show(
+                when=lambda: visible(),
+                render=lambda: Renderable(key="c"),
+                key="show",
+            )
+            reconcile(parent, list(parent._children), [new_show])
+
+        # Should still have same subscriber count — no leaks
+        assert _sub_count(visible) == initial_sub_count
+
+
+# ---------------------------------------------------------------------------
+# Re-tracking tests — conditional deps correctly handled
+# ---------------------------------------------------------------------------
+
+
+class TestShowRetracking:
+    """Show re-tracks deps when condition reads different signals."""
+
+    def test_show_retracks_conditional_deps(self):
+        """Show discovers new signal deps on reactive update."""
+        mode = Signal("a", name="mode")
+        sig_a = Signal(True, name="a")
+        sig_b = Signal(True, name="b")
+
+        show = Show(
+            when=lambda: sig_a() if mode() == "a" else sig_b(),
+            render=lambda: Renderable(key="content"),
+            key="show",
+        )
+        assert show._current_branch == "render"
+
+        # Initially tracks mode + sig_a. Change sig_b — should NOT trigger.
+        sig_b.set(False)
+        assert show._current_branch == "render"  # No change (sig_b not tracked)
+
+        # Switch mode to "b" — re-tracks, now tracks mode + sig_b
+        mode.set("b")
+        # sig_b is False, so now condition is False
+        assert show._current_branch == "none"
+
+        # Now sig_b changes should trigger updates
+        sig_b.set(True)
+        assert show._current_branch == "render"
+
+    def test_switch_retracks_conditional_deps(self):
+        """Switch discovers new signal deps on reactive update."""
+        mode = Signal("direct", name="mode")
+        tab = Signal(0, name="tab")
+        alt = Signal(0, name="alt")
+
+        switch = Switch(
+            on=lambda: tab() if mode() == "direct" else alt(),
+            cases={
+                0: lambda: Renderable(key="p0"),
+                1: lambda: Renderable(key="p1"),
+            },
+            key="sw",
+        )
+        assert switch._children[0].key == "p0"
+
+        # tab change triggers update
+        tab.set(1)
+        assert switch._children[0].key == "p1"
+
+        # Switch to alt mode — now tracks mode + alt instead of mode + tab
+        mode.set("alt")
+        # alt is 0, so branch changes to p0
+        assert switch._children[0].key == "p0"
+
+        # alt change should now trigger
+        alt.set(1)
+        assert switch._children[0].key == "p1"
+
+        # tab change should NOT trigger anymore
+        tab.set(0)
+        assert switch._children[0].key == "p1"  # Unchanged
+
+
+# ---------------------------------------------------------------------------
+# Rebuild-skip optimization tests
+# ---------------------------------------------------------------------------
+
+
+class TestRebuildSkip:
+    """Verify signal changes are handled reactively by Show/For/Switch
+    without triggering rebuilds."""
+
+    async def test_show_signal_updates_reactively(self):
+        """Signal read only in Show.when updates content reactively."""
+        visible = Signal(True, name="visible")
+
+        def component():
+            return Box(
+                Show(
+                    when=lambda: visible(),
+                    render=lambda: Text("Shown"),
+                    fallback=lambda: Text("Hidden"),
+                    key="show",
+                ),
+            )
+
+        setup = await _test_render(component, {"width": 40, "height": 10})
+
+        visible.set(False)
+        setup.render_frame()
+
+        frame = setup.capture_char_frame()
+        assert "Hidden" in frame
+
+        visible.set(True)
+        setup.render_frame()
+
+        frame = setup.capture_char_frame()
+        assert "Shown" in frame
+
+        setup.destroy()
+
+    async def test_template_component_updates_stable_text(self):
+        """Template-lowered stable text updates reactively."""
+        count = Signal(0, name="count")
+
+        @template_component
+        def component():
+            return Box(Text(reactive(lambda: f"Count: {count()}"), id="count_text"))
+
+        setup = await _test_render(component, {"width": 40, "height": 10})
+
+        count.set(1)
+        setup.render_frame()
+
+        frame = setup.capture_char_frame()
+        assert "Count: 1" in frame
+
+        setup.destroy()
+
+    async def test_body_signal_reads_rejected(self):
+        """Signal reads in ordinary component bodies are rejected."""
+        count = Signal(0, name="count")
+
+        def component():
+            return Box(Text(f"Count: {count()}"))
+
+        import pytest
+
+        with pytest.raises(RuntimeError, match="reads signals in its body"):
+            await _test_render(component, {"width": 40, "height": 10})
+
+    async def test_template_components_skip_signal_tracking(self):
+        """Template components skip signal tracking and work correctly."""
+        count = Signal(0, name="count")
+
+        @template_component
+        def component():
+            return Box(Text(reactive(lambda: f"Count: {count()}"), id="count_text"))
+
+        setup = await _test_render(component, {"width": 40, "height": 10})
+
+        count.set(2)
+        setup.render_frame()
+
+        frame = setup.capture_char_frame()
+        assert "Count: 2" in frame
+
+        setup.destroy()
+
+    async def test_switch_signal_updates_reactively(self):
+        """Signal read only in Switch.on updates content reactively."""
+        tab = Signal(0, name="tab")
+
+        def component():
+            return Box(
+                Switch(
+                    on=lambda: tab(),
+                    cases={
+                        0: lambda: Text("Tab 0"),
+                        1: lambda: Text("Tab 1"),
+                    },
+                    key="tabs",
+                ),
+            )
+
+        setup = await _test_render(component, {"width": 40, "height": 10})
+
+        tab.set(1)
+        setup.render_frame()
+
+        frame = setup.capture_char_frame()
+        assert "Tab 1" in frame
+
+        setup.destroy()
+
+    async def test_successful_frame_clears_dirty_flags(self):
+        """Renderer clears _dirty after a successful frame so future pruning can rely on it."""
+
+        class CountingRenderable(Renderable):
+            __slots__ = ("render_count",)
+
+            def __init__(self):
+                super().__init__()
+                self.render_count = 0
+
+            def render(self, buffer, delta_time: float = 0) -> None:
+                self.render_count += 1
+
+        child = CountingRenderable()
+
+        def component():
+            return Box(child)
+
+        setup = await _test_render(component, {"width": 40, "height": 10})
+
+        setup.render_frame()
+        assert child.render_count == 1
+        assert child._dirty is False
+
+        child.mark_dirty()
+        setup.render_frame()
+        assert child.render_count == 2
+        assert child._dirty is False
+
+        setup.destroy()
+
+    async def test_custom_update_layout_still_runs_on_clean_frames(self):
+        """Layout-hook renderables must still receive per-frame update_layout calls."""
+
+        class CountingLayoutRenderable(Renderable):
+            __slots__ = ("layout_calls",)
+
+            def __init__(self):
+                super().__init__()
+                self.layout_calls = 0
+
+            def update_layout(self, delta_time: float = 0) -> None:
+                self.layout_calls += 1
+
+        child = CountingLayoutRenderable()
+
+        def component():
+            return Box(child)
+
+        setup = await _test_render(component, {"width": 40, "height": 10})
+
+        setup.render_frame()
+        setup.render_frame()
+
+        assert child.layout_calls == 2
+
+        setup.destroy()
+
+
+# ---------------------------------------------------------------------------
+# For data-change propagation tests
+# ---------------------------------------------------------------------------
+
+
+class TestForDataPropagation:
+    """Verify that For propagates data changes to reused children."""
+
+    def test_for_updates_reused_child_props(self):
+        """Reused child gets updated props when data changes (same keys)."""
+        items = [{"id": 1, "label": "old"}]
+
+        def render_item(item):
+            return Text(item["label"], key=f"item-{item['id']}")
+
+        f = For(
+            each=lambda: items,
+            render=render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="list",
+        )
+        f._reconcile_children()
+        assert f._children[0]._content == "old"
+
+        child_identity = f._children[0]
+
+        # Update data (same key, different label)
+        items[0] = {"id": 1, "label": "new"}
+        f._reconcile_children()
+
+        # Same identity (reused), but props updated
+        assert f._children[0] is child_identity
+        assert f._children[0]._content == "new"
+
+    def test_for_fast_path_still_patches(self):
+        """Fast path (same keys, same order) still patches data changes."""
+        items = [{"id": 1, "label": "A"}, {"id": 2, "label": "B"}]
+
+        def render_item(item):
+            return Text(item["label"], key=f"item-{item['id']}")
+
+        f = For(
+            each=lambda: items,
+            render=render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="list",
+        )
+        f._reconcile_children()
+        child_1 = f._children[0]
+        child_2 = f._children[1]
+
+        # Same keys, same order, different labels
+        items[0] = {"id": 1, "label": "A-updated"}
+        items[1] = {"id": 2, "label": "B-updated"}
+        f._reconcile_children()
+
+        # Same identities, updated props
+        assert f._children[0] is child_1
+        assert f._children[1] is child_2
+        assert f._children[0]._content == "A-updated"
+        assert f._children[1]._content == "B-updated"
+
+    def test_for_reactive_data_change_propagates(self):
+        """Signal-driven data change propagates to reused children."""
+        items_sig = Signal([{"id": 1, "label": "v1"}], name="items")
+
+        def render_item(item):
+            return Text(item["label"], key=f"item-{item['id']}")
+
+        f = For(
+            each=lambda: items_sig(),
+            render=render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="list",
+        )
+        f._reconcile_children()
+        assert f._children[0]._content == "v1"
+        child = f._children[0]
+
+        # Signal update with same key, new data
+        items_sig.set([{"id": 1, "label": "v2"}])
+
+        assert f._children[0] is child  # Same identity
+        assert f._children[0]._content == "v2"  # Updated data
+
+    async def test_for_data_change_renders_correctly(self):
+        """For data change propagates to visible text output."""
+        items_sig = Signal(
+            [
+                {"id": 1, "label": "Alpha"},
+                {"id": 2, "label": "Bravo"},
+            ],
+            name="items",
+        )
+
+        def component():
+            return Box(
+                For(
+                    each=lambda: items_sig(),
+                    render=lambda item: Text(item["label"], key=f"item-{item['id']}"),
+                    key_fn=lambda e: f"item-{e['id']}",
+                    key="list",
+                ),
+            )
+
+        setup = await _test_render(component, {"width": 40, "height": 10})
+        frame = setup.capture_char_frame()
+        assert "Alpha" in frame
+        assert "Bravo" in frame
+
+        # Update labels (same keys)
+        items_sig.set(
+            [
+                {"id": 1, "label": "Alpha-v2"},
+                {"id": 2, "label": "Bravo-v2"},
+            ]
+        )
+        setup.render_frame()
+
+        frame = setup.capture_char_frame()
+        assert "Alpha-v2" in frame
+        assert "Bravo-v2" in frame
+        setup.destroy()
+
+    def test_for_prepend_fast_path_preserves_suffix_and_skips_rerender(self):
+        """Pure prepend preserves existing suffix identities and only renders new heads."""
+        item_one = {"id": 1}
+        item_two = {"id": 2}
+        items = [item_one, item_two]
+        render_calls: list[int] = []
+        destroyed: list[int] = []
+
+        class Row(Text):
+            __slots__ = ("item_id",)
+
+            def __init__(self, item_id: int):
+                super().__init__(f"item-{item_id}", key=f"item-{item_id}")
+                self.item_id = item_id
+
+            def destroy(self) -> None:
+                destroyed.append(self.item_id)
+                super().destroy()
+
+        def render_item(item):
+            render_calls.append(item["id"])
+            return Row(item["id"])
+
+        f = For(
+            each=lambda: items,
+            render=render_item,
+            key_fn=lambda e: f"item-{e['id']}",
+            key="list",
+        )
+        f._reconcile_children()
+        old_first = f._children[0]
+        old_second = f._children[1]
+
+        render_calls.clear()
+        items = [{"id": 0}, item_one, item_two]
+        f._reconcile_children()
+
+        assert [child.key for child in f._children] == ["item-0", "item-1", "item-2"]
+        assert f._children[0] is not old_first
+        assert f._children[1] is old_first
+        assert f._children[2] is old_second
+        assert render_calls == [0]
+        assert destroyed == []
+
+
+# ---------------------------------------------------------------------------
 # Render-output verification tests
 # ---------------------------------------------------------------------------
 
@@ -781,7 +1643,7 @@ class TestControlFlowRenderOutput:
 
     async def test_show_toggles_content(self):
         """Toggling Show's condition signal swaps visible content."""
-        visible = Signal("visible", True)
+        visible = Signal(True, name="visible")
 
         def component():
             return Box(
@@ -805,4 +1667,343 @@ class TestControlFlowRenderOutput:
         frame = setup.capture_char_frame()
         assert "Now you see me" not in frame
         assert "Now you don't" in frame
+        setup.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Reactive Text — callable content with signal auto-tracking
+# ---------------------------------------------------------------------------
+
+
+class TestReactiveText:
+    """Text with callable content reactively updates when signals change."""
+
+    def test_callable_content_initial_value(self):
+        """Callable content is evaluated to produce initial _content."""
+        count = Signal(42, name="count")
+        text = Text(lambda: f"Count: {count()}")
+        assert text._content == "Count: 42"
+
+    def test_callable_content_signal_update(self):
+        """Signal change updates Text._content reactively."""
+        count = Signal(0, name="count")
+        text = Text(lambda: f"Count: {count()}")
+        assert text._content == "Count: 0"
+
+        count.set(5)
+        assert text._content == "Count: 5"
+
+        count.set(10)
+        assert text._content == "Count: 10"
+
+    def test_callable_content_multiple_signals(self):
+        """Callable that reads multiple signals tracks all of them."""
+        a = Signal(1, name="a")
+        b = Signal(2, name="b")
+        text = Text(lambda: f"{a()} + {b()} = {a() + b()}")
+        assert text._content == "1 + 2 = 3"
+
+        a.set(10)
+        assert text._content == "10 + 2 = 12"
+
+        b.set(20)
+        assert text._content == "10 + 20 = 30"
+
+    def test_callable_content_same_value_noop(self):
+        """Same computed content doesn't mark dirty."""
+        count = Signal(5, name="count")
+        text = Text(lambda: f"Count: {count()}")
+        text._dirty = False  # Reset dirty
+
+        # Set signal to same value — no notification at all
+        count.set(5)
+        assert text._dirty is False
+
+    def test_callable_content_retracks_deps(self):
+        """Conditional reads re-track on each update."""
+        mode = Signal("a", name="mode")
+        sig_a = Signal("hello", name="a")
+        sig_b = Signal("world", name="b")
+
+        text = Text(lambda: sig_a() if mode() == "a" else sig_b())
+        assert text._content == "hello"
+
+        # sig_b not tracked yet — changing it should NOT update
+        sig_b.set("WORLD")
+        assert text._content == "hello"
+
+        # Switch mode → re-tracks, now reads sig_b
+        mode.set("b")
+        assert text._content == "WORLD"
+
+        # sig_a no longer tracked
+        sig_a.set("HELLO")
+        assert text._content == "WORLD"
+
+        # sig_b now triggers
+        sig_b.set("updated")
+        assert text._content == "updated"
+
+    def test_callable_content_destroy_cleans_subscription(self):
+        """Destroying reactive Text unsubscribes from signals."""
+        count = Signal(0, name="count")
+        text = Text(lambda: f"Count: {count()}")
+        assert text._prop_bindings is not None
+
+        initial_sub_count = _sub_count(count)
+        text.destroy()
+        assert _sub_count(count) < initial_sub_count
+
+        # Signal change after destroy should not crash
+        count.set(99)
+
+    def test_static_content_unchanged(self):
+        """Static string content still works normally."""
+        text = Text("Hello")
+        assert text._content == "Hello"
+        assert text._prop_bindings is None
+
+    def test_callable_content_none_return(self):
+        """Callable returning None produces empty string."""
+        text = Text(lambda: None)
+        assert text._content == ""
+
+    def test_callable_content_int_return(self):
+        """Callable returning non-string value is stringified."""
+        count = Signal(42, name="count")
+        text = Text(lambda: count())
+        assert text._content == "42"
+
+        count.set(99)
+        assert text._content == "99"
+
+    def test_callable_content_zero_deps(self):
+        """Callable reading no signals produces static content via _bind_reactive_prop."""
+        text = Text(lambda: "constant")
+        assert text._content == "constant"
+        # Zero-dep callable still creates a binding (ComputedSignal wrapper)
+        assert text._prop_bindings is not None
+
+    def test_callable_content_batch_single_update(self):
+        """Batch defers reactive Text updates — content is consistent after batch."""
+        from opentui.signals import Batch
+
+        a = Signal(1, name="a")
+        b = Signal(2, name="b")
+        eval_count = 0
+
+        def content_fn():
+            nonlocal eval_count
+            eval_count += 1
+            return f"{a()} + {b()}"
+
+        text = Text(content_fn)
+        assert text._content == "1 + 2"
+        eval_count = 0  # Reset after init
+
+        with Batch():
+            a.set(10)
+            b.set(20)
+            # During batch, subscribers are deferred
+            assert text._content == "1 + 2"
+
+        # After batch exit, content reflects final values
+        assert text._content == "10 + 20"
+
+    def test_callable_content_exception_in_update(self):
+        """Exception in callable during reactive update resets reentrancy guard.
+
+        With _bind_reactive_prop, the callable is wrapped in a ComputedSignal.
+        When the callable raises, the exception propagates through the signal
+        subscriber chain. The ComputedSignal's _computing guard is reset in
+        its finally block, and the old value is preserved (set() never called).
+        """
+        count = Signal(0, name="count")
+        should_fail = Signal(False, name="fail")
+
+        def content_fn():
+            if should_fail():
+                raise ValueError("boom")
+            return f"Count: {count()}"
+
+        text = Text(content_fn)
+        assert text._content == "Count: 0"
+
+        # Trigger exception — propagates through signal subscriber
+        try:
+            should_fail.set(True)
+        except ValueError:
+            pass  # Exception propagates out of signal.set()
+
+        # After fixing the callable, updates should resume
+        try:
+            should_fail.set(False)
+        except Exception:
+            pass
+        # The content should be restored since the callable no longer raises
+        # A new signal change triggers the ComputedSignal to re-evaluate
+        count.set(1)
+        assert text._content == "Count: 1"
+
+    def test_callable_content_diff_tracking_efficiency(self):
+        """Reactive text with multiple deps updates correctly."""
+        a = Signal(1, name="a")
+        b = Signal(2, name="b")
+        text = Text(lambda: f"{a()} + {b()}")
+        assert text._prop_bindings is not None
+
+        # Trigger update — same deps, content updates correctly
+        a.set(5)
+        assert text._content == "5 + 2"
+
+        b.set(10)
+        assert text._content == "5 + 10"
+
+
+class TestReactiveTextReconciler:
+    """Reconciler correctly handles reactive Text."""
+
+    def test_text_reconcile_no_leak(self):
+        """Reconciling reactive Text cleans up new node's subscription."""
+        count = Signal(0, name="count")
+
+        old_text = Text(lambda: f"Count: {count()}", key="counter")
+        parent = BaseRenderable()
+        parent._children = [old_text]
+        old_text._parent = parent
+
+        initial_sub_count = _sub_count(count)
+
+        # Simulate rebuild: new Text subscribes in __init__
+        new_text = Text(lambda: f"Count: {count()}", key="counter")
+        assert _sub_count(count) == initial_sub_count + 1  # Leaked if not cleaned
+
+        # Reconcile — should clean up new_text's subscription
+        reconcile(parent, [old_text], [new_text])
+
+        assert _sub_count(count) == initial_sub_count  # No leak
+        assert parent._children[0] is old_text  # Old preserved
+
+    def test_text_no_accumulating_subscribers(self):
+        """Multiple reconciliations don't accumulate subscribers."""
+        count = Signal(0, name="count")
+
+        parent = BaseRenderable()
+        old_text = Text(lambda: f"Count: {count()}", key="counter")
+        parent._children = [old_text]
+        old_text._parent = parent
+
+        initial_sub_count = _sub_count(count)
+
+        # Simulate 10 rebuilds
+        for _ in range(10):
+            new_text = Text(lambda: f"Count: {count()}", key="counter")
+            reconcile(parent, list(parent._children), [new_text])
+
+        assert _sub_count(count) == initial_sub_count
+
+    def test_text_reactive_after_reconcile(self):
+        """Old reactive Text still updates after reconciliation."""
+        count = Signal(0, name="count")
+
+        old_text = Text(lambda: f"Count: {count()}", key="counter")
+        parent = BaseRenderable()
+        parent._children = [old_text]
+        old_text._parent = parent
+
+        new_text = Text(lambda: f"Count: {count()}", key="counter")
+        reconcile(parent, [old_text], [new_text])
+
+        # Old text still reactive
+        count.set(42)
+        assert old_text._content == "Count: 42"
+
+    def test_text_callable_patched_on_reconcile(self):
+        """Reconciler patches _content_source from new to old."""
+        count = Signal(0, name="count")
+
+        old_text = Text(lambda: f"v1: {count()}", key="counter")
+        parent = BaseRenderable()
+        parent._children = [old_text]
+        old_text._parent = parent
+
+        # New Text has a different callable
+        new_text = Text(lambda: f"v2: {count()}", key="counter")
+        reconcile(parent, [old_text], [new_text])
+
+        # After reconcile, old_text has new callable
+        count.set(5)
+        assert old_text._content == "v2: 5"
+
+
+class TestReactiveTextRebuildSkip:
+    """Reactive Text updates without full tree rebuilds."""
+
+    async def test_reactive_text_updates(self):
+        """Signal read only in Text callable updates reactively."""
+        count = Signal(0, name="count")
+
+        def component():
+            return Box(
+                Text(lambda: f"Count: {count()}", key="counter"),
+            )
+
+        setup = await _test_render(component, {"width": 40, "height": 10})
+
+        count.set(1)
+        setup.render_frame()
+
+        frame = setup.capture_char_frame()
+        assert "Count: 1" in frame
+
+        count.set(42)
+        setup.render_frame()
+
+        frame = setup.capture_char_frame()
+        assert "Count: 42" in frame
+
+        setup.destroy()
+
+    async def test_reactive_text_renders_initial_value(self):
+        """Reactive Text renders correct initial content."""
+        count = Signal(7, name="count")
+
+        def component():
+            return Box(
+                Text(lambda: f"Value: {count()}", key="display"),
+            )
+
+        setup = await _test_render(component, {"width": 40, "height": 10})
+        frame = setup.capture_char_frame()
+        assert "Value: 7" in frame
+        setup.destroy()
+
+    async def test_mixed_reactive_text_and_show(self):
+        """Reactive Text and Show both update reactively."""
+        count = Signal(0, name="count")
+        visible = Signal(True, name="visible")
+
+        def component():
+            return Box(
+                Text(lambda: f"Count: {count()}", key="counter"),
+                Show(
+                    when=lambda: visible(),
+                    render=lambda: Text("Shown"),
+                    fallback=lambda: Text("Hidden"),
+                    key="show",
+                ),
+            )
+
+        setup = await _test_render(component, {"width": 40, "height": 10})
+
+        count.set(5)
+        setup.render_frame()
+        frame = setup.capture_char_frame()
+        assert "Count: 5" in frame
+
+        visible.set(False)
+        setup.render_frame()
+        frame = setup.capture_char_frame()
+        assert "Hidden" in frame
+
         setup.destroy()

@@ -5,22 +5,15 @@ Tests ported: 4/4 (0 skipped)
 """
 
 from opentui import test_render as _test_render
-from opentui.components.box import Box, ScrollBox
+from opentui.components.box import Box, ScrollBox, ScrollContent
+from opentui.components.control_flow import For
 from opentui.components.text import Text
 from opentui.signals import Signal
 
 
-def _rebuild(setup, component_fn):
-    """Rebuild the component tree from a factory function.
-
-    Clears the root's children and yoga nodes, then adds the new component.
-    This is the Python equivalent of SolidJS reactive re-rendering.
-    """
-    root = setup.renderer.root
-    root._children.clear()
-    root._yoga_node.remove_all_children()
-    component = component_fn()
-    root.add(component)
+async def _strict_render(component_fn, options):
+    merged = dict(options)
+    return await _test_render(component_fn, merged)
 
 
 class TestScrollBoxStickyScrollBehavior:
@@ -29,18 +22,25 @@ class TestScrollBoxStickyScrollBehavior:
     async def test_sticky_scroll_bottom_stays_at_bottom_after_scroll_by_scroll_to(self):
         """Maps to it("sticky scroll bottom stays at bottom after scrollBy/scrollTo is called (setter-based)")."""
 
-        items = Signal("items", ["Line 0"])
+        items = Signal(["Line 0"], name="items")
 
         def build():
             return ScrollBox(
-                *[Box(Text(item)) for item in items()],
+                content=ScrollContent(
+                    For(
+                        each=items,
+                        render=lambda item: Box(Text(item), key=f"line-{item}"),
+                        key_fn=lambda item: f"line-{item}",
+                        key="items",
+                    )
+                ),
                 width=40,
                 height=10,
                 sticky_scroll=True,
                 sticky_start="bottom",
             )
 
-        setup = await _test_render(build, {"width": 80, "height": 24})
+        setup = await _strict_render(build, {"width": 80, "height": 24})
         setup.render_frame()
 
         # Get the ScrollBox renderable
@@ -57,7 +57,6 @@ class TestScrollBoxStickyScrollBehavior:
         # Now gradually add content
         for i in range(1, 30):
             items.set(items() + [f"Line {i}"])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scroll_ref = setup.renderer.root.get_children()[0]
@@ -76,24 +75,30 @@ class TestScrollBoxStickyScrollBehavior:
     async def test_sticky_scroll_can_still_scroll_up_and_down_after_scroll_by_scroll_to(self):
         """Maps to it("sticky scroll can still scroll up and down after scrollBy/scrollTo (setter-based)")."""
 
-        items = Signal("items", [])
+        items = Signal([], name="items")
 
         def build():
             return ScrollBox(
-                *[Box(Text(item)) for item in items()],
+                content=ScrollContent(
+                    For(
+                        each=items,
+                        render=lambda item: Box(Text(item), key=f"line-{item}"),
+                        key_fn=lambda item: f"line-{item}",
+                        key="items",
+                    )
+                ),
                 width=40,
                 height=10,
                 sticky_scroll=True,
                 sticky_start="bottom",
             )
 
-        setup = await _test_render(build, {"width": 80, "height": 24})
+        setup = await _strict_render(build, {"width": 80, "height": 24})
         setup.render_frame()
 
         # Add enough content to overflow
         new_items = [f"Line {i}" for i in range(50)]
         items.set(new_items)
-        _rebuild(setup, build)
         setup.render_frame()
 
         scroll_ref = setup.renderer.root.get_children()[0]
@@ -124,18 +129,25 @@ class TestScrollBoxStickyScrollBehavior:
     async def test_accidental_scroll_when_no_scrollable_content_does_not_disable_sticky(self):
         """Maps to it("accidental scroll when no scrollable content does not disable sticky")."""
 
-        items = Signal("items", [])
+        items = Signal([], name="items")
 
         def build():
             return ScrollBox(
-                *[Box(Text(item)) for item in items()],
+                content=ScrollContent(
+                    For(
+                        each=items,
+                        render=lambda item: Box(Text(item), key=f"line-{item}"),
+                        key_fn=lambda item: f"line-{item}",
+                        key="items",
+                    )
+                ),
                 width=40,
                 height=10,
                 sticky_scroll=True,
                 sticky_start="bottom",
             )
 
-        setup = await _test_render(build, {"width": 80, "height": 24})
+        setup = await _strict_render(build, {"width": 80, "height": 24})
         setup.render_frame()
 
         scroll_ref = setup.renderer.root.get_children()[0]
@@ -159,7 +171,6 @@ class TestScrollBoxStickyScrollBehavior:
         # Now add content to make it scrollable
         for i in range(30):
             items.set(items() + [f"Line {i}"])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scroll_ref = setup.renderer.root.get_children()[0]
@@ -179,11 +190,18 @@ class TestScrollBoxStickyScrollBehavior:
     async def test_sticky_scroll_with_sticky_start_set_via_setter(self):
         """Maps to it("sticky scroll with stickyStart set via setter (not constructor)")."""
 
-        items = Signal("items", ["Line 0"])
+        items = Signal(["Line 0"], name="items")
 
         def build():
             sb = ScrollBox(
-                *[Box(Text(item)) for item in items()],
+                content=ScrollContent(
+                    For(
+                        each=items,
+                        render=lambda item: Box(Text(item), key=f"line-{item}"),
+                        key_fn=lambda item: f"line-{item}",
+                        key="items",
+                    ),
+                ),
                 width=40,
                 height=10,
             )
@@ -193,7 +211,7 @@ class TestScrollBoxStickyScrollBehavior:
             sb._sticky_start = "bottom"
             return sb
 
-        setup = await _test_render(build, {"width": 80, "height": 24})
+        setup = await _strict_render(build, {"width": 80, "height": 24})
         setup.render_frame()
 
         scroll_ref = setup.renderer.root.get_children()[0]
@@ -203,7 +221,6 @@ class TestScrollBoxStickyScrollBehavior:
         # Add content
         for i in range(1, 30):
             items.set(items() + [f"Line {i}"])
-            _rebuild(setup, build)
             setup.render_frame()
 
             scroll_ref = setup.renderer.root.get_children()[0]

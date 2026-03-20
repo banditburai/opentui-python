@@ -1,8 +1,4 @@
-"""Yoga layout wrapper for OpenTUI Python.
-
-This module wraps yoga-python to provide flexbox layout for terminal UIs.
-Uses character-based units (not pixels) to match terminal grid.
-"""
+"""Yoga layout wrapper for OpenTUI — flexbox in character-cell units."""
 
 from __future__ import annotations
 
@@ -11,23 +7,19 @@ from typing import Any
 
 import yoga
 
-# Global yoga config - created once and reused.
-# Typed as Any because yoga-python (nanobind C++ extension) has incomplete stubs.
 _config: Any = None
 
 
 def _get_config() -> Any:
-    """Get or create the global yoga config."""
     global _config
     if _config is None:
         _config = yoga.Config()
         _config.use_web_defaults = False
-        _config.point_scale_factor = 1.0  # 1 yoga unit = 1 character
+        _config.point_scale_factor = 1.0
     return _config
 
 
 def create_node() -> yoga.Node:
-    """Create a new yoga node with the global config."""
     return yoga.Node(_get_config())
 
 
@@ -56,7 +48,6 @@ ALIGN_MAP = {
     "auto": yoga.Align.Auto,
 }
 
-# Edge constants for padding/margin
 EDGE_MAP = {
     "top": yoga.Edge.Top,
     "right": yoga.Edge.Right,
@@ -87,67 +78,30 @@ POSITION_TYPE_MAP = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Yoga option parsers
-# ---------------------------------------------------------------------------
+_ALIGN_MAP = {
+    "auto": yoga.Align.Auto,
+    "flex-start": yoga.Align.FlexStart,
+    "center": yoga.Align.Center,
+    "flex-end": yoga.Align.FlexEnd,
+    "stretch": yoga.Align.Stretch,
+    "baseline": yoga.Align.Baseline,
+    "space-between": yoga.Align.SpaceBetween,
+    "space-around": yoga.Align.SpaceAround,
+    "space-evenly": yoga.Align.SpaceEvenly,
+}
 
 
-def parse_align(value: str | None) -> yoga.Align:
-    """Parse an align string to a yoga Align enum. Default: Auto."""
+def parse_align(value: str | None, default: yoga.Align = yoga.Align.Auto) -> yoga.Align:
     if value is None:
-        return yoga.Align.Auto
-    match value.lower():
-        case "auto":
-            return yoga.Align.Auto
-        case "flex-start":
-            return yoga.Align.FlexStart
-        case "center":
-            return yoga.Align.Center
-        case "flex-end":
-            return yoga.Align.FlexEnd
-        case "stretch":
-            return yoga.Align.Stretch
-        case "baseline":
-            return yoga.Align.Baseline
-        case "space-between":
-            return yoga.Align.SpaceBetween
-        case "space-around":
-            return yoga.Align.SpaceAround
-        case "space-evenly":
-            return yoga.Align.SpaceEvenly
-        case _:
-            return yoga.Align.Auto
+        return default
+    return _ALIGN_MAP.get(value.lower(), default)
 
 
 def parse_align_items(value: str | None) -> yoga.Align:
-    """Parse an align-items string to a yoga Align enum. Default: Stretch."""
-    if value is None:
-        return yoga.Align.Stretch
-    match value.lower():
-        case "auto":
-            return yoga.Align.Auto
-        case "flex-start":
-            return yoga.Align.FlexStart
-        case "center":
-            return yoga.Align.Center
-        case "flex-end":
-            return yoga.Align.FlexEnd
-        case "stretch":
-            return yoga.Align.Stretch
-        case "baseline":
-            return yoga.Align.Baseline
-        case "space-between":
-            return yoga.Align.SpaceBetween
-        case "space-around":
-            return yoga.Align.SpaceAround
-        case "space-evenly":
-            return yoga.Align.SpaceEvenly
-        case _:
-            return yoga.Align.Stretch
+    return parse_align(value, yoga.Align.Stretch)
 
 
 def parse_box_sizing(value: str | None) -> yoga.BoxSizing:
-    """Parse a box-sizing string. Default: BorderBox."""
     if value is None:
         return yoga.BoxSizing.BorderBox
     match value.lower():
@@ -160,7 +114,6 @@ def parse_box_sizing(value: str | None) -> yoga.BoxSizing:
 
 
 def parse_dimension(value: str | None) -> yoga.Dimension:
-    """Parse a dimension string ('width'/'height'). Default: Width."""
     if value is None:
         return yoga.Dimension.Width
     match value.lower():
@@ -173,7 +126,6 @@ def parse_dimension(value: str | None) -> yoga.Dimension:
 
 
 def parse_direction(value: str | None) -> yoga.Direction:
-    """Parse a direction string. Default: LTR."""
     if value is None:
         return yoga.Direction.LTR
     match value.lower():
@@ -188,7 +140,6 @@ def parse_direction(value: str | None) -> yoga.Direction:
 
 
 def parse_display(value: str | None) -> yoga.Display:
-    """Parse a display string. Default: Flex."""
     if value is None:
         return yoga.Display.Flex
     match value.lower():
@@ -203,7 +154,6 @@ def parse_display(value: str | None) -> yoga.Display:
 
 
 def parse_edge(value: str | None) -> yoga.Edge:
-    """Parse an edge string. Default: All."""
     if value is None:
         return yoga.Edge.All
     match value.lower():
@@ -230,7 +180,6 @@ def parse_edge(value: str | None) -> yoga.Edge:
 
 
 def parse_flex_direction(value: str | None) -> yoga.FlexDirection:
-    """Parse a flex-direction string. Default: Column."""
     if value is None:
         return yoga.FlexDirection.Column
     match value.lower():
@@ -247,7 +196,6 @@ def parse_flex_direction(value: str | None) -> yoga.FlexDirection:
 
 
 def parse_gutter(value: str | None) -> yoga.Gutter:
-    """Parse a gutter string. Default: All."""
     if value is None:
         return yoga.Gutter.All
     match value.lower():
@@ -262,7 +210,6 @@ def parse_gutter(value: str | None) -> yoga.Gutter:
 
 
 def parse_justify(value: str | None) -> yoga.Justify:
-    """Parse a justify string. Default: FlexStart."""
     if value is None:
         return yoga.Justify.FlexStart
     match value.lower():
@@ -283,7 +230,6 @@ def parse_justify(value: str | None) -> yoga.Justify:
 
 
 def parse_log_level(value: str | None) -> yoga.LogLevel:
-    """Parse a log level string. Default: Info."""
     if value is None:
         return yoga.LogLevel.Info
     match value.lower():
@@ -304,7 +250,6 @@ def parse_log_level(value: str | None) -> yoga.LogLevel:
 
 
 def parse_measure_mode(value: str | None) -> yoga.MeasureMode:
-    """Parse a measure mode string. Default: Undefined."""
     if value is None:
         return yoga.MeasureMode.Undefined
     match value.lower():
@@ -319,7 +264,6 @@ def parse_measure_mode(value: str | None) -> yoga.MeasureMode:
 
 
 def parse_overflow(value: str | None) -> yoga.Overflow:
-    """Parse an overflow string. Default: Visible."""
     if value is None:
         return yoga.Overflow.Visible
     match value.lower():
@@ -334,7 +278,6 @@ def parse_overflow(value: str | None) -> yoga.Overflow:
 
 
 def parse_position_type(value: str | None) -> yoga.PositionType:
-    """Parse a position type string. Default for None: Relative, for invalid: Static."""
     if value is None:
         return yoga.PositionType.Relative
     match value.lower():
@@ -349,7 +292,6 @@ def parse_position_type(value: str | None) -> yoga.PositionType:
 
 
 def parse_unit(value: str | None) -> yoga.Unit:
-    """Parse a unit string. Default: Point."""
     if value is None:
         return yoga.Unit.Point
     match value.lower():
@@ -366,7 +308,6 @@ def parse_unit(value: str | None) -> yoga.Unit:
 
 
 def parse_wrap(value: str | None) -> yoga.Wrap:
-    """Parse a wrap string. Default: NoWrap."""
     if value is None:
         return yoga.Wrap.NoWrap
     match value.lower():
@@ -380,17 +321,7 @@ def parse_wrap(value: str | None) -> yoga.Wrap:
             return yoga.Wrap.NoWrap
 
 
-# ---------------------------------------------------------------------------
-# Layout dimension parsing (internal)
-# ---------------------------------------------------------------------------
-
-
 def _parse_dimension(value: float | str | None) -> tuple[float | None, str | None]:
-    """Parse a dimension value that may be a number, percentage string, or 'auto'.
-
-    Returns:
-        Tuple of (value, type) where type is 'point', 'percent', or 'auto'.
-    """
     if value is None:
         return None, None
     if isinstance(value, str):
@@ -404,28 +335,23 @@ def _parse_dimension(value: float | str | None) -> tuple[float | None, str | Non
 def configure_node(
     node: yoga.Node,
     *,
-    # Dimensions
     width: float | str | None = None,
     height: float | str | None = None,
     min_width: float | str | None = None,
     min_height: float | str | None = None,
     max_width: float | str | None = None,
     max_height: float | str | None = None,
-    # Flex
     flex_grow: float | None = None,
     flex_shrink: float | None = None,
     flex_basis: float | str | None = None,
     flex_direction: str | None = None,
     flex_wrap: str | None = None,
-    # Alignment
     justify_content: str | None = None,
     align_items: str | None = None,
     align_self: str | None = None,
-    # Gap
     gap: float | None = None,
     row_gap: float | None = None,
     column_gap: float | None = None,
-    # Spacing
     padding: float | None = None,
     padding_top: float | None = None,
     padding_right: float | None = None,
@@ -436,23 +362,17 @@ def configure_node(
     margin_right: float | None = None,
     margin_bottom: float | None = None,
     margin_left: float | None = None,
-    # Display
     display: str | None = None,
     position_type: str | None = None,
-    # Overflow
     overflow: str | None = None,
-    # Position edges
     top: float | str | None = None,
     right: float | str | None = None,
     bottom: float | str | None = None,
     left: float | str | None = None,
 ) -> None:
-    """Configure a yoga node with layout properties."""
+    # When None, reset to auto to avoid stale values from a previous
+    # frame persisting and overriding flex layout.
 
-    # Dimensions (support percentage and auto).
-    # When None, explicitly reset to auto so stale values from a previous
-    # frame (written by _apply_yoga_layout → _configure_yoga_node feedback
-    # loop) don't persist and override flex layout.
     if width is not None:
         val, kind = _parse_dimension(width)
         if kind == "percent" and val is not None:
@@ -498,7 +418,6 @@ def configure_node(
         elif val is not None:
             node.max_height = val
 
-    # Flex
     if flex_grow is not None:
         node.flex_grow = flex_grow
     if flex_shrink is not None:
@@ -516,7 +435,6 @@ def configure_node(
     if flex_wrap is not None:
         node.flex_wrap = WRAP_MAP.get(flex_wrap, yoga.Wrap.NoWrap)
 
-    # Alignment
     if justify_content is not None:
         node.justify_content = JUSTIFY_MAP.get(justify_content, yoga.Justify.FlexStart)
     if align_items is not None:
@@ -524,7 +442,6 @@ def configure_node(
     if align_self is not None:
         node.align_self = ALIGN_MAP.get(align_self, yoga.Align.Auto)
 
-    # Gap
     if gap is not None:
         node.set_gap(yoga.Gutter.All, gap)
     if row_gap is not None:
@@ -532,7 +449,6 @@ def configure_node(
     if column_gap is not None:
         node.set_gap(yoga.Gutter.Column, column_gap)
 
-    # Padding
     if padding is not None:
         node.set_padding(yoga.Edge.All, padding)
     if padding_top is not None:
@@ -544,7 +460,6 @@ def configure_node(
     if padding_left is not None:
         node.set_padding(yoga.Edge.Left, padding_left)
 
-    # Margin
     if margin is not None:
         node.set_margin(yoga.Edge.All, margin)
     if margin_top is not None:
@@ -556,17 +471,14 @@ def configure_node(
     if margin_left is not None:
         node.set_margin(yoga.Edge.Left, margin_left)
 
-    # Display
     if display is not None:
         node.display = yoga.Display.Flex if display == "flex" else yoga.Display.None_
     if position_type is not None:
         node.position_type = POSITION_TYPE_MAP.get(position_type, yoga.PositionType.Relative)
 
-    # Overflow
     if overflow is not None:
         node.overflow = OVERFLOW_MAP.get(overflow, yoga.Overflow.Visible)
 
-    # Position edges (for absolute positioning)
     if top is not None:
         val, kind = _parse_dimension(top)
         if kind == "percent" and val is not None:
@@ -594,36 +506,7 @@ def configure_node(
 
 
 def compute_layout(root_node: yoga.Node, width: float, height: float) -> None:
-    """Compute layout for the yoga tree.
-
-    Args:
-        root_node: The root yoga node
-        width: Available width (in character cells)
-        height: Available height (in character cells)
-    """
     root_node.calculate_layout(width, height, yoga.Direction.LTR)
-
-
-def get_layout(node: yoga.Node) -> dict[str, float]:
-    """Get computed layout from a yoga node.
-
-    Returns:
-        Dict with x, y, width, height, and margin values
-    """
-    return {
-        "x": node.layout_left,
-        "y": node.layout_top,
-        "width": node.layout_width,
-        "height": node.layout_height,
-        "margin_top": node.layout_margin(yoga.Edge.Top),
-        "margin_right": node.layout_margin(yoga.Edge.Right),
-        "margin_bottom": node.layout_margin(yoga.Edge.Bottom),
-        "margin_left": node.layout_margin(yoga.Edge.Left),
-        "padding_top": node.layout_padding(yoga.Edge.Top),
-        "padding_right": node.layout_padding(yoga.Edge.Right),
-        "padding_bottom": node.layout_padding(yoga.Edge.Bottom),
-        "padding_left": node.layout_padding(yoga.Edge.Left),
-    }
 
 
 class ViewportBounds:
@@ -677,7 +560,7 @@ def get_objects_in_viewport(
     if viewport.width <= 0 or viewport.height <= 0:
         return []
 
-    if len(objects) == 0:
+    if not objects:
         return []
 
     if len(objects) < min_trigger_size:
@@ -770,13 +653,11 @@ def get_objects_in_viewport(
     return visible
 
 
-# ---------------------------------------------------------------------------
-# set_yoga_prop — Renderable property setters for yoga nodes
-# ---------------------------------------------------------------------------
+def _is_finite_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not (isinstance(value, float) and math.isnan(value))
 
 
 def _is_valid_percentage(value: Any) -> bool:
-    """Check if value is a valid percentage string like "50%"."""
     if isinstance(value, str) and value.endswith("%"):
         try:
             float(value[:-1])
@@ -787,46 +668,23 @@ def _is_valid_percentage(value: Any) -> bool:
 
 
 def _is_padding_type(value: Any) -> bool:
-    """Check if value is a valid padding type (number or percentage)."""
-    if isinstance(value, int | float):
-        return not (isinstance(value, float) and math.isnan(value))
-    return _is_valid_percentage(value)
+    return _is_finite_number(value) or _is_valid_percentage(value)
 
 
 def _is_margin_type(value: Any) -> bool:
-    """Check if value is a valid margin type (number, "auto", or percentage)."""
-    if isinstance(value, int | float):
-        return not (isinstance(value, float) and math.isnan(value))
-    if value == "auto":
-        return True
-    return _is_valid_percentage(value)
+    return _is_finite_number(value) or value == "auto" or _is_valid_percentage(value)
 
 
 def _is_size_type(value: Any) -> bool:
-    """Check if value is a valid size type (number, percentage, or None/undefined)."""
-    if value is None:
-        return True
-    if isinstance(value, int | float):
-        return not (isinstance(value, float) and math.isnan(value))
-    return _is_valid_percentage(value)
+    return value is None or _is_finite_number(value) or _is_valid_percentage(value)
 
 
 def _is_dimension_type(value: Any) -> bool:
-    """Check if value is a valid dimension type (number, "auto", or percentage)."""
-    if isinstance(value, int | float):
-        return not (isinstance(value, float) and math.isnan(value))
-    if value == "auto":
-        return True
-    return _is_valid_percentage(value)
+    return _is_finite_number(value) or value == "auto" or _is_valid_percentage(value)
 
 
 def _is_flex_basis_type(value: Any) -> bool:
-    """Check if value is a valid flex basis type (number, "auto", or None/undefined)."""
-    if value is None or value == "auto":
-        return True
-    if isinstance(value, int | float):
-        return not (isinstance(value, float) and math.isnan(value))
-    return False
+    return value is None or value == "auto" or _is_finite_number(value)
 
 
 def _set_dimension_prop(
@@ -873,19 +731,34 @@ def _set_edge_prop(
     set_fn(edge, float(value))
 
 
+_MARGIN_EDGES: dict[str, Any] = {
+    "margin": yoga.Edge.All,
+    "marginX": yoga.Edge.Horizontal,
+    "marginY": yoga.Edge.Vertical,
+    "marginTop": yoga.Edge.Top,
+    "marginRight": yoga.Edge.Right,
+    "marginBottom": yoga.Edge.Bottom,
+    "marginLeft": yoga.Edge.Left,
+}
+
+_PADDING_EDGES: dict[str, Any] = {
+    "padding": yoga.Edge.All,
+    "paddingX": yoga.Edge.Horizontal,
+    "paddingY": yoga.Edge.Vertical,
+    "paddingTop": yoga.Edge.Top,
+    "paddingRight": yoga.Edge.Right,
+    "paddingBottom": yoga.Edge.Bottom,
+    "paddingLeft": yoga.Edge.Left,
+}
+
+_GAP_GUTTERS: dict[str, Any] = {
+    "gap": yoga.Gutter.All,
+    "rowGap": yoga.Gutter.Row,
+    "columnGap": yoga.Gutter.Column,
+}
+
+
 def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
-    """Set a yoga property on a node by name.
-
-    Accepts a yoga Node, a property name string (camelCase), and a value.
-    Uses the parse_* functions for enum conversion and handles None/undefined
-    by applying sensible defaults matching OpenTUI core behavior.
-
-    Args:
-        node: A yoga.Node instance
-        prop_name: Property name in camelCase (e.g. "flexGrow", "width", "paddingTop")
-        value: The value to set; None means reset to default
-    """
-    # --- Flex numeric properties ---
     if prop_name == "flexGrow":
         if value is None:
             node.flex_grow = 0
@@ -900,7 +773,6 @@ def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
             node.flex_shrink = float(value)
         return
 
-    # --- Flex enum properties ---
     if prop_name == "flexDirection":
         node.flex_direction = parse_flex_direction(value)
         return
@@ -937,7 +809,6 @@ def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
         node.display = parse_display(value)
         return
 
-    # --- Flex basis ---
     if prop_name == "flexBasis":
         if value is None or value == "auto":
             # Reset to undefined (yoga-python has no set_flex_basis_auto)
@@ -947,7 +818,6 @@ def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
             node.flex_basis = float(value)
         return
 
-    # --- Dimension properties (width, height) ---
     if prop_name == "width":
         if value is None:
             node.set_width_auto()
@@ -976,7 +846,6 @@ def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
             )
         return
 
-    # --- Min/max dimension properties ---
     if prop_name == "minWidth":
         if _is_size_type(value):
             if value is None:
@@ -1021,15 +890,14 @@ def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
                 node.max_height = float(value)
         return
 
-    # --- Margin properties ---
-    if prop_name == "margin":
+    edge = _MARGIN_EDGES.get(prop_name)
+    if edge is not None:
         if value is None:
-            node.set_margin(yoga.Edge.All, 0)
-            return
-        if _is_margin_type(value):
+            node.set_margin(edge, 0)
+        elif _is_margin_type(value):
             _set_edge_prop(
                 node,
-                yoga.Edge.All,
+                edge,
                 value,
                 set_fn=node.set_margin,
                 set_percent_fn=node.set_margin_percent,
@@ -1037,223 +905,26 @@ def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
             )
         return
 
-    if prop_name == "marginX":
+    edge = _PADDING_EDGES.get(prop_name)
+    if edge is not None:
         if value is None:
-            node.set_margin(yoga.Edge.Horizontal, 0)
-            return
-        if _is_margin_type(value):
+            node.set_padding(edge, 0)
+        elif _is_padding_type(value):
             _set_edge_prop(
                 node,
-                yoga.Edge.Horizontal,
-                value,
-                set_fn=node.set_margin,
-                set_percent_fn=node.set_margin_percent,
-                set_auto_fn=node.set_margin_auto,
-            )
-        return
-
-    if prop_name == "marginY":
-        if value is None:
-            node.set_margin(yoga.Edge.Vertical, 0)
-            return
-        if _is_margin_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Vertical,
-                value,
-                set_fn=node.set_margin,
-                set_percent_fn=node.set_margin_percent,
-                set_auto_fn=node.set_margin_auto,
-            )
-        return
-
-    if prop_name == "marginTop":
-        if value is None:
-            node.set_margin(yoga.Edge.Top, 0)
-            return
-        if _is_margin_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Top,
-                value,
-                set_fn=node.set_margin,
-                set_percent_fn=node.set_margin_percent,
-                set_auto_fn=node.set_margin_auto,
-            )
-        return
-
-    if prop_name == "marginRight":
-        if value is None:
-            node.set_margin(yoga.Edge.Right, 0)
-            return
-        if _is_margin_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Right,
-                value,
-                set_fn=node.set_margin,
-                set_percent_fn=node.set_margin_percent,
-                set_auto_fn=node.set_margin_auto,
-            )
-        return
-
-    if prop_name == "marginBottom":
-        if value is None:
-            node.set_margin(yoga.Edge.Bottom, 0)
-            return
-        if _is_margin_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Bottom,
-                value,
-                set_fn=node.set_margin,
-                set_percent_fn=node.set_margin_percent,
-                set_auto_fn=node.set_margin_auto,
-            )
-        return
-
-    if prop_name == "marginLeft":
-        if value is None:
-            node.set_margin(yoga.Edge.Left, 0)
-            return
-        if _is_margin_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Left,
-                value,
-                set_fn=node.set_margin,
-                set_percent_fn=node.set_margin_percent,
-                set_auto_fn=node.set_margin_auto,
-            )
-        return
-
-    # --- Padding properties ---
-    if prop_name == "padding":
-        if value is None:
-            node.set_padding(yoga.Edge.All, 0)
-            return
-        if _is_padding_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.All,
+                edge,
                 value,
                 set_fn=node.set_padding,
                 set_percent_fn=node.set_padding_percent,
             )
         return
 
-    if prop_name == "paddingX":
-        if value is None:
-            node.set_padding(yoga.Edge.Horizontal, 0)
-            return
-        if _is_padding_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Horizontal,
-                value,
-                set_fn=node.set_padding,
-                set_percent_fn=node.set_padding_percent,
-            )
-        return
-
-    if prop_name == "paddingY":
-        if value is None:
-            node.set_padding(yoga.Edge.Vertical, 0)
-            return
-        if _is_padding_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Vertical,
-                value,
-                set_fn=node.set_padding,
-                set_percent_fn=node.set_padding_percent,
-            )
-        return
-
-    if prop_name == "paddingTop":
-        if value is None:
-            node.set_padding(yoga.Edge.Top, 0)
-            return
-        if _is_padding_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Top,
-                value,
-                set_fn=node.set_padding,
-                set_percent_fn=node.set_padding_percent,
-            )
-        return
-
-    if prop_name == "paddingRight":
-        if value is None:
-            node.set_padding(yoga.Edge.Right, 0)
-            return
-        if _is_padding_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Right,
-                value,
-                set_fn=node.set_padding,
-                set_percent_fn=node.set_padding_percent,
-            )
-        return
-
-    if prop_name == "paddingBottom":
-        if value is None:
-            node.set_padding(yoga.Edge.Bottom, 0)
-            return
-        if _is_padding_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Bottom,
-                value,
-                set_fn=node.set_padding,
-                set_percent_fn=node.set_padding_percent,
-            )
-        return
-
-    if prop_name == "paddingLeft":
-        if value is None:
-            node.set_padding(yoga.Edge.Left, 0)
-            return
-        if _is_padding_type(value):
-            _set_edge_prop(
-                node,
-                yoga.Edge.Left,
-                value,
-                set_fn=node.set_padding,
-                set_percent_fn=node.set_padding_percent,
-            )
-        return
-
-    # --- Gap properties ---
-    if prop_name == "gap":
-        if value is None:
-            node.set_gap(yoga.Gutter.All, 0)
-        else:
-            node.set_gap(yoga.Gutter.All, float(value))
-        return
-
-    if prop_name == "rowGap":
-        if value is None:
-            node.set_gap(yoga.Gutter.Row, 0)
-        else:
-            node.set_gap(yoga.Gutter.Row, float(value))
-        return
-
-    if prop_name == "columnGap":
-        if value is None:
-            node.set_gap(yoga.Gutter.Column, 0)
-        else:
-            node.set_gap(yoga.Gutter.Column, float(value))
+    gutter = _GAP_GUTTERS.get(prop_name)
+    if gutter is not None:
+        node.set_gap(gutter, 0 if value is None else float(value))
         return
 
 
-# ---------------------------------------------------------------------------
-# Public validation functions for renderable options
-# ---------------------------------------------------------------------------
-
-# Public aliases for the private helpers
 is_valid_percentage = _is_valid_percentage
 is_padding_type = _is_padding_type
 is_margin_type = _is_margin_type
@@ -1263,12 +934,7 @@ is_flex_basis_type = _is_flex_basis_type
 
 
 def is_position_type(value: Any) -> bool:
-    """Check if value is a valid position type (number, "auto", or percentage)."""
-    if isinstance(value, int | float):
-        return not (isinstance(value, float) and math.isnan(value))
-    if value == "auto":
-        return True
-    return _is_valid_percentage(value)
+    return _is_finite_number(value) or value == "auto" or _is_valid_percentage(value)
 
 
 def is_position_type_value(value: Any) -> bool:
@@ -1284,21 +950,20 @@ def is_overflow_type(value: Any) -> bool:
 def validate_options(name: str, options: dict[str, Any]) -> None:
     """Validate renderable options.
 
-    Raises TypeError for invalid width/height values.
+    Raises ValueError for negative width/height values.
     """
     width = options.get("width")
     height = options.get("height")
     if isinstance(width, int | float) and width < 0:
-        raise TypeError(f"{name}: width must be non-negative, got {width}")
+        raise ValueError(f"{name}: width must be non-negative, got {width}")
     if isinstance(height, int | float) and height < 0:
-        raise TypeError(f"{name}: height must be non-negative, got {height}")
+        raise ValueError(f"{name}: height must be non-negative, got {height}")
 
 
 __all__ = [
     "create_node",
     "configure_node",
     "compute_layout",
-    "get_layout",
     "set_yoga_prop",
     "ViewportBounds",
     "ViewportObject",

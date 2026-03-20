@@ -1,9 +1,4 @@
-"""DiffRenderable - unified and split-view diff display.
-
-Side-by-side and unified diff viewer component.
-Renders unified diff format with line numbers, signs (+/-), and custom colors.
-Supports both unified (single column) and split (side-by-side) view modes.
-"""
+"""DiffRenderable - unified and split-view diff display."""
 
 from __future__ import annotations
 
@@ -12,15 +7,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..enums import RenderStrategy
+from ..native import _nb
 from .base import Renderable
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
-
-
-# ---------------------------------------------------------------------------
-# Diff parsing (subset of unified diff patch parsing)
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -147,11 +139,6 @@ def parse_patch(text: str) -> list[StructuredPatch]:
     return patches
 
 
-# ---------------------------------------------------------------------------
-# Line sign type
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class LineSign:
     after: str = ""
@@ -164,11 +151,6 @@ class LineColorConfig:
     content: s.RGBA | None = None
 
 
-# ---------------------------------------------------------------------------
-# Logical line for split view processing
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class LogicalLine:
     content: str = ""
@@ -177,11 +159,6 @@ class LogicalLine:
     color: s.RGBA | None = None
     sign: LineSign | None = None
     line_type: str = "context"  # "context" | "add" | "remove" | "empty"
-
-
-# ---------------------------------------------------------------------------
-# DiffRenderable
-# ---------------------------------------------------------------------------
 
 
 class DiffRenderable(Renderable):
@@ -253,6 +230,11 @@ class DiffRenderable(Renderable):
         # Cached mock line number renderables
         "_mock_left_line_num",
         "_mock_right_line_num",
+        # Retained raster cache
+        "_raster_dirty",
+        "_raster_buffer",
+        "_raster_buffer_ptr",
+        "_raster_buffer_size",
     )
 
     def __init__(
@@ -355,11 +337,29 @@ class DiffRenderable(Renderable):
         # Cached mock line number renderables
         self._mock_left_line_num: _MockLineNumberRenderable | None = None
         self._mock_right_line_num: _MockLineNumberRenderable | None = None
+        self._raster_dirty = True
+        self._raster_buffer = None
+        self._raster_buffer_ptr = None
+        self._raster_buffer_size: tuple[int, int] | None = None
 
         # Parse and build view
         if self._diff_text:
             self._parse_diff()
             self._build_view()
+
+    def get_render_strategy(self) -> RenderStrategy:
+        """Diffs are heavy widgets that benefit from retained raster composition."""
+        return RenderStrategy.HEAVY_WIDGET
+
+    def mark_dirty(self) -> None:
+        if hasattr(self, "_raster_dirty"):
+            self._raster_dirty = True
+        super().mark_dirty()
+
+    def mark_paint_dirty(self) -> None:
+        if hasattr(self, "_raster_dirty"):
+            self._raster_dirty = True
+        super().mark_paint_dirty()
 
     # ── Properties ──────────────────────────────────────────────────────
 
@@ -385,8 +385,7 @@ class DiffRenderable(Renderable):
             self._flex_direction = "row" if value == "split" else "column"
             self._mock_left_line_num = None
             self._mock_right_line_num = None
-            self._build_view()
-            self.mark_dirty()
+            self._build_view()  # _build_view() already calls mark_dirty()
 
     @property
     def filetype(self) -> str | None:
@@ -406,8 +405,7 @@ class DiffRenderable(Renderable):
     def wrap_mode(self, value: str | None) -> None:
         if self._wrap_mode_str != value:
             self._wrap_mode_str = value
-            self._build_view()
-            self.mark_dirty()
+            self._build_view()  # _build_view() already calls mark_dirty()
 
     @property
     def show_line_numbers(self) -> bool:
@@ -439,7 +437,7 @@ class DiffRenderable(Renderable):
         parsed = self._parse_color(value) if value else None
         if self._diff_fg != parsed:
             self._diff_fg = parsed
-            self.mark_dirty()
+            self.mark_paint_dirty()
 
     # Diff color properties
     @property
@@ -522,21 +520,18 @@ class DiffRenderable(Renderable):
 
     @property
     def left_code_renderable(self) -> Any:
-        """Access internal left CodeRenderable (unified/split left side)."""
         if self._mock_left_code is None:
             self._mock_left_code = _MockCodeRenderable(self, "left")
         return self._mock_left_code
 
     @property
     def right_code_renderable(self) -> Any:
-        """Access internal right CodeRenderable (split view right side)."""
         if self._mock_right_code is None:
             self._mock_right_code = _MockCodeRenderable(self, "right")
         return self._mock_right_code
 
     @property
     def left_side(self) -> Any:
-        """Access internal left LineNumberRenderable (unified/split left side)."""
         if self._parsed_diff and self._parsed_diff.hunks:
             if self._mock_left_line_num is None:
                 self._mock_left_line_num = _MockLineNumberRenderable(self, "left")
@@ -545,7 +540,6 @@ class DiffRenderable(Renderable):
 
     @property
     def right_side(self) -> Any:
-        """Access internal right LineNumberRenderable (split view right side)."""
         if self._view_mode == "split" and self._parsed_diff and self._parsed_diff.hunks:
             if self._mock_right_line_num is None:
                 self._mock_right_line_num = _MockLineNumberRenderable(self, "right")
@@ -555,11 +549,12 @@ class DiffRenderable(Renderable):
     # ── Diff parsing ────────────────────────────────────────────────────
 
     def _parse_diff(self) -> None:
+        self._mock_left_line_num = None
+        self._mock_right_line_num = None
+
         if not self._diff_text:
             self._parsed_diff = None
             self._parse_error = None
-            self._mock_left_line_num = None
-            self._mock_right_line_num = None
             return
 
         try:
@@ -567,18 +562,12 @@ class DiffRenderable(Renderable):
             if not patches:
                 self._parsed_diff = None
                 self._parse_error = None
-                self._mock_left_line_num = None
-                self._mock_right_line_num = None
                 return
             self._parsed_diff = patches[0]
             self._parse_error = None
-            self._mock_left_line_num = None
-            self._mock_right_line_num = None
         except Exception as e:
             self._parsed_diff = None
             self._parse_error = e
-            self._mock_left_line_num = None
-            self._mock_right_line_num = None
 
     # ── View building ───────────────────────────────────────────────────
 
@@ -609,27 +598,20 @@ class DiffRenderable(Renderable):
         self._emit_line_info_change()
 
     def _emit_line_info_change(self) -> None:
-        """Fire 'line-info-change' on cached mock code renderables (if any)."""
         if self._mock_left_code is not None:
             self._mock_left_code.emit("line-info-change")
         if self._mock_right_code is not None:
             self._mock_right_code.emit("line-info-change")
 
     def _build_error_view(self) -> None:
-        """Build error display with error message and raw diff."""
         self._unified_lines = []
         self._unified_line_colors = {}
         self._unified_line_signs = {}
         self._unified_line_numbers = {}
 
-        # Error message line
-        error_msg = f"Error parsing diff: {self._parse_error}"
-        self._unified_lines.append(error_msg)
-        # Blank line
+        self._unified_lines.append(f"Error parsing diff: {self._parse_error}")
         self._unified_lines.append("")
-        # Raw diff content
-        for line in self._diff_text.split("\n"):
-            self._unified_lines.append(line)
+        self._unified_lines.extend(self._diff_text.split("\n"))
 
         self.mark_dirty()
 
@@ -870,7 +852,6 @@ class DiffRenderable(Renderable):
     # ── Rendering ───────────────────────────────────────────────────────
 
     def _compute_gutter_width(self, line_numbers: dict[int, int]) -> int:
-        """Compute gutter width based on max line number."""
         if not line_numbers:
             return 2  # minimum
         max_num = max(line_numbers.values())
@@ -878,14 +859,7 @@ class DiffRenderable(Renderable):
         # Format: " <num> <sign> " — num_width + 1 padding left + sign(2) + 1 space
         return num_width + 1  # just the number column width (padding added at render)
 
-    def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the diff to the buffer."""
-        if not self._visible:
-            return
-
-        if self._render_before:
-            self._render_before(buffer, delta_time, self)
-
+    def _render_diff_contents(self, buffer: Buffer) -> None:
         x = self._x + self._padding_left
         y = self._y + self._padding_top
         total_width = self._layout_width - self._padding_left - self._padding_right
@@ -911,11 +885,73 @@ class DiffRenderable(Renderable):
         else:
             self._render_split(buffer, x, y, total_width, total_height)
 
+    def render(self, buffer: Buffer, delta_time: float = 0) -> None:
+        if not self._visible:
+            return
+
+        if self._render_before:
+            self._render_before(buffer, delta_time, self)
+
+        raster = self._ensure_raster_buffer()
+        if raster is not None and self._layout_width and self._layout_height:
+            if self._raster_dirty:
+                raster.clear(0.0)
+                raster.push_offset(-self._x, -self._y)
+                try:
+                    self._render_diff_contents(raster)
+                finally:
+                    raster.pop_offset()
+                self._raster_dirty = False
+
+            try:
+                buffer._native.draw_frame_buffer(buffer._ptr, self._x, self._y, raster._ptr)
+            except Exception:
+                self._render_diff_contents(buffer)
+                self._raster_dirty = False
+        else:
+            self._render_diff_contents(buffer)
+            self._raster_dirty = False
+
         if self._render_after:
             self._render_after(buffer, delta_time, self)
 
+    def _ensure_raster_buffer(self) -> Buffer | None:
+        width = max(0, int(self._layout_width or 0))
+        height = max(0, int(self._layout_height or 0))
+        if width <= 0 or height <= 0:
+            return None
+
+        if self._raster_buffer_ptr is None:
+            ptr = _nb.buffer.create_optimized_buffer(width, height, True, 0, f"diff-{self.id}")
+            from ..renderer import Buffer as RenderBuffer
+
+            self._raster_buffer_ptr = ptr
+            self._raster_buffer = RenderBuffer(ptr, _nb.buffer, _nb.graphics)
+            self._raster_buffer_size = (width, height)
+            self._raster_dirty = True
+            return self._raster_buffer
+
+        if self._raster_buffer_size != (width, height):
+            assert self._raster_buffer is not None
+            self._raster_buffer.resize(width, height)
+            self._raster_buffer_size = (width, height)
+            self._raster_dirty = True
+
+        return self._raster_buffer
+
+    def _release_raster_buffer(self) -> None:
+        if self._raster_buffer_ptr is None:
+            return
+        try:
+            _nb.buffer.destroy_optimized_buffer(self._raster_buffer_ptr)
+        except Exception:
+            pass
+        finally:
+            self._raster_buffer = None
+            self._raster_buffer_ptr = None
+            self._raster_buffer_size = None
+
     def _render_error_view(self, buffer: Buffer, x: int, y: int, width: int, height: int) -> None:
-        """Render error view with error message and raw diff."""
         for i, line in enumerate(self._unified_lines):
             if i >= height:
                 break
@@ -972,7 +1008,6 @@ class DiffRenderable(Renderable):
         line_numbers: dict[int, int],
         hide_line_numbers: set[int] | None = None,
     ) -> None:
-        """Render one side (unified or one half of split)."""
         if not lines:
             return
 
@@ -1054,7 +1089,6 @@ class DiffRenderable(Renderable):
                 visual_row += 1
 
     def _render_unified(self, buffer: Buffer, x: int, y: int, width: int, height: int) -> None:
-        """Render unified view."""
         self._render_side(
             buffer,
             x,
@@ -1257,29 +1291,23 @@ class DiffRenderable(Renderable):
     # ── Line highlighting API ───────────────────────────────────────────
 
     def set_line_color(self, line: int, color: s.RGBA | str | LineColorConfig) -> None:
-        """Set color for a specific line."""
         self._user_line_colors[line] = color
 
     def clear_line_color(self, line: int) -> None:
-        """Clear color for a specific line."""
         self._user_line_colors.pop(line, None)
 
     def set_line_colors(self, line_colors: dict[int, s.RGBA | str | LineColorConfig]) -> None:
-        """Set colors for multiple lines."""
         self._user_line_colors.update(line_colors)
 
     def clear_all_line_colors(self) -> None:
-        """Clear all line colors."""
         self._user_line_colors.clear()
 
     def highlight_lines(
         self, start_line: int, end_line: int, color: s.RGBA | str | LineColorConfig
     ) -> None:
-        """Highlight a range of lines."""
         self._user_highlight_ranges.append((start_line, end_line, color))
 
     def clear_highlight_lines(self, start_line: int, end_line: int) -> None:
-        """Clear highlight for a range of lines."""
         self._user_highlight_ranges = [
             (s, e, c)
             for s, e, c in self._user_highlight_ranges
@@ -1288,15 +1316,14 @@ class DiffRenderable(Renderable):
 
     # ── Destroy ─────────────────────────────────────────────────────────
 
+    def destroy(self) -> None:
+        """Release retained raster resources before normal teardown."""
+        self._release_raster_buffer()
+        super().destroy()
+
     def destroy_recursively(self) -> None:
-        """Override to clean up listeners."""
         self._pending_rebuild = False
         super().destroy_recursively()
-
-
-# ---------------------------------------------------------------------------
-# Mock internal renderables for test compatibility
-# ---------------------------------------------------------------------------
 
 
 class _MockCodeRenderable:

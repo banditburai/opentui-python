@@ -8,6 +8,7 @@ import logging
 import os
 import site
 import sys
+import sysconfig
 from typing import Any
 
 _log = logging.getLogger(__name__)
@@ -16,20 +17,22 @@ _NATIVE_AVAILABLE = False
 _native_module: Any = None
 
 
+def _binding_filename_matches_runtime(filename: str) -> bool:
+    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    if ext_suffix:
+        return filename.endswith(ext_suffix)
+    valid_suffixes = tuple(dict.fromkeys(s for s in importlib.machinery.EXTENSION_SUFFIXES if s))
+    if not valid_suffixes:
+        return filename.endswith((".so", ".pyd"))
+    return filename.endswith(valid_suffixes)
+
+
 def _iter_binding_search_dirs() -> list[str]:
     current_dir = os.path.dirname(os.path.abspath(__file__))
     package_dir = os.path.dirname(current_dir)
 
-    dirs: list[str] = [current_dir]
-
-    seen = set(dirs)
-
-    # Parent of package directory (for development/editable installs)
-    if package_dir not in seen:
-        candidate = os.path.join(package_dir, "opentui")
-        if candidate not in seen:
-            dirs.append(candidate)
-            seen.add(candidate)
+    dirs: list[str] = []
+    seen: set[str] = set()
 
     # Trusted install locations only — do NOT iterate sys.path which
     # includes the current working directory and enables SO/DLL hijacking.
@@ -38,6 +41,10 @@ def _iter_binding_search_dirs() -> list[str]:
         if candidate not in seen:
             dirs.append(candidate)
             seen.add(candidate)
+
+    if current_dir not in seen:
+        dirs.append(current_dir)
+        seen.add(current_dir)
 
     sibling = os.path.join(package_dir, "opentui_bindings")
     if sibling not in seen:
@@ -50,10 +57,9 @@ def _get_lib_names() -> list[str]:
     """Return candidate library filenames for the current platform."""
     if sys.platform == "darwin":
         return ["libopentui.dylib"]
-    elif sys.platform == "win32":
+    if sys.platform == "win32":
         return ["opentui.dll", "libopentui.dll"]
-    else:  # linux and other unix
-        return ["libopentui.so"]
+    return ["libopentui.so"]
 
 
 def _preload_opentui_library() -> None:
@@ -82,14 +88,19 @@ def _preload_opentui_library() -> None:
 
 
 def _try_load_nanobind() -> None:
-    """Try to load nanobind bindings from various locations."""
     global _NATIVE_AVAILABLE, _native_module
 
     existing = sys.modules.get("opentui_bindings")
-    if existing is not None:
+    if existing is not None and hasattr(existing, "buffer"):
+        # Only accept if it's the real compiled extension (has native attrs),
+        # not a namespace package from src/opentui_bindings/ directory.
         _native_module = existing
         _NATIVE_AVAILABLE = True
         return
+    if existing is not None:
+        # Namespace package shadowing the compiled .so — remove it so we
+        # can load the real extension below.
+        del sys.modules["opentui_bindings"]
 
     _preload_opentui_library()
 
@@ -97,7 +108,9 @@ def _try_load_nanobind() -> None:
         if not os.path.isdir(bindings_dir):
             continue
         for f in os.listdir(bindings_dir):
-            if not (f.startswith("opentui_bindings") and f.endswith((".so", ".pyd"))):
+            if not f.startswith("opentui_bindings"):
+                continue
+            if not _binding_filename_matches_runtime(f):
                 continue
             so_file = os.path.join(bindings_dir, f)
             try:
@@ -117,45 +130,32 @@ _try_load_nanobind()
 
 
 class NanobindLibrary:
-    """Wrapper for nanobind C++ bindings.
-
-    This class provides a unified interface to the nanobind bindings,
-    forwarding attribute access to the native module.
-    """
-
     def __init__(self) -> None:
         if _native_module is None:
             raise RuntimeError("Native nanobind bindings not available")
         self._native = _native_module
 
     def __getattr__(self, name: str) -> Any:
-        """Forward attribute access to the native module."""
         if self._native is None:
             raise RuntimeError("Native bindings not available")
         return getattr(self._native, name)
 
     def get_buffer_width(self, buffer: Any) -> int:
-        """Get buffer width."""
         return self._native.buffer.get_buffer_width(buffer)
 
     def get_buffer_height(self, buffer: Any) -> int:
-        """Get buffer height."""
         return self._native.buffer.get_buffer_height(buffer)
 
     def buffer_get_char_ptr(self, buffer: Any) -> int:
-        """Get pointer to character data."""
         return self._native.buffer.buffer_get_char_ptr(buffer)
 
     def buffer_get_fg_ptr(self, buffer: Any) -> int:
-        """Get pointer to foreground color data."""
         return self._native.buffer.buffer_get_fg_ptr(buffer)
 
     def buffer_get_bg_ptr(self, buffer: Any) -> int:
-        """Get pointer to background color data."""
         return self._native.buffer.buffer_get_bg_ptr(buffer)
 
     def buffer_get_attributes_ptr(self, buffer: Any) -> int:
-        """Get pointer to attributes data."""
         return self._native.buffer.buffer_get_attributes_ptr(buffer)
 
 
@@ -163,14 +163,6 @@ _cached_library: NanobindLibrary | None = None
 
 
 def get_library() -> NanobindLibrary:
-    """Get the global library instance (cached after first call).
-
-    Returns:
-        NanobindLibrary instance
-
-    Raises:
-        RuntimeError: If nanobind bindings are not available
-    """
     global _cached_library
     if _cached_library is not None:
         return _cached_library
@@ -183,25 +175,16 @@ def get_library() -> NanobindLibrary:
 
 
 def is_native_available() -> bool:
-    """Check if nanobind native bindings are available.
-
-    Returns:
-        True if nanobind bindings are available
-    """
     return _NATIVE_AVAILABLE
 
 
 def get_native() -> Any:
-    """Get the native bindings module if available.
-
-    Returns:
-        The nanobind module, or None if not available
-    """
     return _native_module
 
 
 __all__ = [
     "NanobindLibrary",
+    "_binding_filename_matches_runtime",
     "get_library",
     "is_native_available",
     "get_native",

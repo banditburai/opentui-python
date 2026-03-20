@@ -6,6 +6,122 @@ Upstream: N/A (Python-specific)
 import pytest
 
 
+def test_binding_filename_matches_runtime_abi():
+    """Only extension modules for the running ABI should be considered."""
+    import sysconfig
+
+    from opentui.ffi import _binding_filename_matches_runtime
+
+    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    assert ext_suffix is not None
+    assert _binding_filename_matches_runtime(f"opentui_bindings{ext_suffix}") is True
+
+    mismatched = ".cpython-312-darwin.so" if "312" not in ext_suffix else ".cpython-313-darwin.so"
+    assert _binding_filename_matches_runtime(f"opentui_bindings{mismatched}") is False
+
+
+def test_ffi_has_native_layout_apply_function():
+    """Yoga should expose the canonical native layout-apply API and layout batch API."""
+    import yoga
+
+    assert hasattr(yoga, "apply_layout_tree")
+    assert hasattr(yoga, "get_layout_batch")
+
+
+@pytest.mark.asyncio
+async def test_renderer_activates_native_layout_apply_path():
+    """A real render pass should resolve the native layout walker."""
+    from opentui import Box, Text, create_test_renderer
+    from opentui import renderer as renderer_mod
+
+    renderer_mod._NATIVE_LAYOUT_CACHE["fn"] = renderer_mod._NOT_LOADED
+    renderer_mod._NATIVE_LAYOUT_CACHE["offsets"] = None
+
+    setup = await create_test_renderer(80, 24)
+    try:
+        root = setup.renderer.root
+        box = Box(width=80, height=24, flex_direction="column")
+        for i in range(3):
+            box.add(Text(f"row {i}"))
+        root.add(box)
+
+        setup.render_frame()
+
+        assert renderer_mod._NATIVE_LAYOUT_CACHE["fn"] is not None
+        assert renderer_mod._NATIVE_LAYOUT_CACHE["offsets"] is not None
+        assert renderer_mod._NATIVE_LAYOUT_CACHE["fn"].__module__ == "yoga.yoga"
+    finally:
+        setup.destroy()
+
+
+def test_apply_layout_tree_reports_old_and_new_geometry():
+    """The facts API should report per-node absolute geometry changes."""
+    import yoga
+
+    from opentui import layout as yoga_layout
+    from opentui.components.base import Renderable
+    from opentui.ffi import get_native
+
+    discover = get_native().native_signals.discover_slot_offset
+    root = Renderable(width=20, height=4, flex_direction="row")
+    left = Renderable(width=5, height=1)
+    right = Renderable(width=5, height=1)
+    root.add(left)
+    root.add(right)
+
+    offsets = {
+        "_x": discover(Renderable, "_x"),
+        "_y": discover(Renderable, "_y"),
+        "_layout_width": discover(Renderable, "_layout_width"),
+        "_layout_height": discover(Renderable, "_layout_height"),
+        "_dirty": discover(Renderable, "_dirty"),
+        "_subtree_dirty": discover(Renderable, "_subtree_dirty"),
+        "_children": discover(Renderable, "_children"),
+        "_parent": discover(Renderable, "_parent"),
+        "_yoga_node": discover(Renderable, "_yoga_node"),
+        "_on_size_change": discover(Renderable, "_on_size_change"),
+    }
+
+    root._configure_yoga_properties()
+    yoga_layout.compute_layout(root._yoga_node, 20, 4)
+    yoga.apply_layout_tree(root, offsets)
+
+    left.width = 6
+    root._configure_yoga_properties()
+    yoga_layout.compute_layout(root._yoga_node, 20, 4)
+    facts = yoga.apply_layout_tree(root, offsets)
+
+    by_node = {fact[0]: fact[1:] for fact in facts}
+    assert left in by_node
+    assert right in by_node
+    assert by_node[left] == (
+        id(root),
+        False,
+        True,
+        0,
+        0,
+        5,
+        1,
+        0,
+        0,
+        6,
+        1,
+    )
+    assert by_node[right] == (
+        id(root),
+        False,
+        False,
+        5,
+        0,
+        5,
+        1,
+        6,
+        0,
+        5,
+        1,
+    )
+
+
 def test_ffi_has_required_functions():
     """Test that required FFI functions are bound."""
     from opentui.ffi import get_native

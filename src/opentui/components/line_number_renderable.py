@@ -1,9 +1,4 @@
-"""LineNumberRenderable - renders line number gutter alongside a target renderable.
-
-Line number gutter component for code and diff views.
-Renders line numbers, line signs, and line-level background colors
-alongside a target renderable that implements the LineInfoProvider protocol.
-"""
+"""LineNumberRenderable - renders line number gutter alongside a target renderable."""
 
 from __future__ import annotations
 
@@ -12,14 +7,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from .. import structs as s
+from ..native import _nb
 from ..structs import display_width as _string_width
 from .base import Renderable
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
-
-
-# ── Types ─────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -68,28 +61,11 @@ class LineInfoProvider(Protocol):
     def scroll_y(self) -> int: ...
 
 
-# ── Helpers ───────────────────────────────────────────────────────────
-
-
-def _parse_color(color: s.RGBA | str | None) -> s.RGBA | None:
-    """Parse a color value to RGBA."""
-    if color is None:
-        return None
-    if isinstance(color, s.RGBA):
-        return color
-    if isinstance(color, str):
-        if color in ("transparent", "none"):
-            return None
-        return s.parse_color(color)
-    return None
+_parse_color = s.parse_color_opt
 
 
 def _darken_color(color: s.RGBA) -> s.RGBA:
-    """Darken an RGBA color by 20%."""
     return s.RGBA(color.r * 0.8, color.g * 0.8, color.b * 0.8, color.a)
-
-
-# ── GutterRenderable ─────────────────────────────────────────────────
 
 
 class GutterRenderable(Renderable):
@@ -115,6 +91,10 @@ class GutterRenderable(Renderable):
         "_max_after_width",
         "_last_known_line_count",
         "_last_known_scroll_y",
+        "_raster_dirty",
+        "_raster_buffer",
+        "_raster_buffer_ptr",
+        "_raster_buffer_size",
     )
 
     def __init__(
@@ -154,14 +134,25 @@ class GutterRenderable(Renderable):
         self._max_after_width: int = 0
         self._last_known_line_count: int = 0
         self._last_known_scroll_y: int = 0
+        self._raster_dirty: bool = True
+        self._raster_buffer = None
+        self._raster_buffer_ptr = None
+        self._raster_buffer_size: tuple[int, int] | None = None
 
         self._calculate_sign_widths()
         self._last_known_line_count = self._get_target_virtual_line_count()
         self._last_known_scroll_y = self._get_target_scroll_y()
         self._setup_measure_func()
 
+    def mark_dirty(self) -> None:
+        self._raster_dirty = True
+        super().mark_dirty()
+
+    def mark_paint_dirty(self) -> None:
+        self._raster_dirty = True
+        super().mark_paint_dirty()
+
     def _get_target_virtual_line_count(self) -> int:
-        """Get virtual line count from target."""
         if hasattr(self._target, "virtual_line_count"):
             return self._target.virtual_line_count
         if hasattr(self._target, "line_count"):
@@ -169,19 +160,16 @@ class GutterRenderable(Renderable):
         return 1
 
     def _get_target_scroll_y(self) -> int:
-        """Get scroll Y from target."""
         if hasattr(self._target, "scroll_y"):
             return self._target.scroll_y
         return 0
 
     def _get_target_line_info(self) -> LineInfo | None:
-        """Get line info from target."""
         if hasattr(self._target, "line_info"):
             return self._target.line_info
         return None
 
     def _calculate_sign_widths(self) -> None:
-        """Calculate max before/after sign widths."""
         self._max_before_width = 0
         self._max_after_width = 0
         for sign in self._line_signs.values():
@@ -193,7 +181,6 @@ class GutterRenderable(Renderable):
                 self._max_after_width = max(self._max_after_width, w)
 
     def _calculate_width(self) -> int:
-        """Calculate gutter width based on target's line count."""
         total_lines = self._get_target_virtual_line_count()
 
         # Find max line number, considering both calculated and custom line numbers
@@ -208,8 +195,6 @@ class GutterRenderable(Renderable):
         return base_width + self._max_before_width + self._max_after_width
 
     def _setup_measure_func(self) -> None:
-        """Set up yoga measure function for the gutter."""
-
         def measure(yoga_node, width, width_mode, height, height_mode):
             gutter_width = self._calculate_width()
             gutter_height = self._get_target_virtual_line_count()
@@ -218,76 +203,133 @@ class GutterRenderable(Renderable):
         self._yoga_node.set_measure_func(measure)
 
     def remeasure(self) -> None:
-        """Mark the yoga node as dirty to trigger re-measurement."""
+        self.mark_dirty()
         if self._yoga_node is not None:
             self._yoga_node.mark_dirty()
 
     def set_line_number_offset(self, offset: int) -> None:
-        """Set the line number offset."""
         if self._line_number_offset != offset:
             self._line_number_offset = offset
             if self._yoga_node is not None:
                 self._yoga_node.mark_dirty()
-            self.request_render()
+            self.mark_dirty()
 
     def set_hide_line_numbers(self, hide_line_numbers: set[int]) -> None:
-        """Set which line numbers to hide."""
         self._hide_line_numbers = hide_line_numbers
         if self._yoga_node is not None:
             self._yoga_node.mark_dirty()
-        self.request_render()
+        self.mark_dirty()
 
     def set_line_numbers(self, line_numbers: dict[int, int]) -> None:
-        """Set custom line number mapping."""
         self._line_numbers = line_numbers
         if self._yoga_node is not None:
             self._yoga_node.mark_dirty()
-        self.request_render()
+        self.mark_dirty()
 
     def set_line_colors(
         self,
         line_colors_gutter: dict[int, s.RGBA],
         line_colors_content: dict[int, s.RGBA],
     ) -> None:
-        """Update line colors."""
         self._line_colors_gutter = line_colors_gutter
         self._line_colors_content = line_colors_content
-        self.request_render()
+        self.mark_paint_dirty()
 
     def get_line_colors(self) -> dict:
-        """Get current line colors."""
         return {
             "gutter": dict(self._line_colors_gutter),
             "content": dict(self._line_colors_content),
         }
 
     def set_line_signs(self, line_signs: dict[int, LineSign]) -> None:
-        """Update line signs."""
         old_max_before = self._max_before_width
         old_max_after = self._max_after_width
 
         self._line_signs = line_signs
         self._calculate_sign_widths()
 
-        if (
+        widths_changed = (
             self._max_before_width != old_max_before or self._max_after_width != old_max_after
-        ) and self._yoga_node is not None:
-            self._yoga_node.mark_dirty()
-
-        self.request_render()
+        )
+        if widths_changed:
+            self.mark_dirty()
+            if self._yoga_node is not None:
+                self._yoga_node.mark_dirty()
+        else:
+            self.mark_paint_dirty()
 
     def get_line_signs(self) -> dict[int, LineSign]:
-        """Get current line signs."""
         return dict(self._line_signs)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the gutter."""
         if not self._visible:
             return
+        scroll_y = self._get_target_scroll_y()
+        line_count = self._get_target_virtual_line_count()
+        if scroll_y != self._last_known_scroll_y or line_count != self._last_known_line_count:
+            self._last_known_scroll_y = scroll_y
+            self._last_known_line_count = line_count
+            self._raster_dirty = True
+
+        raster = self._ensure_raster_buffer()
+        if raster is not None and self._layout_width and self._layout_height:
+            if self._raster_dirty:
+                raster.clear(0.0)
+                raster.push_offset(-self._x, -self._y)
+                try:
+                    self._refresh_frame_buffer(raster)
+                finally:
+                    raster.pop_offset()
+                self._raster_dirty = False
+
+            try:
+                buffer._native.draw_frame_buffer(buffer._ptr, self._x, self._y, raster._ptr)
+                return
+            except Exception:
+                pass
+
         self._refresh_frame_buffer(buffer)
+        self._raster_dirty = False
+
+    def _ensure_raster_buffer(self) -> Buffer | None:
+        gutter_width = max(0, int(self._layout_width or self._calculate_width()))
+        gutter_height = max(0, int(self._layout_height or 0))
+        if gutter_width <= 0 or gutter_height <= 0:
+            return None
+
+        if self._raster_buffer_ptr is None:
+            ptr = _nb.buffer.create_optimized_buffer(
+                gutter_width, gutter_height, True, 0, f"gutter-{self.id}"
+            )
+            from ..renderer import Buffer as RenderBuffer
+
+            self._raster_buffer_ptr = ptr
+            self._raster_buffer = RenderBuffer(ptr, _nb.buffer, _nb.graphics)
+            self._raster_buffer_size = (gutter_width, gutter_height)
+            self._raster_dirty = True
+            return self._raster_buffer
+
+        if self._raster_buffer_size != (gutter_width, gutter_height):
+            assert self._raster_buffer is not None
+            self._raster_buffer.resize(gutter_width, gutter_height)
+            self._raster_buffer_size = (gutter_width, gutter_height)
+            self._raster_dirty = True
+
+        return self._raster_buffer
+
+    def _release_raster_buffer(self) -> None:
+        if self._raster_buffer_ptr is None:
+            return
+        try:
+            _nb.buffer.destroy_optimized_buffer(self._raster_buffer_ptr)
+        except Exception:
+            pass
+        finally:
+            self._raster_buffer = None
+            self._raster_buffer_ptr = None
+            self._raster_buffer_size = None
 
     def _refresh_frame_buffer(self, buffer: Buffer) -> None:
-        """Draw the gutter content to the buffer."""
         start_x = self._x
         start_y = self._y
         gutter_width = self._layout_width or self._calculate_width()
@@ -365,7 +407,6 @@ class GutterRenderable(Renderable):
         line_bg: s.RGBA | None,
         is_continuation: bool,
     ) -> None:
-        """Draw a single line number (or nothing for continuation lines)."""
         if is_continuation:
             return
 
@@ -407,8 +448,10 @@ class GutterRenderable(Renderable):
             after_color = _parse_color(sign.after_color) if sign.after_color else self._gutter_fg
             buffer.draw_text(sign.after, after_x, y, after_color, line_bg)
 
-
-# ── LineNumberRenderable ──────────────────────────────────────────────
+    def destroy(self) -> None:
+        """Release retained raster resources before normal teardown."""
+        self._release_raster_buffer()
+        super().destroy()
 
 
 class LineNumberRenderable(Renderable):
@@ -496,13 +539,11 @@ class LineNumberRenderable(Renderable):
             self._gutter._visible = False
 
     def _on_line_info_change(self) -> None:
-        """When line info changes in the target, remeasure the gutter."""
         if self._gutter is not None:
             self._gutter.remeasure()
-        self.request_render()
+        self.mark_dirty()
 
     def _parse_line_color(self, line: int, color: Any) -> None:
-        """Parse a line color value into gutter and content colors."""
         if isinstance(color, dict) and ("gutter" in color or "content" in color):
             # LineColorConfig format
             if color.get("gutter"):
@@ -539,7 +580,6 @@ class LineNumberRenderable(Renderable):
                 self._line_colors_content[line] = _darken_color(parsed)
 
     def _set_target(self, target: Any) -> None:
-        """Set up the target renderable."""
         if self._target is target:
             return
 
@@ -583,14 +623,12 @@ class LineNumberRenderable(Renderable):
         super().add(self._target)
 
     def add(self, child: Any, index: int | None = None) -> int:
-        """Override add to intercept and set as target if it's a LineInfoProvider."""
         if self._target is None and self._is_line_info_provider(child):
             self._set_target(child)
             return self.get_children_count() - 1
         return -1
 
     def _is_line_info_provider(self, obj: Any) -> bool:
-        """Check if an object implements the LineInfoProvider interface."""
         return (
             hasattr(obj, "line_info")
             and hasattr(obj, "line_count")
@@ -599,7 +637,6 @@ class LineNumberRenderable(Renderable):
         )
 
     def remove(self, child: Any) -> None:
-        """Override remove to prevent removing gutter/target directly."""
         if self._is_destroying:
             super().remove(child)
             return
@@ -613,7 +650,6 @@ class LineNumberRenderable(Renderable):
         super().remove(child)
 
     def destroy(self) -> None:
-        """Destroy this renderable and clean up."""
         self._is_destroying = True
         if self._target is not None and hasattr(self._target, "off"):
             self._target.off("line-info-change", self._handle_line_info_change)
@@ -622,7 +658,6 @@ class LineNumberRenderable(Renderable):
         self._target = None
 
     def destroy_recursively(self) -> None:
-        """Destroy this renderable and all descendants."""
         self._is_destroying = True
         if self._target is not None and hasattr(self._target, "off"):
             self._target.off("line-info-change", self._handle_line_info_change)
@@ -631,7 +666,6 @@ class LineNumberRenderable(Renderable):
         self._target = None
 
     def clear_target(self) -> None:
-        """Remove the current target."""
         if self._target is not None:
             if hasattr(self._target, "off"):
                 self._target.off("line-info-change", self._handle_line_info_change)
@@ -641,69 +675,55 @@ class LineNumberRenderable(Renderable):
             super().remove(self._gutter)
             self._gutter = None
 
-    # ── Properties ─────────────────────────────────────────────────────
-
     @property
     def gutter(self) -> GutterRenderable | None:
-        """Get the gutter renderable (for testing)."""
         return self._gutter
 
     @property
     def target(self) -> Any:
-        """Get the target renderable."""
         return self._target
 
     @property
     def show_line_numbers(self) -> bool:
-        """Get whether line numbers are visible."""
         if self._gutter is not None:
             return self._gutter._visible
         return False
 
     @show_line_numbers.setter
     def show_line_numbers(self, value: bool) -> None:
-        """Set whether line numbers are visible."""
         if self._gutter is not None:
             self._gutter._visible = value
             self.mark_dirty()
 
     @property
     def line_number_offset(self) -> int:
-        """Get the line number offset."""
         return self._ln_line_number_offset
 
     @line_number_offset.setter
     def line_number_offset(self, value: int) -> None:
-        """Set the line number offset."""
         if self._ln_line_number_offset != value:
             self._ln_line_number_offset = value
             if self._gutter is not None:
                 self._gutter.set_line_number_offset(value)
 
-    # ── Line color methods ──────────────────────────────────────────────
-
     def set_line_color(self, line: int, color: Any) -> None:
-        """Set color for a specific line."""
         self._parse_line_color(line, color)
         if self._gutter is not None:
             self._gutter.set_line_colors(self._line_colors_gutter, self._line_colors_content)
 
     def clear_line_color(self, line: int) -> None:
-        """Clear color for a specific line."""
         self._line_colors_gutter.pop(line, None)
         self._line_colors_content.pop(line, None)
         if self._gutter is not None:
             self._gutter.set_line_colors(self._line_colors_gutter, self._line_colors_content)
 
     def clear_all_line_colors(self) -> None:
-        """Clear all line colors."""
         self._line_colors_gutter.clear()
         self._line_colors_content.clear()
         if self._gutter is not None:
             self._gutter.set_line_colors(self._line_colors_gutter, self._line_colors_content)
 
     def set_line_colors(self, line_colors: dict[int, Any]) -> None:
-        """Set multiple line colors at once."""
         self._line_colors_gutter.clear()
         self._line_colors_content.clear()
         for line, color in line_colors.items():
@@ -712,31 +732,25 @@ class LineNumberRenderable(Renderable):
             self._gutter.set_line_colors(self._line_colors_gutter, self._line_colors_content)
 
     def get_line_colors(self) -> dict:
-        """Get current line colors as {gutter: dict, content: dict}."""
         return {
             "gutter": dict(self._line_colors_gutter),
             "content": dict(self._line_colors_content),
         }
 
     def highlight_lines(self, start_line: int, end_line: int, color: Any) -> None:
-        """Apply color to a range of lines (inclusive)."""
         for i in range(start_line, end_line + 1):
             self._parse_line_color(i, color)
         if self._gutter is not None:
             self._gutter.set_line_colors(self._line_colors_gutter, self._line_colors_content)
 
     def clear_highlight_lines(self, start_line: int, end_line: int) -> None:
-        """Clear color from a range of lines (inclusive)."""
         for i in range(start_line, end_line + 1):
             self._line_colors_gutter.pop(i, None)
             self._line_colors_content.pop(i, None)
         if self._gutter is not None:
             self._gutter.set_line_colors(self._line_colors_gutter, self._line_colors_content)
 
-    # ── Line sign methods ──────────────────────────────────────────────
-
     def set_line_sign(self, line: int, sign: LineSign) -> None:
-        """Set a sign for a specific line."""
         self._line_signs[line] = sign
         if self._gutter is not None:
             self._gutter.set_line_signs(self._line_signs)
@@ -765,8 +779,6 @@ class LineNumberRenderable(Renderable):
         """Get current line signs."""
         return dict(self._line_signs)
 
-    # ── Hidden line numbers ───────────────────────────────────────────
-
     def set_hide_line_numbers(self, hide_line_numbers: set[int]) -> None:
         """Set which line numbers to hide."""
         self._ln_hide_line_numbers = hide_line_numbers
@@ -787,8 +799,6 @@ class LineNumberRenderable(Renderable):
         """Get custom line number mapping."""
         return dict(self._ln_line_numbers)
 
-    # ── Rendering ─────────────────────────────────────────────────────
-
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         """Render the line number renderable and its children."""
         if not self._visible:
@@ -796,10 +806,12 @@ class LineNumberRenderable(Renderable):
 
         if self._target is not None and self._gutter is not None:
             self._render_line_backgrounds(buffer)
+            self._target.render(buffer, delta_time)
+            self._gutter.render(buffer, delta_time)
+            return
 
         for child in self._children:
-            if isinstance(child, Renderable):
-                child.render(buffer, delta_time)
+            child.render(buffer, delta_time)
 
     def _render_line_backgrounds(self, buffer: Buffer) -> None:
         """Draw full-width background colors for lines with custom colors."""

@@ -37,13 +37,14 @@ pip install opentui[dev]           # pytest, ruff, pyright
 
 ```python
 import asyncio
-from opentui import render, Box, Text, Signal, use_keyboard
+from opentui import render, Box, Text, Signal, reactive, template_component, use_keyboard
 
-count = Signal("count", 0)
+count = Signal(0, name="count")
 
+@template_component
 def App():
     return Box(
-        Text(f"Count: {count()}"),
+        Text(reactive(lambda: f"Count: {count()}")),
         Text("Press +/- to change, q to quit"),
         padding=2,
         border=True,
@@ -65,6 +66,23 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Reactive Patterns
+
+- **Direct Signal** — pass a Signal directly to supported props for zero-overhead reactivity:
+  ```python
+  color = Signal("red", name="color")
+  Text("Hello", fg=color)  # updates paint when color changes
+  ```
+- **Lambda binding** — use `reactive()` for computed/derived values:
+  ```python
+  count = Signal(0, name="count")
+  Text(reactive(lambda: f"Count: {count()}"))
+  ```
+- **Control flow** — conditional and list rendering with `Show`, `Switch`, `For`:
+  ```python
+  Show(when=is_visible, children=lambda: [Text("Visible!")])
+  ```
 
 ## Components
 
@@ -118,7 +136,7 @@ asyncio.run(main())
 ```python
 from opentui import Signal, computed, effect
 
-name = Signal("name", "world")
+name = Signal("world", name="name")
 greeting = computed(lambda: f"Hello, {name()}!")
 
 effect(lambda: print(greeting()))  # prints "Hello, world!"

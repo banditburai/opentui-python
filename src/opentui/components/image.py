@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 from ..filters import ImageRenderer
 from ..image import ImageFit, ImageProtocol, ImageSource, resize_rgba_nearest
-from ..image_cache import ImageCache
 from ..image_loader import load_image
+from ..native import ImageCache
 from ..renderer import TerminalCapabilities
 from .base import Renderable
 

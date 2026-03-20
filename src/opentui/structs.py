@@ -24,16 +24,10 @@ class RGBA:
 
     @classmethod
     def from_array(cls, values: Any) -> RGBA:
-        """Create RGBA from an array-like sequence of 4 floats.
-
-        Python dataclass fields are independent values, so this always copies
-        the data.
-        """
         return cls(float(values[0]), float(values[1]), float(values[2]), float(values[3]))
 
     @classmethod
     def from_ints(cls, r: int, g: int, b: int, a: int = 255) -> RGBA:
-        """Create RGBA from integer values (0-255)."""
         return cls(r / 255, g / 255, b / 255, a / 255)
 
     @classmethod
@@ -50,9 +44,7 @@ class RGBA:
         elif len(hex_color) == 4:
             hex_color = hex_color[0] * 2 + hex_color[1] * 2 + hex_color[2] * 2 + hex_color[3] * 2
 
-        if not (
-            re.fullmatch(r"[0-9A-Fa-f]{6}", hex_color) or re.fullmatch(r"[0-9A-Fa-f]{8}", hex_color)
-        ):
+        if not re.fullmatch(r"[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?", hex_color):
             warnings.warn(f"Invalid hex color: {hex_color}, defaulting to magenta", stacklevel=2)
             return cls(1.0, 0.0, 1.0, 1.0)
 
@@ -63,37 +55,28 @@ class RGBA:
         return cls(r, g, b, a)
 
     def to_ints(self) -> tuple[int, int, int, int]:
-        """Convert to integer values (0-255)."""
         return (round(self.r * 255), round(self.g * 255), round(self.b * 255), round(self.a * 255))
 
     def to_hex(self) -> str:
-        """Convert to hex color string. Clamps values to 0-1 range."""
-        components = [self.r, self.g, self.b] if self.a == 1 else [self.r, self.g, self.b, self.a]
-        hex_parts = []
-        for x in components:
-            val = math.floor(max(0.0, min(1.0, x)) * 255)
-            h = format(val, "x")
-            hex_parts.append(h.zfill(2))
-        return "#" + "".join(hex_parts)
+        def _c(x: float) -> int:
+            return math.floor(max(0.0, min(1.0, x)) * 255)
+
+        if self.a == 1:
+            return f"#{_c(self.r):02x}{_c(self.g):02x}{_c(self.b):02x}"
+        return f"#{_c(self.r):02x}{_c(self.g):02x}{_c(self.b):02x}{_c(self.a):02x}"
 
     def map(self, fn: Callable[[float], T]) -> list[T]:
         """Apply function to each channel, return [fn(r), fn(g), fn(b), fn(a)]."""
         return [fn(self.r), fn(self.g), fn(self.b), fn(self.a)]
 
     def __str__(self) -> str:
-        """Format as rgba string with 2 decimal places."""
         return f"rgba({self.r:.2f}, {self.g:.2f}, {self.b:.2f}, {self.a:.2f})"
 
     def equals(self, other: RGBA | None) -> bool:
-        """Check equality with another RGBA."""
         if other is None:
             return False
         return self.r == other.r and self.g == other.g and self.b == other.b and self.a == other.a
 
-
-# ---------------------------------------------------------------------------
-# Color utilities
-# ---------------------------------------------------------------------------
 
 ColorInput = str | RGBA
 
@@ -185,13 +168,86 @@ def parse_color(color: ColorInput) -> RGBA:
     return RGBA.from_hex(color)
 
 
-# ---------------------------------------------------------------------------
-# Border utilities
-# ---------------------------------------------------------------------------
+def parse_color_opt(color: RGBA | str | None) -> RGBA | None:
+    """Parse a color with None/transparent/none → None (no color).
+
+    Use this when ``None`` means "no color, terminal default shows through".
+    ``parse_color()`` maps "transparent" → ``RGBA(0,0,0,0)`` which would
+    paint black; this function maps it to ``None`` so no fill occurs.
+    """
+    if color is None:
+        return None
+    if isinstance(color, RGBA):
+        return color
+    if isinstance(color, str):
+        if color in ("transparent", "none"):
+            return None
+        return parse_color(color)
+    return None
+
 
 VALID_BORDER_STYLES = ("single", "double", "rounded", "heavy")
 
-BorderStyle = str  # one of VALID_BORDER_STYLES
+BORDER_CHARS: dict[str, dict[str, str]] = {
+    "single": {
+        "top_left": "┌",
+        "top_right": "┐",
+        "bottom_left": "└",
+        "bottom_right": "┘",
+        "horizontal": "─",
+        "vertical": "│",
+    },
+    "double": {
+        "top_left": "╔",
+        "top_right": "╗",
+        "bottom_left": "╚",
+        "bottom_right": "╝",
+        "horizontal": "═",
+        "vertical": "║",
+    },
+    "round": {
+        "top_left": "╭",
+        "top_right": "╮",
+        "bottom_left": "╰",
+        "bottom_right": "╯",
+        "horizontal": "─",
+        "vertical": "│",
+    },
+    "bold": {
+        "top_left": "┏",
+        "top_right": "┓",
+        "bottom_left": "┗",
+        "bottom_right": "┛",
+        "horizontal": "━",
+        "vertical": "┃",
+    },
+    "block": {
+        "top_left": "█",
+        "top_right": "█",
+        "bottom_left": "█",
+        "bottom_right": "█",
+        "horizontal": "█",
+        "vertical": "█",
+    },
+}
+
+
+def get_border_chars(style: str) -> dict[str, str]:
+    """Get border characters for a style. Falls back to 'single'."""
+    return BORDER_CHARS.get(style, BORDER_CHARS["single"])
+
+
+def get_border_chars_tuple(style: str) -> tuple[str, str, str, str, str, str]:
+    """Get border chars as (tl, tr, bl, br, horizontal, vertical) tuple."""
+    c = get_border_chars(style)
+    return (
+        c["top_left"],
+        c["top_right"],
+        c["bottom_left"],
+        c["bottom_right"],
+        c["horizontal"],
+        c["vertical"],
+    )
 
 
 def is_valid_border_style(value: Any) -> bool:
@@ -204,6 +260,8 @@ def parse_border_style(value: Any, fallback: str = "single") -> str:
 
     Logs a warning for invalid non-None values.
     """
+    if value == "round":
+        value = "rounded"
     if is_valid_border_style(value):
         return value
 
@@ -216,10 +274,6 @@ def parse_border_style(value: Any, fallback: str = "single") -> str:
     return fallback
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 TEXT_ATTRIBUTE_BOLD = 1 << 0  # 0x01
 TEXT_ATTRIBUTE_DIM = 1 << 1  # 0x02
 TEXT_ATTRIBUTE_ITALIC = 1 << 2  # 0x04
@@ -230,54 +284,6 @@ TEXT_ATTRIBUTE_HIDDEN = 1 << 6  # 0x40
 TEXT_ATTRIBUTE_STRIKETHROUGH = 1 << 7  # 0x80
 
 
-BORDER_STYLE_NONE = 0
-BORDER_STYLE_SINGLE = 1
-BORDER_STYLE_DOUBLE = 2
-BORDER_STYLE_ROUND = 3
-BORDER_STYLE_BOLD = 4
-BORDER_STYLE_DOUBLE_SINGLE_H = 5
-BORDER_STYLE_DOUBLE_SINGLE_V = 6
-BORDER_STYLE_BLOCK = 7
-
-
-ALIGNMENT_LEFT = 0
-ALIGNMENT_CENTER = 1
-ALIGNMENT_RIGHT = 2
-
-
-FLEX_DIRECTION_ROW = 0
-FLEX_DIRECTION_COLUMN = 1
-
-
-JUSTIFY_FLEX_START = 0
-JUSTIFY_CENTER = 1
-JUSTIFY_FLEX_END = 2
-JUSTIFY_SPACE_BETWEEN = 3
-JUSTIFY_SPACE_AROUND = 4
-JUSTIFY_SPACE_EVENLY = 5
-
-
-ALIGN_ITEMS_FLEX_START = 0
-ALIGN_ITEMS_CENTER = 1
-ALIGN_ITEMS_FLEX_END = 2
-ALIGN_ITEMS_STRETCH = 3
-ALIGN_ITEMS_BASELINE = 4
-
-
-WIDTH_METHOD_WCWIDTH = 0
-WIDTH_METHOD_UNICODE = 1
-
-
-TEXT_BUFFER_MAIN = 0
-TEXT_BUFFER_SELECTION = 1
-TEXT_BUFFER_HIGHLIGHT = 2
-
-
-# ---------------------------------------------------------------------------
-# Display width utilities
-# ---------------------------------------------------------------------------
-
-
 def char_width(ch: str) -> int:
     """Return the display width of a single character (1 or 2)."""
     eaw = unicodedata.east_asian_width(ch)
@@ -286,7 +292,7 @@ def char_width(ch: str) -> int:
 
 def display_width(text: str) -> int:
     """Return the display width of *text*, accounting for wide (CJK/emoji) characters."""
-    if all(c < "\x80" for c in text):
+    if text.isascii():
         return len(text)
     w = 0
     for ch in text:
@@ -307,6 +313,9 @@ __all__ = [
     "is_valid_border_style",
     "parse_border_style",
     "VALID_BORDER_STYLES",
+    "BORDER_CHARS",
+    "get_border_chars",
+    "get_border_chars_tuple",
     "TEXT_ATTRIBUTE_BOLD",
     "TEXT_ATTRIBUTE_DIM",
     "TEXT_ATTRIBUTE_ITALIC",
@@ -315,35 +324,7 @@ __all__ = [
     "TEXT_ATTRIBUTE_INVERSE",
     "TEXT_ATTRIBUTE_HIDDEN",
     "TEXT_ATTRIBUTE_STRIKETHROUGH",
-    "BORDER_STYLE_NONE",
-    "BORDER_STYLE_SINGLE",
-    "BORDER_STYLE_DOUBLE",
-    "BORDER_STYLE_ROUND",
-    "BORDER_STYLE_BOLD",
-    "BORDER_STYLE_DOUBLE_SINGLE_H",
-    "BORDER_STYLE_DOUBLE_SINGLE_V",
-    "BORDER_STYLE_BLOCK",
-    "ALIGNMENT_LEFT",
-    "ALIGNMENT_CENTER",
-    "ALIGNMENT_RIGHT",
-    "FLEX_DIRECTION_ROW",
-    "FLEX_DIRECTION_COLUMN",
-    "JUSTIFY_FLEX_START",
-    "JUSTIFY_CENTER",
-    "JUSTIFY_FLEX_END",
-    "JUSTIFY_SPACE_BETWEEN",
-    "JUSTIFY_SPACE_AROUND",
-    "JUSTIFY_SPACE_EVENLY",
-    "ALIGN_ITEMS_FLEX_START",
-    "ALIGN_ITEMS_CENTER",
-    "ALIGN_ITEMS_FLEX_END",
-    "ALIGN_ITEMS_STRETCH",
-    "ALIGN_ITEMS_BASELINE",
-    "WIDTH_METHOD_WCWIDTH",
-    "WIDTH_METHOD_UNICODE",
-    "TEXT_BUFFER_MAIN",
-    "TEXT_BUFFER_SELECTION",
-    "TEXT_BUFFER_HIGHLIGHT",
+    "parse_color_opt",
     "char_width",
     "display_width",
 ]

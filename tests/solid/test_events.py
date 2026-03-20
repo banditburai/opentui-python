@@ -11,14 +11,21 @@ not preventDefault'd.  This mirrors the InternalKeyHandler pattern from
 the upstream TS codebase.
 """
 
+from opentui import reactive, template_component
 from opentui import test_render as _test_render
 from opentui.components.box import Box
+from opentui.components.control_flow import For
 from opentui.components.input import Input, Select, SelectOption, Textarea
 from opentui.components.advanced import TabSelect
 from opentui.components.text import Text
 from opentui.signals import Signal
 from opentui.hooks import use_keyboard, use_paste
 from opentui.events import KeyEvent
+
+
+async def _strict_render(component_fn, options):
+    merged = dict(options)
+    return await _test_render(component_fn, merged)
 
 
 class _Spy:
@@ -97,16 +104,23 @@ class TestSolidJSRendererIntegration:
             """Maps to it("should handle input onInput events")."""
 
             on_input_spy = _Spy()
-            value = [""]
+            value = Signal("", name="value")
 
             def on_input(val):
                 on_input_spy(val)
-                value[0] = val
+                value.set(val)
 
             input_comp = Input(focused=True, on_input=on_input)
 
-            setup = await _test_render(
-                lambda: Box(input_comp, Text(f"Value: {value[0]}")),
+            @template_component
+            def InputStatus():
+                return Box(
+                    input_comp,
+                    Text(reactive(lambda: f"Value: {value()}"), id="input_value"),
+                )
+
+            setup = await _strict_render(
+                InputStatus,
                 {"width": 20, "height": 5},
             )
 
@@ -119,7 +133,7 @@ class TestSolidJSRendererIntegration:
             assert on_input_spy.call_count() == 5
             assert on_input_spy.calls[0][0] == "h"
             assert on_input_spy.calls[4][0] == "hello"
-            assert value[0] == "hello"
+            assert value() == "hello"
 
             setup.destroy()
 
@@ -158,7 +172,7 @@ class TestSolidJSRendererIntegration:
             """Maps to it("should handle select onChange events")."""
 
             on_change_spy = _Spy()
-            selected_index = [0]
+            selected_index = Signal(0, name="selected_index")
 
             options = [
                 SelectOption("Option 1", value=1, description="First option"),
@@ -171,13 +185,20 @@ class TestSolidJSRendererIntegration:
                 focused=True,
                 on_change=lambda idx, opt: (
                     on_change_spy(idx, opt),
-                    selected_index.__setitem__(0, idx),
+                    selected_index.set(idx),
                 ),
             )
             select_comp._selected_index = 0  # Start at index 0 like upstream
 
-            setup = await _test_render(
-                lambda: Box(select_comp, Text(f"Selected: {selected_index[0]}")),
+            @template_component
+            def SelectStatus():
+                return Box(
+                    select_comp,
+                    Text(reactive(lambda: f"Selected: {selected_index()}"), id="selected_index"),
+                )
+
+            setup = await _strict_render(
+                SelectStatus,
                 {"width": 30, "height": 10},
             )
 
@@ -200,7 +221,7 @@ class TestSolidJSRendererIntegration:
             assert on_change_spy.call_count() == 1
             assert on_change_spy.calls[0][0] == 1
             assert on_change_spy.calls[0][1].value == 2  # options[1]
-            assert selected_index[0] == 1
+            assert selected_index() == 1
 
             setup.destroy()
 
@@ -208,7 +229,7 @@ class TestSolidJSRendererIntegration:
             """Maps to it("should handle tab_select onSelect events")."""
 
             on_select_spy = _Spy()
-            active_tab = [0]
+            active_tab = Signal(0, name="active_tab")
 
             tabs = ["Tab 1", "Tab 2", "Tab 3"]
 
@@ -217,12 +238,19 @@ class TestSolidJSRendererIntegration:
                 focused=True,
                 on_change=lambda idx, name: (
                     on_select_spy(idx),
-                    active_tab.__setitem__(0, idx),
+                    active_tab.set(idx),
                 ),
             )
 
-            setup = await _test_render(
-                lambda: Box(tab_select, Text(f"Active tab: {active_tab[0]}")),
+            @template_component
+            def TabStatus():
+                return Box(
+                    tab_select,
+                    Text(reactive(lambda: f"Active tab: {active_tab()}"), id="active_tab"),
+                )
+
+            setup = await _strict_render(
+                TabStatus,
                 {"width": 40, "height": 8},
             )
 
@@ -242,7 +270,7 @@ class TestSolidJSRendererIntegration:
 
             assert on_select_spy.call_count() == 1
             assert on_select_spy.calls[0][0] == 2
-            assert active_tab[0] == 2
+            assert active_tab() == 2
 
             setup.destroy()
 
@@ -321,7 +349,7 @@ class TestSolidJSRendererIntegration:
             """Maps to it("should handle keyboard navigation on select components")."""
 
             change_spy = _Spy()
-            selected_value = [""]
+            selected_value = Signal("", name="selected_value")
 
             options = [
                 SelectOption("Option 1", value="opt1", description="First option"),
@@ -334,13 +362,20 @@ class TestSolidJSRendererIntegration:
                 focused=True,
                 on_change=lambda idx, opt: (
                     change_spy(idx, opt),
-                    selected_value.__setitem__(0, opt.value if opt else ""),
+                    selected_value.set(opt.value if opt else ""),
                 ),
             )
             select_comp._selected_index = 0  # Start at first option
 
-            setup = await _test_render(
-                lambda: Box(select_comp, Text(f"Selected: {selected_value[0]}")),
+            @template_component
+            def SelectValueStatus():
+                return Box(
+                    select_comp,
+                    Text(reactive(lambda: f"Selected: {selected_value()}"), id="selected_value"),
+                )
+
+            setup = await _strict_render(
+                SelectValueStatus,
                 {"width": 25, "height": 10},
             )
 
@@ -359,52 +394,55 @@ class TestSolidJSRendererIntegration:
             assert change_spy.call_count() == 1
             assert change_spy.calls[0][0] == 1
             assert change_spy.calls[0][1].value == "opt2"
-            assert selected_value[0] == "opt2"
+            assert selected_value() == "opt2"
 
             _dispatch_key(setup.mock_input, "down", internal_handler=select_key_handler)
 
             assert change_spy.call_count() == 2
             assert change_spy.calls[1][0] == 2
             assert change_spy.calls[1][1].value == "opt3"
-            assert selected_value[0] == "opt3"
+            assert selected_value() == "opt3"
 
             setup.destroy()
 
         async def test_should_handle_dynamic_arrays_and_list_updates(self):
             """Maps to it("should handle dynamic arrays and list updates")."""
 
-            items = Signal("items", ["Item 1", "Item 2"])
+            items = Signal(["Item 1", "Item 2"], name="items")
 
             def build_tree():
-                return Box(*[Text(item) for item in items()])
+                return Box(
+                    For(
+                        each=items,
+                        render=lambda item: Text(item, key=f"item-{item}"),
+                        key_fn=lambda item: f"item-{item}",
+                        key="items",
+                    )
+                )
 
-            setup = await _test_render(build_tree, {"width": 20, "height": 10})
+            setup = await _strict_render(build_tree, {"width": 20, "height": 10})
+            setup.render_frame()
 
             # Check initial children
             children = setup.renderer.root.get_children()
             assert len(children) == 1  # The Box
-            box_children = children[0].get_children()
+            box_children = children[0].get_children()[0].get_children()
             assert len(box_children) == 2
 
-            # Add an item -- rebuild the tree
+            # Add an item through For's reactive update path
             items.set(["Item 1", "Item 2", "Item 3"])
-            root = setup.renderer.root
-            root._children.clear()
-            root._yoga_node.remove_all_children()
-            root.add(build_tree())
+            setup.render_frame()
 
             children = setup.renderer.root.get_children()
-            box_children = children[0].get_children()
+            box_children = children[0].get_children()[0].get_children()
             assert len(box_children) == 3
 
             # Remove an item
             items.set(["Item 1", "Item 3"])
-            root._children.clear()
-            root._yoga_node.remove_all_children()
-            root.add(build_tree())
+            setup.render_frame()
 
             children = setup.renderer.root.get_children()
-            box_children = children[0].get_children()
+            box_children = children[0].get_children()[0].get_children()
             assert len(box_children) == 2
 
             setup.destroy()
@@ -436,26 +474,26 @@ class TestSolidJSRendererIntegration:
         async def test_should_handle_dynamic_text_content(self):
             """Maps to it("should handle dynamic text content")."""
 
-            dynamic_text = Signal("text", "Initial")
+            dynamic_text = Signal("Initial", name="text")
 
-            def build_tree():
+            @template_component
+            def ContentBox():
                 return Box(
-                    Text(f"Static: {dynamic_text()}", wrap_mode="none"),
+                    Text(reactive(lambda: f"Static: {dynamic_text()}"), id="dynamic_text", wrap_mode="none"),
                     Text("Direct content"),
                 )
 
-            setup = await _test_render(build_tree, {"width": 30, "height": 8})
+            setup = await _strict_render(
+                ContentBox,
+                {"width": 30, "height": 8},
+            )
 
             frame = setup.capture_char_frame()
             assert "Static: Initial" in frame
             assert "Direct content" in frame
 
-            # Update the signal and rebuild
+            # Update the signal and let the template path update in place
             dynamic_text.set("Updated")
-            root = setup.renderer.root
-            root._children.clear()
-            root._yoga_node.remove_all_children()
-            root.add(build_tree())
 
             frame = setup.capture_char_frame()
             assert "Static: Updated" in frame
@@ -467,17 +505,21 @@ class TestSolidJSRendererIntegration:
             """Maps to it("should handle usePaste hook")."""
 
             paste_spy = _Spy()
-            pasted_text = [""]
+            pasted_text = Signal("", name="pasted_text")
 
-            setup = await _test_render(
-                lambda: Box(Text(f"Pasted: {pasted_text[0]}")),
+            @template_component
+            def PasteStatus():
+                return Box(Text(reactive(lambda: f"Pasted: {pasted_text()}"), id="pasted_text"))
+
+            setup = await _strict_render(
+                PasteStatus,
                 {"width": 30, "height": 5},
             )
 
             # Register paste handler (mirrors usePaste hook)
             def on_paste(event):
                 paste_spy(event.text)
-                pasted_text[0] = event.text
+                pasted_text.set(event.text)
 
             use_paste(on_paste)
 
@@ -485,7 +527,7 @@ class TestSolidJSRendererIntegration:
 
             assert paste_spy.call_count() == 1
             assert paste_spy.calls[0][0] == "pasted content"
-            assert pasted_text[0] == "pasted content"
+            assert pasted_text() == "pasted content"
 
             setup.destroy()
 
@@ -586,16 +628,23 @@ class TestSolidJSRendererIntegration:
             """Maps to it("should handle global handler registered after component mount")."""
 
             input_spy = _Spy()
-            value = [""]
+            value = Signal("", name="value")
 
             def on_input(val):
                 input_spy(val)
-                value[0] = val
+                value.set(val)
 
             input_comp = Input(focused=True, on_input=on_input)
 
-            setup = await _test_render(
-                lambda: Box(input_comp, Text(f"Value: {value[0]}")),
+            @template_component
+            def InputStatus():
+                return Box(
+                    input_comp,
+                    Text(reactive(lambda: f"Value: {value()}"), id="input_value"),
+                )
+
+            setup = await _strict_render(
+                InputStatus,
                 {"width": 20, "height": 5},
             )
 
@@ -604,7 +653,7 @@ class TestSolidJSRendererIntegration:
             # Type before global handler exists
             _dispatch_type_text(setup.mock_input, "hello", internal_handler=handler)
             assert input_spy.call_count() == 5
-            assert value[0] == "hello"
+            assert value() == "hello"
 
             input_spy.reset()
 
@@ -620,7 +669,7 @@ class TestSolidJSRendererIntegration:
 
             # Only letters should reach the input (6 letters: a, b, c, x, y, z)
             assert input_spy.call_count() == 6
-            assert value[0] == "helloabcxyz"
+            assert value() == "helloabcxyz"
 
             setup.destroy()
 
@@ -677,7 +726,7 @@ class TestSolidJSRendererIntegration:
 
             change_spy = _Spy()
             global_handler_spy = _Spy()
-            selected_index = [0]
+            selected_index = Signal(0, name="selected_index")
 
             options = [
                 SelectOption("Option 1", value=1, description="First"),
@@ -690,13 +739,20 @@ class TestSolidJSRendererIntegration:
                 focused=True,
                 on_change=lambda idx, opt: (
                     change_spy(idx, opt),
-                    selected_index.__setitem__(0, idx),
+                    selected_index.set(idx),
                 ),
             )
             select_comp._selected_index = 0
 
-            setup = await _test_render(
-                lambda: Box(select_comp, Text(f"Selected: {selected_index[0]}")),
+            @template_component
+            def PreventDefaultSelectStatus():
+                return Box(
+                    select_comp,
+                    Text(reactive(lambda: f"Selected: {selected_index()}"), id="selected_index"),
+                )
+
+            setup = await _strict_render(
+                PreventDefaultSelectStatus,
                 {"width": 30, "height": 10},
             )
 
@@ -729,7 +785,7 @@ class TestSolidJSRendererIntegration:
             )
             assert global_handler_spy.call_count() == 1
             assert change_spy.call_count() == 0  # Should not change
-            assert selected_index[0] == 0  # Should remain at 0
+            assert selected_index() == 0  # Should remain at 0
 
             # Up arrow should still work (wraps to last option)
             _dispatch_key(
@@ -739,7 +795,7 @@ class TestSolidJSRendererIntegration:
             )
             assert global_handler_spy.call_count() == 2
             assert change_spy.call_count() == 1  # Should wrap to last option
-            assert selected_index[0] == 2  # Should be at last option
+            assert selected_index() == 2  # Should be at last option
 
             setup.destroy()
 

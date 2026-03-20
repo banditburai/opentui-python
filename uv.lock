@@ -104,6 +104,13 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-bash" },
+    { name = "tree-sitter-javascript" },
+    { name = "tree-sitter-json" },
+    { name = "tree-sitter-markdown" },
+    { name = "tree-sitter-python" },
+    { name = "tree-sitter-typescript" },
 ]
 highlighting = [
     { name = "tree-sitter" },
@@ -122,6 +129,7 @@ images = [
 [package.metadata]
 requires-dist = [
     { name = "numpy", marker = "extra == 'images'", specifier = ">=1.24.0" },
+    { name = "opentui", extras = ["highlighting"], marker = "extra == 'dev'" },
     { name = "pillow", marker = "extra == 'images'", specifier = ">=10.0.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -134,7 +142,7 @@ requires-dist = [
     { name = "tree-sitter-markdown", marker = "extra == 'highlighting'", specifier = ">=0.3.2" },
     { name = "tree-sitter-python", marker = "extra == 'highlighting'", specifier = ">=0.23.0" },
     { name = "tree-sitter-typescript", marker = "extra == 'highlighting'", specifier = ">=0.23.0" },
-    { name = "yoga-python", specifier = ">=0.1.2" },
+    { name = "yoga-python", editable = "../yoga-python" },
 ]
 provides-extras = ["dev", "images", "highlighting"]
 
@@ -436,13 +444,21 @@ wheels = [
 [[package]]
 name = "yoga-python"
 version = "0.1.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c2/9e/6784ff8e87bc0eb5102b6393fa7d252ec2662c82564276606db87fc04933/yoga_python-0.1.2.tar.gz", hash = "sha256:53481483899508316c1bbc7f5901570b258804af03cb4920b9d477edb2e0b968", size = 99005, upload-time = "2026-03-07T00:29:13.216Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/9c/45002e5027e029db61420896d049890aa424027d3e0a8c0fb61af7402d19/yoga_python-0.1.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:4181597095a8156aa1bbdd1d9fe1aff2e371de9281c1b84c22d06446aea17786", size = 126889, upload-time = "2026-03-07T00:29:05.591Z" },
-    { url = "https://files.pythonhosted.org/packages/ac/51/5fa1660be519164e49a2b33079f1ee349c7c43b4afe848585ca93ff09133/yoga_python-0.1.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e1018478e716db3278d6f1992ab534e42878b16822e2783542bd285ca1aff1b7", size = 183086, upload-time = "2026-03-07T00:29:06.843Z" },
-    { url = "https://files.pythonhosted.org/packages/5f/46/0a8731198720d1f4cbe8a3b16f6af12e460ecb6c28eefd7d43fc438a0900/yoga_python-0.1.2-cp312-cp312-win_amd64.whl", hash = "sha256:46fdcaf82d1366de64558ca681dc701020a167bd8d1aad9420d0ab0b5484225c", size = 150234, upload-time = "2026-03-07T00:29:07.973Z" },
-    { url = "https://files.pythonhosted.org/packages/b3/31/8c22bb27e2b11b209c393c4ff4b1de7161babae87662f35df9cb6dde9303/yoga_python-0.1.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:4344be79d1d31fe50ad1183c5ca2ff78d7cde734d2671a79261bbca9e8d773f3", size = 126842, upload-time = "2026-03-07T00:29:09.201Z" },
-    { url = "https://files.pythonhosted.org/packages/25/7e/528b8517db5643c718ea861762d6708c438c99c8e2cc1e288183f9ee0358/yoga_python-0.1.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:90e6f5e262b8a7a5491262c68a05f3e4212c254ea2744d0df354e7b9b57f4c17", size = 183037, upload-time = "2026-03-07T00:29:10.563Z" },
-    { url = "https://files.pythonhosted.org/packages/57/ad/92e97b4fa0871fb3efc819002d5f33fe48b2f0a211638e84bf3096e3f282/yoga_python-0.1.2-cp313-cp313-win_amd64.whl", hash = "sha256:e954fd7d735b180402e903a93d3e2615bcfbcc69b20c56d503e107c5f48b9910", size = 150218, upload-time = "2026-03-07T00:29:12.091Z" },
+source = { editable = "../yoga-python" }
+
+[package.metadata]
+requires-dist = [
+    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.408" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3" },
+]
+provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyright", specifier = ">=1.1.408" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-cov", specifier = ">=4.1" },
+    { name = "ruff", specifier = ">=0.3" },
 ]

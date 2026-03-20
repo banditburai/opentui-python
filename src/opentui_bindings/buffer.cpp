@@ -1,19 +1,25 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/array.h>
+#include <nanobind/stl/vector.h>
 #include <cstring>
 #include <cstdint>
 #include <string>
 #include <vector>
 #include <optional>
 #include <array>
+#include "border_draw.h"
 
 namespace nb = nanobind;
 
-// EncodedChar struct matching the Zig ExternalEncodedChar layout
 struct EncodedChar {
     uint8_t width;
     uint32_t ch;
+};
+
+struct ExternalGridDrawOptions {
+    bool draw_inner;
+    bool draw_outer;
 };
 
 extern "C" {
@@ -22,6 +28,13 @@ extern "C" {
     void bufferDrawText(void* buffer, const char* text, size_t len, uint32_t x, uint32_t y, float* fg, float* bg, uint32_t attrs);
     void bufferSetCell(void* buffer, uint32_t x, uint32_t y, uint32_t ch, float* fg, float* bg, uint32_t attrs);
     void bufferFillRect(void* buffer, uint32_t x, uint32_t y, uint32_t width, uint32_t height, float* bg);
+    void bufferDrawBox(void* buffer, int32_t x, int32_t y, uint32_t width, uint32_t height,
+                       const uint32_t* borderChars, uint32_t packedOptions, float* borderColor,
+                       float* backgroundColor, const char* title, uint32_t titleLen);
+    void bufferDrawGrid(void* buffer, const uint32_t* borderChars, float* borderFg, float* borderBg,
+                        const int32_t* columnOffsets, uint32_t columnCount,
+                        const int32_t* rowOffsets, uint32_t rowCount,
+                        const ExternalGridDrawOptions* options);
     void* bufferGetCharPtr(void* buffer);
     void* bufferGetFgPtr(void* buffer);
     void* bufferGetBgPtr(void* buffer);
@@ -36,16 +49,15 @@ extern "C" {
     size_t getArenaAllocatedBytes();
     void* createOptimizedBuffer(uint32_t width, uint32_t height, bool respectAlpha, uint8_t encoding, const char* id, size_t idLen);
     void destroyOptimizedBuffer(void* buffer);
-    void drawFrameBuffer(void* buffer);
+    void drawFrameBuffer(void* targetBuffer, int32_t destX, int32_t destY, void* frameBuffer,
+                         uint32_t sourceX, uint32_t sourceY, uint32_t sourceWidth, uint32_t sourceHeight);
     size_t bufferGetId(void* buffer, void* out, size_t maxLen);
 
-    // Unicode encoding and drawChar
     bool encodeUnicode(const char* text, size_t textLen, EncodedChar** outPtr, size_t* outLenPtr, uint8_t widthMethod);
     void freeUnicode(const EncodedChar* charsPtr, size_t charsLen);
     void bufferDrawChar(void* buffer, uint32_t ch, uint32_t x, uint32_t y, float* fg, float* bg, uint32_t attrs);
 }
 
-// Helper: copy optional RGBA array into a float[4], using default if not provided
 static void resolve_fg(std::optional<std::array<float, 4>> const& opt, float out[4]) {
     if (opt.has_value()) {
         out[0] = (*opt)[0]; out[1] = (*opt)[1]; out[2] = (*opt)[2]; out[3] = (*opt)[3];
@@ -62,8 +74,15 @@ static void resolve_bg(std::optional<std::array<float, 4>> const& opt, float out
     }
 }
 
+static void resolve_transparent_bg(std::optional<std::array<float, 4>> const& opt, float out[4]) {
+    if (opt.has_value()) {
+        out[0] = (*opt)[0]; out[1] = (*opt)[1]; out[2] = (*opt)[2]; out[3] = (*opt)[3];
+    } else {
+        out[0] = 0.0f; out[1] = 0.0f; out[2] = 0.0f; out[3] = 0.0f;
+    }
+}
+
 void bind_buffer(nb::module_& m) {
-    // Buffer clear - delegates to Zig bufferClear
     m.def("buffer_clear", [](void* buffer, float alpha) {
         float color[4] = {0.0f, 0.0f, 0.0f, alpha};
         bufferClear(buffer, color);
@@ -72,7 +91,6 @@ void bind_buffer(nb::module_& m) {
     m.def("buffer_resize", &bufferResize,
           nb::arg("buffer"), nb::arg("width"), nb::arg("height"));
 
-    // buffer_draw_text - delegates to Zig bufferDrawText
     m.def("buffer_draw_text", [](void* buffer, nb::bytes text,
                                   int32_t len, uint32_t x, uint32_t y,
                                   std::optional<std::array<float, 4>> fg,
@@ -95,7 +113,6 @@ void bind_buffer(nb::module_& m) {
     }, nb::arg("buffer"), nb::arg("text"), nb::arg("len"), nb::arg("x"), nb::arg("y"),
        nb::arg("fg") = std::nullopt, nb::arg("bg") = std::nullopt, nb::arg("attrs") = 0);
 
-    // buffer_set_cell - delegates to Zig bufferSetCell
     m.def("buffer_set_cell", [](void* buffer, uint32_t x, uint32_t y, uint32_t ch,
                                 std::optional<std::array<float, 4>> fg,
                                 std::optional<std::array<float, 4>> bg,
@@ -107,7 +124,6 @@ void bind_buffer(nb::module_& m) {
     }, nb::arg("buffer"), nb::arg("x"), nb::arg("y"), nb::arg("ch"),
        nb::arg("fg") = std::nullopt, nb::arg("bg") = std::nullopt, nb::arg("attrs") = 0);
 
-    // buffer_fill_rect - delegates to Zig bufferFillRect
     m.def("buffer_fill_rect", [](void* buffer, uint32_t x, uint32_t y,
                                   uint32_t width, uint32_t height,
                                   std::optional<std::array<float, 4>> bg) {
@@ -117,7 +133,98 @@ void bind_buffer(nb::module_& m) {
     }, nb::arg("buffer"), nb::arg("x"), nb::arg("y"), nb::arg("width"), nb::arg("height"),
        nb::arg("bg") = std::nullopt);
 
-    // Return pointers as integers for direct memory access from Python
+    m.def("buffer_draw_box", [](void* buffer, int32_t x, int32_t y,
+                                 uint32_t width, uint32_t height,
+                                 const char* borderStyle,
+                                 bool borderTop,
+                                 bool borderRight,
+                                 bool borderBottom,
+                                 bool borderLeft,
+                                 bool shouldFill,
+                                 std::optional<std::array<float, 4>> borderColor,
+                                 std::optional<std::array<float, 4>> backgroundColor,
+                                 const char* title,
+                                 const char* titleAlignment) {
+        float fg_color[4];
+        resolve_fg(borderColor, fg_color);
+
+        float bg_color[4];
+        resolve_transparent_bg(backgroundColor, bg_color);
+
+        const auto style = border_draw::border_style_from_cstr(borderStyle);
+        const auto packed = border_draw::pack_draw_options(
+            borderTop,
+            borderRight,
+            borderBottom,
+            borderLeft,
+            shouldFill,
+            border_draw::title_alignment_code(titleAlignment)
+        );
+        const size_t title_len = title ? std::strlen(title) : 0;
+        bufferDrawBox(
+            buffer,
+            x,
+            y,
+            width,
+            height,
+            border_draw::border_chars(style),
+            packed,
+            fg_color,
+            bg_color,
+            title_len ? title : nullptr,
+            static_cast<uint32_t>(title_len)
+        );
+    }, nb::arg("buffer"), nb::arg("x"), nb::arg("y"), nb::arg("width"), nb::arg("height"),
+       nb::arg("border_style") = "single",
+       nb::arg("border_top") = true,
+       nb::arg("border_right") = true,
+       nb::arg("border_bottom") = true,
+       nb::arg("border_left") = true,
+       nb::arg("should_fill") = false,
+       nb::arg("border_color") = std::nullopt,
+       nb::arg("background_color") = std::nullopt,
+       nb::arg("title") = "",
+       nb::arg("title_alignment") = "left");
+
+    m.def("buffer_draw_grid", [](void* buffer,
+                                  const char* borderStyle,
+                                  std::optional<std::array<float, 4>> borderColor,
+                                  std::optional<std::array<float, 4>> backgroundColor,
+                                  const std::vector<int32_t>& columnOffsets,
+                                  const std::vector<int32_t>& rowOffsets,
+                                  bool drawInner,
+                                  bool drawOuter) {
+        float fg_color[4];
+        resolve_fg(borderColor, fg_color);
+
+        float bg_color[4];
+        resolve_transparent_bg(backgroundColor, bg_color);
+
+        const auto style = border_draw::border_style_from_cstr(borderStyle);
+        const ExternalGridDrawOptions options{drawInner, drawOuter};
+        const uint32_t column_count = columnOffsets.size() > 0
+            ? static_cast<uint32_t>(columnOffsets.size() - 1)
+            : 0;
+        const uint32_t row_count = rowOffsets.size() > 0
+            ? static_cast<uint32_t>(rowOffsets.size() - 1)
+            : 0;
+
+        bufferDrawGrid(
+            buffer,
+            border_draw::border_chars(style),
+            fg_color,
+            bg_color,
+            columnOffsets.empty() ? nullptr : columnOffsets.data(),
+            column_count,
+            rowOffsets.empty() ? nullptr : rowOffsets.data(),
+            row_count,
+            &options
+        );
+    }, nb::arg("buffer"), nb::arg("border_style") = "single",
+       nb::arg("border_color") = std::nullopt, nb::arg("background_color") = std::nullopt,
+       nb::arg("column_offsets"), nb::arg("row_offsets"),
+       nb::arg("draw_inner") = true, nb::arg("draw_outer") = true);
+
     m.def("buffer_get_char_ptr", [](void* buffer) -> uint64_t {
         return (uint64_t)bufferGetCharPtr(buffer);
     }, nb::arg("buffer"));
@@ -163,7 +270,6 @@ void bind_buffer(nb::module_& m) {
 
     m.def("get_arena_allocated_bytes", &getArenaAllocatedBytes);
 
-    // OptimizedBuffer functions
     m.def("create_optimized_buffer", [](uint32_t width, uint32_t height, bool respectAlpha,
                                         uint8_t encoding, const char* id) -> void* {
         size_t idLen = id ? std::strlen(id) : 0;
@@ -172,7 +278,18 @@ void bind_buffer(nb::module_& m) {
        nb::arg("encoding") = 0, nb::arg("id") = "");
 
     m.def("destroy_optimized_buffer", &destroyOptimizedBuffer, nb::arg("buffer"));
-    m.def("draw_frame_buffer", &drawFrameBuffer, nb::arg("buffer"));
+    m.def(
+        "draw_frame_buffer",
+        &drawFrameBuffer,
+        nb::arg("target_buffer"),
+        nb::arg("dest_x"),
+        nb::arg("dest_y"),
+        nb::arg("frame_buffer"),
+        nb::arg("source_x") = 0,
+        nb::arg("source_y") = 0,
+        nb::arg("source_width") = 0,
+        nb::arg("source_height") = 0
+    );
 
     m.def("buffer_get_id", [](void* buffer, size_t maxLen) -> nb::bytes {
         std::string out(maxLen, '\0');
@@ -180,7 +297,6 @@ void bind_buffer(nb::module_& m) {
         return nb::bytes(out.data(), len);
     }, nb::arg("buffer"), nb::arg("max_len") = 256);
 
-    // encodeUnicode: encode text into array of (width, char) tuples
     m.def("encode_unicode", [](nb::bytes text, uint8_t widthMethod) -> nb::list {
         EncodedChar* outPtr = nullptr;
         size_t outLen = 0;
@@ -195,7 +311,6 @@ void bind_buffer(nb::module_& m) {
         return result;
     }, nb::arg("text"), nb::arg("width_method") = 0);
 
-    // bufferDrawChar: draw a single encoded character at position
     m.def("buffer_draw_char", [](void* buffer, uint32_t ch, uint32_t x, uint32_t y,
                                   std::optional<std::array<float, 4>> fg,
                                   std::optional<std::array<float, 4>> bg,
