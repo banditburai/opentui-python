@@ -13,9 +13,14 @@ import math
 import os
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
+try:
     import numpy as np
 
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
+
+if TYPE_CHECKING:
     from .renderer import Buffer, TerminalCapabilities
 
 
@@ -738,69 +743,26 @@ class ClipboardHandler:
 class Filter:
     """Base class for image filters.
 
-    Filters process image data to apply visual effects.
-    This base class provides the interface that all filters must implement.
-
-    Example:
-        class MyFilter(Filter):
-            def apply(self, data: bytes) -> bytes:
-                # Process image data
-                return processed_data
+    Subclasses implement ``_apply_pure`` and ``_apply_numpy``.  The base
+    ``apply`` dispatches to the numpy path when available.
     """
 
     def apply(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply filter to image data.
+        if _HAS_NUMPY:
+            return self._apply_numpy(data, format)
+        return self._apply_pure(data, format)
 
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
+    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+        return data
 
-        Returns:
-            Filtered image data
-        """
+    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
         return data
 
 
 class GrayscaleFilter(Filter):
-    """Convert image to grayscale.
-
-    Converts each pixel from color to grayscale using the luminance formula:
-    Y = 0.299*R + 0.587*G + 0.114*B
-
-    Example:
-        filter = GrayscaleFilter()
-        grayscale_data = filter.apply(rgba_data, format="RGBA")
-    """
-
-    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply grayscale conversion to image data.
-
-        Tries NumPy-accelerated path first, falls back to pure Python.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Grayscale image data (same format as input)
-        """
-        try:
-            import numpy as np
-
-            return self._apply_numpy(data, format)
-        except ImportError:
-            return self._apply_pure(data, format)
+    """Convert image to grayscale using luminance formula Y = 0.299*R + 0.587*G + 0.114*B."""
 
     def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply grayscale conversion using pure Python.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Grayscale image data (same format as input)
-        """
         if len(data) < 3:
             return data
 
@@ -825,17 +787,6 @@ class GrayscaleFilter(Filter):
         return bytes(result)
 
     def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply grayscale conversion using NumPy vectorized operations.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Grayscale image data (same format as input)
-        """
-        import numpy as np
-
         if len(data) < 3:
             return data
 
@@ -861,18 +812,7 @@ class GrayscaleFilter(Filter):
 
 
 class BlurFilter(Filter):
-    """Apply Gaussian blur to image.
-
-    Applies a Gaussian blur effect to soften image details.
-
-    Example:
-        # Apply mild blur
-        blur = BlurFilter(radius=2.0)
-        blurred = blur.apply(image_data, width=100, height=100)
-
-        # Apply strong blur
-        strong_blur = BlurFilter(radius=5.0)
-    """
+    """Apply Gaussian blur to image with configurable radius."""
 
     def __init__(self, radius: float = 1.0):
         """Initialize blur filter.
@@ -885,40 +825,15 @@ class BlurFilter(Filter):
     def apply(
         self, data: bytes, width: int | None = None, height: int | None = None, format: str = "RGBA"
     ) -> bytes:
-        """Apply Gaussian blur to image data.
-
-        Tries NumPy-accelerated path first, falls back to pure Python.
-
-        Args:
-            data: Raw image data
-            width: Image width in pixels (required for non-square images)
-            height: Image height in pixels (optional, defaults to width)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Blurred image data
-        """
-        try:
-            import numpy as np
-
+        """Apply Gaussian blur to image data."""
+        if _HAS_NUMPY:
             return self._apply_numpy(data, width, height, format)
-        except ImportError:
-            return self._apply_pure(data, width, height, format)
+        return self._apply_pure(data, width, height, format)
 
     def _apply_pure(
         self, data: bytes, width: int | None = None, height: int | None = None, format: str = "RGBA"
     ) -> bytes:
-        """Apply Gaussian blur using pure Python.
-
-        Args:
-            data: Raw image data
-            width: Image width in pixels (required for non-square images)
-            height: Image height in pixels (optional, defaults to width)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Blurred image data
-        """
+        """Apply Gaussian blur using pure Python."""
         if len(data) < 4:
             return data
 
@@ -981,22 +896,7 @@ class BlurFilter(Filter):
     def _apply_numpy(
         self, data: bytes, width: int | None = None, height: int | None = None, format: str = "RGBA"
     ) -> bytes:
-        """Apply Gaussian blur using NumPy with separable convolution.
-
-        Implements a two-pass separable Gaussian blur (horizontal then vertical),
-        which is O(n*k) instead of O(n*k^2) for the 2D kernel approach.
-
-        Args:
-            data: Raw image data
-            width: Image width in pixels (required for non-square images)
-            height: Image height in pixels (optional, defaults to width)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Blurred image data
-        """
-        import numpy as np
-
+        """Apply Gaussian blur using NumPy with separable convolution."""
         if len(data) < 4:
             return data
 
@@ -1047,15 +947,7 @@ class BlurFilter(Filter):
         return result.tobytes()
 
     def _create_gaussian_kernel(self, size: int, sigma: float) -> list[float]:
-        """Create a Gaussian kernel.
-
-        Args:
-            size: Kernel size (must be odd)
-            sigma: Standard deviation for Gaussian
-
-        Returns:
-            Flattened kernel values
-        """
+        """Create a 2D Gaussian kernel, returned flattened."""
         kernel = []
         half = size // 2
         sum_val = 0.0
@@ -1071,17 +963,7 @@ class BlurFilter(Filter):
         return [k / sum_val for k in kernel]
 
     def _create_gaussian_kernel_1d(self, radius: int, sigma: float) -> np.ndarray:
-        """Create a 1D Gaussian kernel for separable convolution.
-
-        Args:
-            radius: Kernel radius (kernel size = 2*radius + 1)
-            sigma: Standard deviation for Gaussian
-
-        Returns:
-            Normalized 1D NumPy kernel array
-        """
-        import numpy as np
-
+        """Create a normalized 1D Gaussian kernel for separable convolution."""
         size = radius * 2 + 1
         x = np.arange(size) - radius
         kernel = np.exp(-(x * x) / (2 * sigma * sigma))
@@ -1090,17 +972,7 @@ class BlurFilter(Filter):
 
 
 class BrightnessFilter(Filter):
-    """Adjust image brightness.
-
-    Brightens or darkens an image by scaling pixel values.
-
-    Example:
-        # Brighten an image
-        bright = BrightnessFilter(factor=1.5)  # 50% brighter
-
-        # Darken an image
-        dark = BrightnessFilter(factor=0.5)  # 50% darker
-    """
+    """Adjust image brightness by scaling pixel values."""
 
     def __init__(self, factor: float = 1.0):
         """Initialize brightness filter.
@@ -1110,35 +982,8 @@ class BrightnessFilter(Filter):
         """
         self._factor = factor
 
-    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply brightness adjustment to image data.
-
-        Tries NumPy-accelerated path first, falls back to pure Python.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Brightness-adjusted image data
-        """
-        try:
-            import numpy as np
-
-            return self._apply_numpy(data, format)
-        except ImportError:
-            return self._apply_pure(data, format)
-
     def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply brightness adjustment using pure Python.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Brightness-adjusted image data
-        """
+        """Apply brightness adjustment using pure Python."""
         if len(data) < 3:
             return data
 
@@ -1157,17 +1002,7 @@ class BrightnessFilter(Filter):
         return bytes(result)
 
     def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply brightness adjustment using NumPy vectorized operations.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Brightness-adjusted image data
-        """
-        import numpy as np
-
+        """Apply brightness adjustment using NumPy."""
         if len(data) < 3:
             return data
 
@@ -1186,17 +1021,7 @@ class BrightnessFilter(Filter):
 
 
 class ContrastFilter(Filter):
-    """Adjust image contrast.
-
-    Increases or decreases the difference between light and dark pixels.
-
-    Example:
-        # Increase contrast
-        high_contrast = ContrastFilter(factor=1.5)
-
-        # Decrease contrast
-        low_contrast = ContrastFilter(factor=0.5)
-    """
+    """Adjust image contrast by scaling distance from midpoint."""
 
     def __init__(self, factor: float = 1.0):
         """Initialize contrast filter.
@@ -1206,35 +1031,8 @@ class ContrastFilter(Filter):
         """
         self._factor = factor
 
-    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply contrast adjustment to image data.
-
-        Tries NumPy-accelerated path first, falls back to pure Python.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Contrast-adjusted image data
-        """
-        try:
-            import numpy as np
-
-            return self._apply_numpy(data, format)
-        except ImportError:
-            return self._apply_pure(data, format)
-
     def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply contrast adjustment using pure Python.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Contrast-adjusted image data
-        """
+        """Apply contrast adjustment using pure Python."""
         if len(data) < 3:
             return data
 
@@ -1254,17 +1052,7 @@ class ContrastFilter(Filter):
         return bytes(result)
 
     def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply contrast adjustment using NumPy vectorized operations.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Contrast-adjusted image data
-        """
-        import numpy as np
-
+        """Apply contrast adjustment using NumPy."""
         if len(data) < 3:
             return data
 
@@ -1284,54 +1072,10 @@ class ContrastFilter(Filter):
 
 
 class SepiaFilter(Filter):
-    """Apply sepia tone to image.
-
-    Gives images a warm, vintage brownish tone.
-
-    Example:
-        sepia = SepiaFilter()
-        sepia_data = sepia.apply(image_data, format="RGBA")
-    """
-
-    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply sepia effect to image data.
-
-        Tries NumPy-accelerated path first, falls back to pure Python.
-
-        Uses the standard sepia transformation matrix:
-        R' = 0.393*R + 0.769*G + 0.189*B
-        G' = 0.349*R + 0.686*G + 0.168*B
-        B' = 0.272*R + 0.534*G + 0.131*B
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Sepia-toned image data
-        """
-        try:
-            import numpy as np
-
-            return self._apply_numpy(data, format)
-        except ImportError:
-            return self._apply_pure(data, format)
+    """Apply sepia tone to image using the standard sepia transformation matrix."""
 
     def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply sepia effect using pure Python.
-
-        Uses the standard sepia transformation matrix:
-        R' = 0.393*R + 0.769*G + 0.189*B
-        G' = 0.349*R + 0.686*G + 0.168*B
-        B' = 0.272*R + 0.534*G + 0.131*B
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Sepia-toned image data
-        """
+        """Apply sepia effect using pure Python."""
         if len(data) < 3:
             return data
 
@@ -1357,17 +1101,7 @@ class SepiaFilter(Filter):
         return bytes(result)
 
     def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply sepia effect using NumPy vectorized operations.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Sepia-toned image data
-        """
-        import numpy as np
-
+        """Apply sepia effect using NumPy."""
         if len(data) < 3:
             return data
 
@@ -1397,44 +1131,10 @@ class SepiaFilter(Filter):
 
 
 class InvertFilter(Filter):
-    """Invert image colors.
-
-    Creates a photo-negative effect by inverting each color channel.
-
-    Example:
-        invert = InvertFilter()
-        inverted_data = invert.apply(image_data, format="RGBA")
-    """
-
-    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply color inversion to image data.
-
-        Tries NumPy-accelerated path first, falls back to pure Python.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Inverted image data
-        """
-        try:
-            import numpy as np
-
-            return self._apply_numpy(data, format)
-        except ImportError:
-            return self._apply_pure(data, format)
+    """Invert image colors to create a photo-negative effect."""
 
     def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply color inversion using pure Python.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Inverted image data
-        """
+        """Apply color inversion using pure Python."""
         if len(data) < 3:
             return data
 
@@ -1452,17 +1152,7 @@ class InvertFilter(Filter):
         return bytes(result)
 
     def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply color inversion using NumPy vectorized operations.
-
-        Args:
-            data: Raw image data (RGBA or RGB format)
-            format: Image format - "RGBA" or "RGB"
-
-        Returns:
-            Inverted image data
-        """
-        import numpy as np
-
+        """Apply color inversion using NumPy."""
         if len(data) < 3:
             return data
 

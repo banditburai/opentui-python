@@ -91,6 +91,13 @@ _ALIGN_MAP = {
 }
 
 
+def _make_parser(mapping: dict[str, Any], default: Any):
+    """Create a str→enum parser: None→default, else dict lookup with default fallback."""
+    def parse(value: str | None) -> Any:
+        return default if value is None else mapping.get(value.lower(), default)
+    return parse
+
+
 def parse_align(value: str | None, default: yoga.Align = yoga.Align.Auto) -> yoga.Align:
     if value is None:
         return default
@@ -101,224 +108,60 @@ def parse_align_items(value: str | None) -> yoga.Align:
     return parse_align(value, yoga.Align.Stretch)
 
 
-def parse_box_sizing(value: str | None) -> yoga.BoxSizing:
-    if value is None:
-        return yoga.BoxSizing.BorderBox
-    match value.lower():
-        case "border-box":
-            return yoga.BoxSizing.BorderBox
-        case "content-box":
-            return yoga.BoxSizing.ContentBox
-        case _:
-            return yoga.BoxSizing.BorderBox
+_BOX_SIZING_MAP = {"border-box": yoga.BoxSizing.BorderBox, "content-box": yoga.BoxSizing.ContentBox}
+parse_box_sizing = _make_parser(_BOX_SIZING_MAP, yoga.BoxSizing.BorderBox)
 
+_DIMENSION_PARSE_MAP = {"width": yoga.Dimension.Width, "height": yoga.Dimension.Height}
+parse_dimension = _make_parser(_DIMENSION_PARSE_MAP, yoga.Dimension.Width)
 
-def parse_dimension(value: str | None) -> yoga.Dimension:
-    if value is None:
-        return yoga.Dimension.Width
-    match value.lower():
-        case "width":
-            return yoga.Dimension.Width
-        case "height":
-            return yoga.Dimension.Height
-        case _:
-            return yoga.Dimension.Width
+_DIRECTION_MAP = {"inherit": yoga.Direction.Inherit, "ltr": yoga.Direction.LTR, "rtl": yoga.Direction.RTL}
+parse_direction = _make_parser(_DIRECTION_MAP, yoga.Direction.LTR)
 
+_DISPLAY_MAP = {"flex": yoga.Display.Flex, "none": yoga.Display.None_, "contents": yoga.Display.Contents}
+parse_display = _make_parser(_DISPLAY_MAP, yoga.Display.Flex)
 
-def parse_direction(value: str | None) -> yoga.Direction:
-    if value is None:
-        return yoga.Direction.LTR
-    match value.lower():
-        case "inherit":
-            return yoga.Direction.Inherit
-        case "ltr":
-            return yoga.Direction.LTR
-        case "rtl":
-            return yoga.Direction.RTL
-        case _:
-            return yoga.Direction.LTR
+parse_edge = _make_parser(EDGE_MAP, yoga.Edge.All)
 
+parse_flex_direction = _make_parser(FLEX_DIRECTION_MAP, yoga.FlexDirection.Column)
 
-def parse_display(value: str | None) -> yoga.Display:
-    if value is None:
-        return yoga.Display.Flex
-    match value.lower():
-        case "flex":
-            return yoga.Display.Flex
-        case "none":
-            return yoga.Display.None_
-        case "contents":
-            return yoga.Display.Contents
-        case _:
-            return yoga.Display.Flex
+_GUTTER_MAP = {"column": yoga.Gutter.Column, "row": yoga.Gutter.Row, "all": yoga.Gutter.All}
+parse_gutter = _make_parser(_GUTTER_MAP, yoga.Gutter.All)
 
+parse_justify = _make_parser(JUSTIFY_MAP, yoga.Justify.FlexStart)
 
-def parse_edge(value: str | None) -> yoga.Edge:
-    if value is None:
-        return yoga.Edge.All
-    match value.lower():
-        case "left":
-            return yoga.Edge.Left
-        case "top":
-            return yoga.Edge.Top
-        case "right":
-            return yoga.Edge.Right
-        case "bottom":
-            return yoga.Edge.Bottom
-        case "start":
-            return yoga.Edge.Start
-        case "end":
-            return yoga.Edge.End
-        case "horizontal":
-            return yoga.Edge.Horizontal
-        case "vertical":
-            return yoga.Edge.Vertical
-        case "all":
-            return yoga.Edge.All
-        case _:
-            return yoga.Edge.All
+_LOG_LEVEL_MAP = {
+    "error": yoga.LogLevel.Error, "warn": yoga.LogLevel.Warn, "info": yoga.LogLevel.Info,
+    "debug": yoga.LogLevel.Debug, "verbose": yoga.LogLevel.Verbose, "fatal": yoga.LogLevel.Fatal,
+}
+parse_log_level = _make_parser(_LOG_LEVEL_MAP, yoga.LogLevel.Info)
 
+_MEASURE_MODE_MAP = {
+    "undefined": yoga.MeasureMode.Undefined, "exactly": yoga.MeasureMode.Exactly,
+    "at-most": yoga.MeasureMode.AtMost,
+}
+parse_measure_mode = _make_parser(_MEASURE_MODE_MAP, yoga.MeasureMode.Undefined)
 
-def parse_flex_direction(value: str | None) -> yoga.FlexDirection:
-    if value is None:
-        return yoga.FlexDirection.Column
-    match value.lower():
-        case "column":
-            return yoga.FlexDirection.Column
-        case "column-reverse":
-            return yoga.FlexDirection.ColumnReverse
-        case "row":
-            return yoga.FlexDirection.Row
-        case "row-reverse":
-            return yoga.FlexDirection.RowReverse
-        case _:
-            return yoga.FlexDirection.Column
+parse_overflow = _make_parser(OVERFLOW_MAP, yoga.Overflow.Visible)
 
-
-def parse_gutter(value: str | None) -> yoga.Gutter:
-    if value is None:
-        return yoga.Gutter.All
-    match value.lower():
-        case "column":
-            return yoga.Gutter.Column
-        case "row":
-            return yoga.Gutter.Row
-        case "all":
-            return yoga.Gutter.All
-        case _:
-            return yoga.Gutter.All
-
-
-def parse_justify(value: str | None) -> yoga.Justify:
-    if value is None:
-        return yoga.Justify.FlexStart
-    match value.lower():
-        case "flex-start":
-            return yoga.Justify.FlexStart
-        case "center":
-            return yoga.Justify.Center
-        case "flex-end":
-            return yoga.Justify.FlexEnd
-        case "space-between":
-            return yoga.Justify.SpaceBetween
-        case "space-around":
-            return yoga.Justify.SpaceAround
-        case "space-evenly":
-            return yoga.Justify.SpaceEvenly
-        case _:
-            return yoga.Justify.FlexStart
-
-
-def parse_log_level(value: str | None) -> yoga.LogLevel:
-    if value is None:
-        return yoga.LogLevel.Info
-    match value.lower():
-        case "error":
-            return yoga.LogLevel.Error
-        case "warn":
-            return yoga.LogLevel.Warn
-        case "info":
-            return yoga.LogLevel.Info
-        case "debug":
-            return yoga.LogLevel.Debug
-        case "verbose":
-            return yoga.LogLevel.Verbose
-        case "fatal":
-            return yoga.LogLevel.Fatal
-        case _:
-            return yoga.LogLevel.Info
-
-
-def parse_measure_mode(value: str | None) -> yoga.MeasureMode:
-    if value is None:
-        return yoga.MeasureMode.Undefined
-    match value.lower():
-        case "undefined":
-            return yoga.MeasureMode.Undefined
-        case "exactly":
-            return yoga.MeasureMode.Exactly
-        case "at-most":
-            return yoga.MeasureMode.AtMost
-        case _:
-            return yoga.MeasureMode.Undefined
-
-
-def parse_overflow(value: str | None) -> yoga.Overflow:
-    if value is None:
-        return yoga.Overflow.Visible
-    match value.lower():
-        case "visible":
-            return yoga.Overflow.Visible
-        case "hidden":
-            return yoga.Overflow.Hidden
-        case "scroll":
-            return yoga.Overflow.Scroll
-        case _:
-            return yoga.Overflow.Visible
+_POSITION_TYPE_PARSE_MAP = {
+    "static": yoga.PositionType.Static, "relative": yoga.PositionType.Relative,
+    "absolute": yoga.PositionType.Absolute,
+}
 
 
 def parse_position_type(value: str | None) -> yoga.PositionType:
     if value is None:
         return yoga.PositionType.Relative
-    match value.lower():
-        case "static":
-            return yoga.PositionType.Static
-        case "relative":
-            return yoga.PositionType.Relative
-        case "absolute":
-            return yoga.PositionType.Absolute
-        case _:
-            return yoga.PositionType.Static
+    return _POSITION_TYPE_PARSE_MAP.get(value.lower(), yoga.PositionType.Static)
 
+_UNIT_MAP = {
+    "undefined": yoga.Unit.Undefined, "point": yoga.Unit.Point,
+    "percent": yoga.Unit.Percent, "auto": yoga.Unit.Auto,
+}
+parse_unit = _make_parser(_UNIT_MAP, yoga.Unit.Point)
 
-def parse_unit(value: str | None) -> yoga.Unit:
-    if value is None:
-        return yoga.Unit.Point
-    match value.lower():
-        case "undefined":
-            return yoga.Unit.Undefined
-        case "point":
-            return yoga.Unit.Point
-        case "percent":
-            return yoga.Unit.Percent
-        case "auto":
-            return yoga.Unit.Auto
-        case _:
-            return yoga.Unit.Point
-
-
-def parse_wrap(value: str | None) -> yoga.Wrap:
-    if value is None:
-        return yoga.Wrap.NoWrap
-    match value.lower():
-        case "no-wrap":
-            return yoga.Wrap.NoWrap
-        case "wrap":
-            return yoga.Wrap.Wrap
-        case "wrap-reverse":
-            return yoga.Wrap.WrapReverse
-        case _:
-            return yoga.Wrap.NoWrap
+_WRAP_PARSE_MAP = {"no-wrap": yoga.Wrap.NoWrap, "wrap": yoga.Wrap.Wrap, "wrap-reverse": yoga.Wrap.WrapReverse}
+parse_wrap = _make_parser(_WRAP_PARSE_MAP, yoga.Wrap.NoWrap)
 
 
 def _parse_dimension(value: float | str | None) -> tuple[float | None, str | None]:
@@ -758,136 +601,75 @@ _GAP_GUTTERS: dict[str, Any] = {
 }
 
 
+_ENUM_YOGA_PROPS: dict[str, tuple[str, Any]] = {
+    "flexDirection": ("flex_direction", parse_flex_direction),
+    "flexWrap": ("flex_wrap", parse_wrap),
+    "alignItems": ("align_items", parse_align_items),
+    "justifyContent": ("justify_content", parse_justify),
+    "alignSelf": ("align_self", parse_align),
+    "alignContent": ("align_content", parse_align),
+    "overflow": ("overflow", parse_overflow),
+    "position": ("position_type", parse_position_type),
+    "display": ("display", parse_display),
+}
+
+_DIM_YOGA_PROPS: dict[str, tuple[str, str, str]] = {
+    "width": ("width", "set_width_percent", "set_width_auto"),
+    "height": ("height", "set_height_percent", "set_height_auto"),
+}
+
+_MINMAX_YOGA_PROPS: dict[str, tuple[str, str]] = {
+    "minWidth": ("min_width", "set_min_width_percent"),
+    "maxWidth": ("max_width", "set_max_width_percent"),
+    "minHeight": ("min_height", "set_min_height_percent"),
+    "maxHeight": ("max_height", "set_max_height_percent"),
+}
+
+
 def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
     if prop_name == "flexGrow":
-        if value is None:
-            node.flex_grow = 0
-        else:
-            node.flex_grow = float(value)
+        node.flex_grow = 0 if value is None else float(value)
         return
-
     if prop_name == "flexShrink":
-        if value is None:
-            node.flex_shrink = 1
-        else:
-            node.flex_shrink = float(value)
+        node.flex_shrink = 1 if value is None else float(value)
         return
-
-    if prop_name == "flexDirection":
-        node.flex_direction = parse_flex_direction(value)
-        return
-
-    if prop_name == "flexWrap":
-        node.flex_wrap = parse_wrap(value)
-        return
-
-    if prop_name == "alignItems":
-        node.align_items = parse_align_items(value)
-        return
-
-    if prop_name == "justifyContent":
-        node.justify_content = parse_justify(value)
-        return
-
-    if prop_name == "alignSelf":
-        node.align_self = parse_align(value)
-        return
-
-    if prop_name == "alignContent":
-        node.align_content = parse_align(value)
-        return
-
-    if prop_name == "overflow":
-        node.overflow = parse_overflow(value)
-        return
-
-    if prop_name == "position":
-        node.position_type = parse_position_type(value)
-        return
-
-    if prop_name == "display":
-        node.display = parse_display(value)
-        return
-
     if prop_name == "flexBasis":
         if value is None or value == "auto":
-            # Reset to undefined (yoga-python has no set_flex_basis_auto)
             node.flex_basis = float("nan")
-            return
-        if _is_flex_basis_type(value):
+        elif _is_flex_basis_type(value):
             node.flex_basis = float(value)
         return
 
-    if prop_name == "width":
+    enum_entry = _ENUM_YOGA_PROPS.get(prop_name)
+    if enum_entry is not None:
+        attr, parser = enum_entry
+        setattr(node, attr, parser(value))
+        return
+
+    dim = _DIM_YOGA_PROPS.get(prop_name)
+    if dim is not None:
+        attr, pct_fn, auto_fn = dim
         if value is None:
-            node.set_width_auto()
-            return
-        if _is_dimension_type(value):
+            getattr(node, auto_fn)()
+        elif _is_dimension_type(value):
             _set_dimension_prop(
-                node,
-                value,
-                set_point=lambda v: setattr(node, "width", v),
-                set_percent=node.set_width_percent,
-                set_auto=node.set_width_auto,
+                node, value,
+                set_point=lambda v, a=attr: setattr(node, a, v),
+                set_percent=getattr(node, pct_fn),
+                set_auto=getattr(node, auto_fn),
             )
         return
 
-    if prop_name == "height":
-        if value is None:
-            node.set_height_auto()
-            return
-        if _is_dimension_type(value):
-            _set_dimension_prop(
-                node,
-                value,
-                set_point=lambda v: setattr(node, "height", v),
-                set_percent=node.set_height_percent,
-                set_auto=node.set_height_auto,
-            )
-        return
-
-    if prop_name == "minWidth":
+    mm = _MINMAX_YOGA_PROPS.get(prop_name)
+    if mm is not None:
+        attr, pct_fn = mm
         if _is_size_type(value):
             if value is None:
-                node.min_width = float("nan")
-                return
-            if _is_valid_percentage(value):
-                node.set_min_width_percent(float(value[:-1]))
+                setattr(node, attr, float("nan"))
+            elif _is_valid_percentage(value):
+                getattr(node, pct_fn)(float(value[:-1]))
             else:
-                node.min_width = float(value)
-        return
-
-    if prop_name == "maxWidth":
-        if _is_size_type(value):
-            if value is None:
-                node.max_width = float("nan")
-                return
-            if _is_valid_percentage(value):
-                node.set_max_width_percent(float(value[:-1]))
-            else:
-                node.max_width = float(value)
-        return
-
-    if prop_name == "minHeight":
-        if _is_size_type(value):
-            if value is None:
-                node.min_height = float("nan")
-                return
-            if _is_valid_percentage(value):
-                node.set_min_height_percent(float(value[:-1]))
-            else:
-                node.min_height = float(value)
-        return
-
-    if prop_name == "maxHeight":
-        if _is_size_type(value):
-            if value is None:
-                node.max_height = float("nan")
-                return
-            if _is_valid_percentage(value):
-                node.set_max_height_percent(float(value[:-1]))
-            else:
-                node.max_height = float(value)
+                setattr(node, attr, float(value))
         return
 
     edge = _MARGIN_EDGES.get(prop_name)
@@ -896,12 +678,8 @@ def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
             node.set_margin(edge, 0)
         elif _is_margin_type(value):
             _set_edge_prop(
-                node,
-                edge,
-                value,
-                set_fn=node.set_margin,
-                set_percent_fn=node.set_margin_percent,
-                set_auto_fn=node.set_margin_auto,
+                node, edge, value, set_fn=node.set_margin,
+                set_percent_fn=node.set_margin_percent, set_auto_fn=node.set_margin_auto,
             )
         return
 
@@ -911,10 +689,7 @@ def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
             node.set_padding(edge, 0)
         elif _is_padding_type(value):
             _set_edge_prop(
-                node,
-                edge,
-                value,
-                set_fn=node.set_padding,
+                node, edge, value, set_fn=node.set_padding,
                 set_percent_fn=node.set_padding_percent,
             )
         return
