@@ -112,6 +112,7 @@ class TestOnMount:
     def test_on_mount_registers(self):
         """on_mount adds to pending list and flush runs callback."""
         from opentui.hooks import flush_mount_callbacks
+
         results = []
         on_mount(lambda: results.append("mounted"))
         flush_mount_callbacks()
@@ -120,6 +121,7 @@ class TestOnMount:
     def test_flush_clears_and_runs(self):
         """flush_mount_callbacks runs all pending and clears."""
         from opentui.hooks import flush_mount_callbacks
+
         results = []
         on_mount(lambda: results.append("a"))
         on_mount(lambda: results.append("b"))
@@ -147,6 +149,7 @@ class TestCreateResource:
 
     def test_sync_fetcher_error(self):
         """Sync fetcher errors are caught."""
+
         def bad_fetcher():
             raise ValueError("boom")
 

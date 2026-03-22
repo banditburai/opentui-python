@@ -11,7 +11,7 @@ not preventDefault'd.  This mirrors the InternalKeyHandler pattern from
 the upstream TS codebase.
 """
 
-from opentui import reactive, template_component
+from opentui import component
 from opentui import test_render as _test_render
 from opentui.components.box import Box
 from opentui.components.control_flow import For
@@ -112,11 +112,11 @@ class TestSolidJSRendererIntegration:
 
             input_comp = Input(focused=True, on_input=on_input)
 
-            @template_component
+            @component
             def InputStatus():
                 return Box(
                     input_comp,
-                    Text(reactive(lambda: f"Value: {value()}"), id="input_value"),
+                    Text(lambda: f"Value: {value()}", id="input_value"),
                 )
 
             setup = await _strict_render(
@@ -190,11 +190,11 @@ class TestSolidJSRendererIntegration:
             )
             select_comp._selected_index = 0  # Start at index 0 like upstream
 
-            @template_component
+            @component
             def SelectStatus():
                 return Box(
                     select_comp,
-                    Text(reactive(lambda: f"Selected: {selected_index()}"), id="selected_index"),
+                    Text(lambda: f"Selected: {selected_index()}", id="selected_index"),
                 )
 
             setup = await _strict_render(
@@ -242,11 +242,11 @@ class TestSolidJSRendererIntegration:
                 ),
             )
 
-            @template_component
+            @component
             def TabStatus():
                 return Box(
                     tab_select,
-                    Text(reactive(lambda: f"Active tab: {active_tab()}"), id="active_tab"),
+                    Text(lambda: f"Active tab: {active_tab()}", id="active_tab"),
                 )
 
             setup = await _strict_render(
@@ -367,11 +367,11 @@ class TestSolidJSRendererIntegration:
             )
             select_comp._selected_index = 0  # Start at first option
 
-            @template_component
+            @component
             def SelectValueStatus():
                 return Box(
                     select_comp,
-                    Text(reactive(lambda: f"Selected: {selected_value()}"), id="selected_value"),
+                    Text(lambda: f"Selected: {selected_value()}", id="selected_value"),
                 )
 
             setup = await _strict_render(
@@ -413,8 +413,8 @@ class TestSolidJSRendererIntegration:
             def build_tree():
                 return Box(
                     For(
+                        lambda item: Text(item, key=f"item-{item}"),
                         each=items,
-                        render=lambda item: Text(item, key=f"item-{item}"),
                         key_fn=lambda item: f"item-{item}",
                         key="items",
                     )
@@ -476,10 +476,10 @@ class TestSolidJSRendererIntegration:
 
             dynamic_text = Signal("Initial", name="text")
 
-            @template_component
+            @component
             def ContentBox():
                 return Box(
-                    Text(reactive(lambda: f"Static: {dynamic_text()}"), id="dynamic_text", wrap_mode="none"),
+                    Text(lambda: f"Static: {dynamic_text()}", id="dynamic_text", wrap_mode="none"),
                     Text("Direct content"),
                 )
 
@@ -507,9 +507,9 @@ class TestSolidJSRendererIntegration:
             paste_spy = _Spy()
             pasted_text = Signal("", name="pasted_text")
 
-            @template_component
+            @component
             def PasteStatus():
-                return Box(Text(reactive(lambda: f"Pasted: {pasted_text()}"), id="pasted_text"))
+                return Box(Text(lambda: f"Pasted: {pasted_text()}", id="pasted_text"))
 
             setup = await _strict_render(
                 PasteStatus,
@@ -636,11 +636,11 @@ class TestSolidJSRendererIntegration:
 
             input_comp = Input(focused=True, on_input=on_input)
 
-            @template_component
+            @component
             def InputStatus():
                 return Box(
                     input_comp,
-                    Text(reactive(lambda: f"Value: {value()}"), id="input_value"),
+                    Text(lambda: f"Value: {value()}", id="input_value"),
                 )
 
             setup = await _strict_render(
@@ -744,11 +744,11 @@ class TestSolidJSRendererIntegration:
             )
             select_comp._selected_index = 0
 
-            @template_component
+            @component
             def PreventDefaultSelectStatus():
                 return Box(
                     select_comp,
-                    Text(reactive(lambda: f"Selected: {selected_index()}"), id="selected_index"),
+                    Text(lambda: f"Selected: {selected_index()}", id="selected_index"),
                 )
 
             setup = await _strict_render(

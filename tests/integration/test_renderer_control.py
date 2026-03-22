@@ -261,7 +261,7 @@ class TestCliRendererMisc:
         clear_paste_handlers()
         use_paste(lambda event: seen.append(("hook", event.text)))
 
-        monkeypatch.setattr("opentui.input.EventLoop", _FakeEventLoop)
+        monkeypatch.setattr("opentui.input.event_loop.EventLoop", _FakeEventLoop)
         monkeypatch.setattr(r, "setup", lambda: None)
         monkeypatch.setattr(r, "_refresh_mouse_tracking", lambda: None)
         monkeypatch.setattr(r, "_render_frame", lambda dt: None)

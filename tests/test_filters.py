@@ -5,7 +5,7 @@ Upstream: N/A (Python-specific)
 
 import pytest
 
-from opentui.filters import (
+from opentui.image.filters import (
     BlurFilter,
     BrightnessFilter,
     ContrastFilter,
@@ -163,10 +163,10 @@ class TestBlurFilter:
     """Tests for BlurFilter."""
 
     def test_blur_small_radius(self):
-        """Test blur with small radius."""
+        """Test blur with small radius on a 2x2 image."""
         data = bytes([255, 0, 0, 255] * 4)  # 2x2 image
         filter_ = BlurFilter(radius=1.0)
-        result = filter_.apply(data, width=2, height=2, format="RGBA")
+        result = filter_.apply(data, format="RGBA")
 
         # Should have some red from neighbors
         assert result[0] > 0
@@ -175,17 +175,16 @@ class TestBlurFilter:
         """Test that zero radius returns original data."""
         data = bytes([255, 0, 0, 255] * 4)
         filter_ = BlurFilter(radius=0)
-        result = filter_.apply(data, width=2, height=2, format="RGBA")
+        result = filter_.apply(data, format="RGBA")
 
         assert result == data
 
-    def test_blur_invalid_dimensions_raises(self):
-        """Test that invalid dimensions raise error."""
-        data = bytes([255, 0, 0, 255] * 10)  # 10 bytes = 2.5 pixels
-        filter_ = BlurFilter(radius=1.0)
-
-        with pytest.raises(ValueError):
-            filter_.apply(data, width=2, height=2, format="RGBA")
+    def test_blur_via_filter_chain(self):
+        """Test that BlurFilter works through FilterChain (base apply signature)."""
+        data = bytes([255, 0, 0, 255] * 4)  # 2x2 image
+        chain = FilterChain([BlurFilter(radius=1.0)])
+        result = chain.apply(data, format="RGBA")
+        assert len(result) == len(data)
 
 
 class TestFilterChain:

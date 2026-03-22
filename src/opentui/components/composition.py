@@ -41,6 +41,7 @@ class VRenderable(Renderable):
     @render_fn.setter
     def render_fn(self, value: Callable | None) -> None:
         self._render_fn = value
+        self.mark_paint_dirty()
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         if not self._visible:

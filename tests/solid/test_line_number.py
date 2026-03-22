@@ -92,15 +92,15 @@ class TestLineNumberRenderableWithSolidJS:
         def make_component():
             return Box(
                 Show(
-                    when=lambda: show_line_numbers(),
-                    render=lambda: Code(
+                    Code(
                         CODE_CONTENT,
                         filetype="javascript",
                         show_line_numbers=True,
                         width="100%",
                         height="100%",
                     ),
-                    fallback=lambda: Code(
+                    when=lambda: show_line_numbers(),
+                    fallback=Code(
                         CODE_CONTENT,
                         filetype="javascript",
                         show_line_numbers=False,

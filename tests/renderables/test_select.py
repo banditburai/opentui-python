@@ -10,7 +10,7 @@ from opentui import create_test_renderer
 from opentui.components.input import SelectOption
 from opentui.components.select_renderable import SelectRenderable
 from opentui.events import KeyEvent
-from opentui.keymapping import KeyBinding
+from opentui.input.keymapping import KeyBinding
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -38,6 +38,7 @@ class TestSelectRenderableInitialization:
     async def test_reuses_raster_cache_when_select_is_clean(self):
         setup = await create_test_renderer(40, 12)
         try:
+
             class _CountingSelect(SelectRenderable):
                 __slots__ = ("render_calls",)
 
@@ -729,7 +730,7 @@ class TestSelectRenderableKeyBindingsAndAliases:
             key_bindings=[
                 KeyBinding(name="n", action="move-down", ctrl=True),
                 KeyBinding(name="p", action="move-up", ctrl=True),
-                KeyBinding(name="s", action="select-current", meta=True),
+                KeyBinding(name="s", action="select-current", alt=True),
             ],
         )
         sel.focus()
@@ -742,8 +743,7 @@ class TestSelectRenderableKeyBindingsAndAliases:
         assert sel.handle_key(_key("p", ctrl=True)) is True
         assert sel.get_selected_index() == 0
 
-        # Meta+S -> select current (KeyBinding.meta maps to KeyEvent.alt
-        # in terminal convention where Meta = Alt)
+        # Alt+S -> select current
         events: list = []
         sel.on("itemSelected", lambda idx, opt: events.append((idx, opt)))
         assert sel.handle_key(_key("s", alt=True)) is True

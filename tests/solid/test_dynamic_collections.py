@@ -53,8 +53,8 @@ class TestDynamicCollectionsBasicArrayOperations:
         def build():
             return Box(
                 For(
+                    lambda item: Text(item, key=f"item-{item}"),
                     each=items,
-                    render=lambda item: Text(item, key=f"item-{item}"),
                     key_fn=lambda item: f"item-{item}",
                     key="items",
                 )
@@ -84,8 +84,8 @@ class TestDynamicCollectionsBasicArrayOperations:
         def build():
             return Box(
                 For(
+                    lambda item: Text(item, key=f"item-{item}"),
                     each=items,
-                    render=lambda item: Text(item, key=f"item-{item}"),
                     key_fn=lambda item: f"item-{item}",
                     key="items",
                 )
@@ -117,8 +117,8 @@ class TestDynamicCollectionsBasicArrayOperations:
         def build():
             return Box(
                 For(
+                    lambda item: Text(item, key=f"item-{item}"),
                     each=items,
-                    render=lambda item: Text(item, key=f"item-{item}"),
                     key_fn=lambda item: f"item-{item}",
                     key="items",
                 )
@@ -143,8 +143,8 @@ class TestDynamicCollectionsBasicArrayOperations:
         def build():
             return Box(
                 For(
+                    lambda item: Text(item, key=f"item-{item}"),
                     each=items,
-                    render=lambda item: Text(item, key=f"item-{item}"),
                     key_fn=lambda item: f"item-{item}",
                     key="items",
                 )
@@ -175,8 +175,8 @@ class TestDynamicCollectionsReactiveCollectionUpdates:
         def build():
             return Box(
                 For(
+                    lambda item: Text(item, key=f"item-{item}"),
                     each=lambda: [f"Item {i + 1}" for i in range(count())],
-                    render=lambda item: Text(item, key=f"item-{item}"),
                     key_fn=lambda item: f"item-{item}",
                     key="items",
                 )
@@ -212,11 +212,11 @@ class TestDynamicCollectionsReactiveCollectionUpdates:
         def build():
             return Box(
                 For(
-                    each=todos,
-                    render=lambda todo: Text(
+                    lambda todo: Text(
                         f"{'✓' if todo['completed'] else '○'} {todo['text']}",
                         key=f"todo-{todo['id']}",
                     ),
+                    each=todos,
                     key_fn=lambda todo: f"todo-{todo['id']}",
                     key="todos",
                 )
@@ -249,8 +249,8 @@ class TestDynamicCollectionsReactiveCollectionUpdates:
         def build():
             return Box(
                 For(
+                    lambda item: Text(f"Number: {item}", key=f"number-{item}"),
                     each=lambda: [item for item in items() if not show_even() or item % 2 == 0],
-                    render=lambda item: Text(f"Number: {item}", key=f"number-{item}"),
                     key_fn=lambda item: f"number-{item}",
                     key="filtered-items",
                 )
@@ -293,19 +293,19 @@ class TestDynamicCollectionsNestedCollections:
         def build():
             return Box(
                 For(
-                    each=lambda: list(enumerate(matrix())),
-                    render=lambda row_pair: Box(
+                    lambda row_pair: Box(
                         For(
-                            each=lambda: list(enumerate(row_pair[1])),
-                            render=lambda cell_pair: Text(
+                            lambda cell_pair: Text(
                                 str(cell_pair[1]),
                                 key=f"cell-{row_pair[0]}-{cell_pair[0]}",
                             ),
+                            each=lambda: list(enumerate(row_pair[1])),
                             key_fn=lambda cell_pair: f"cell-{row_pair[0]}-{cell_pair[0]}",
                             key=f"cells-{row_pair[0]}",
                         ),
                         key=f"row-{row_pair[0]}",
                     ),
+                    each=lambda: list(enumerate(matrix())),
                     key_fn=lambda row_pair: f"row-{row_pair[0]}",
                     key="rows",
                 )
@@ -356,20 +356,20 @@ class TestDynamicCollectionsNestedCollections:
         def build():
             return Box(
                 For(
-                    each=tree,
-                    render=lambda node: Box(
+                    lambda node: Box(
                         Text(node["name"]),
                         For(
-                            each=lambda: node["children"],
-                            render=lambda child: Text(
+                            lambda child: Text(
                                 f" └─ {child['name']}",
                                 key=f"child-{node['name']}-{child['name']}",
                             ),
+                            each=lambda: node["children"],
                             key_fn=lambda child: f"child-{node['name']}-{child['name']}",
                             key=f"children-{node['name']}",
                         ),
                         key=f"node-{node['name']}",
                     ),
+                    each=tree,
                     key_fn=lambda node: f"node-{node['name']}",
                     key="tree",
                 )
@@ -396,11 +396,11 @@ class TestDynamicCollectionsEdgeCases:
         def build():
             return Box(
                 For(
-                    each=lambda: list(enumerate(items())),
-                    render=lambda pair: Text(
+                    lambda pair: Text(
                         pair[1] if pair[1] else "[null]",
                         key=f"item-{pair[0]}",
                     ),
+                    each=lambda: list(enumerate(items())),
                     key_fn=lambda pair: f"item-{pair[0]}",
                     key="items",
                 )
@@ -427,8 +427,8 @@ class TestDynamicCollectionsEdgeCases:
         def build():
             return Box(
                 For(
+                    lambda item: Text(item, key=f"item-{item}"),
                     each=items,
-                    render=lambda item: Text(item, key=f"item-{item}"),
                     key_fn=lambda item: f"item-{item}",
                     key="items",
                 )
@@ -470,8 +470,7 @@ class TestDynamicCollectionsEdgeCases:
         def build():
             return Box(
                 For(
-                    each=lambda: list(enumerate(items())),
-                    render=lambda pair: (
+                    lambda pair: (
                         Text(pair[1]["content"], key=f"text-{pair[0]}")
                         if pair[1]["type"] == "text"
                         else Box(
@@ -480,6 +479,7 @@ class TestDynamicCollectionsEdgeCases:
                             key=f"box-{pair[0]}",
                         )
                     ),
+                    each=lambda: list(enumerate(items())),
                     key_fn=lambda pair: f"item-{pair[0]}",
                     key="items",
                 )
@@ -510,6 +510,7 @@ class TestDynamicCollectionsTransformations:
         def build():
             return Box(
                 For(
+                    lambda pair: Text(f"Number: {pair[1]}", key=f"sorted-{pair[0]}"),
                     each=lambda: list(
                         enumerate(
                             sorted(
@@ -518,7 +519,6 @@ class TestDynamicCollectionsTransformations:
                             )
                         )
                     ),
-                    render=lambda pair: Text(f"Number: {pair[1]}", key=f"sorted-{pair[0]}"),
                     key_fn=lambda pair: f"sorted-{pair[0]}",
                     key="sorted-items",
                 )
@@ -557,15 +557,15 @@ class TestDynamicCollectionsTransformations:
         def build():
             return Box(
                 For(
+                    lambda item: Text(
+                        f"{item['name']} ({item['category']})",
+                        key=f"item-{item['name']}",
+                    ),
                     each=lambda: [
                         item
                         for item in items()
                         if filter_val() == "all" or item["category"] == filter_val()
                     ],
-                    render=lambda item: Text(
-                        f"{item['name']} ({item['category']})",
-                        key=f"item-{item['name']}",
-                    ),
                     key_fn=lambda item: f"item-{item['name']}",
                     key="filtered-items",
                 )

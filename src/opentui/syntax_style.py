@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .native import NativeSyntaxStyle
+from .editor.text_buffer_native import NativeSyntaxStyle
 from .structs import RGBA, ColorInput, parse_color
 
 ATTR_NONE = 0

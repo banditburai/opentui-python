@@ -8,7 +8,7 @@ import pytest
 
 from opentui.events import MouseButton, MouseEvent
 from opentui.input import InputHandler
-from opentui.testing import SGRMouseParser
+from opentui.testing.sgr import SGRMouseParser
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -482,15 +482,11 @@ class TestMouseParserSGRMode:
         def test_move_with_no_button_code_35(self):
             """Maps to test("move with no button: code 35 (32|3) -> 'move'").
 
-            Python: button_code 35 has bit 5 set -> type="drag", button=35&3=3.
-            Upstream: type="move" (because button bits == 3 means no button).
-            Python lacks the move/drag distinction for button==3 with motion bit.
+            button_code 35 = 32|3: motion bit set + button 3 (no button held) -> "move".
             """
             e = _parse_sgr(35, 10, 5, False)
             assert e is not None
-            # Python emits "drag" for any motion-bit event (bit 5 set),
-            # unlike upstream which checks button==3 to emit "move".
-            assert e.type == "drag"
+            assert e.type == "move"
 
         def test_drag_with_left_button_held_code_32(self):
             """Maps to test("drag with left button held: code 32 (32|0)").
@@ -502,28 +498,17 @@ class TestMouseParserSGRMode:
             assert e is not None
             assert e.type == "drag"
 
-        def test_motion_without_prior_press_is_move(self):
-            """Maps to test("motion without prior press is 'move' even when button bits != 3").
-
-            Python: button_code 32 has bit 5 set -> type="drag" unconditionally.
-            Upstream: type="move" (because no button is tracked as pressed).
-            """
+        def test_motion_without_prior_press_is_drag_when_button_held(self):
+            """button_code 32 = 32|0: motion + left button held -> "drag"."""
             e = _parse_sgr(32, 10, 5, False)
             assert e is not None
-            # Python always emits "drag" when motion bit is set,
-            # regardless of prior press state.
             assert e.type == "drag"
 
-        def test_motion_button_3_is_always_move_even_with_buttons_pressed(self):
-            """Maps to test("motion + button 3 is always 'move' even with buttons pressed").
-
-            Python: button_code 35 (32|3) has bit 5 set -> type="drag".
-            Upstream: type="move" (button bits == 3 always means move).
-            """
+        def test_motion_button_3_is_always_move(self):
+            """button_code 35 = 32|3: motion + no button held -> "move"."""
             e = _parse_sgr(35, 12, 5, False)
             assert e is not None
-            # Python emits "drag" (no special handling for button==3 + motion).
-            assert e.type == "drag"
+            assert e.type == "move"
 
     class TestModifiers:
         """Maps to describe("modifiers")."""

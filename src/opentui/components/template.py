@@ -1,29 +1,25 @@
-"""Template system - MountedTemplate, Template, reactive bindings.
+"""Template system - Mount, @component.
 
 Provides the template-based rendering primitives that mount a stable
-subtree once and update it reactively in place.  The ``reactive()``
-marker and ``@template_component`` decorator are the primary public
-entry points.
+subtree once and update it reactively in place.  ``@component`` is the
+primary public entry point for named components; ``Mount`` is the
+inline primitive for reactive regions.
 """
 
 from __future__ import annotations
 
 import inspect
-import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .. import structs as s
-from ..signals import Signal, _tracking_context, is_reactive
+from ..signals import Signal, _tracking_context
 from .base import BaseRenderable, Renderable
 
-_log = logging.getLogger(__name__)
 _TEMPLATE_UNSET = object()
 _TEMPLATE_NO_KEY = object()
 
 if TYPE_CHECKING:
-    from ..renderer import Buffer
+    pass
 
 
 def _collect_template_refs(
@@ -43,96 +39,22 @@ def _collect_template_refs(
     return refs
 
 
-class TemplateRefs(dict[str, BaseRenderable]):
-    """Stable id->node mapping for MountedTemplate updates."""
+class Mount(Renderable):
+    """Mount a build function as a reactive subtree.
 
-    def require(self, id: str) -> BaseRenderable:
-        node = self.get(id)
-        if node is None:
-            raise KeyError(f"Template ref not found: {id}")
-        return node
+    The inline primitive for reactive regions.  ``build()`` creates the
+    subtree once; signals read during build are auto-tracked and trigger
+    rebuilds when they change.
 
-
-@dataclass(frozen=True, slots=True)
-class TemplateBinding:
-    """Marker for declarative template lowering.
-
-    Most callers should use :func:`reactive` rather than construct this directly.
-    """
-
-    source: object
-    __opentui_template_binding__: bool = True
-
-
-def reactive(source: object) -> TemplateBinding:
-    """Mark a prop/text value for mounted-template lowering.
-
-    ``source`` may be a plain value, ``Signal``, computed, or a zero-argument
-    callable. Small lambdas are fine for local leaf expressions; named
-    functions are preferred when the logic is reused or non-trivial.
-
-    There are two reactive mechanisms for updating props:
-
-    1. **Direct Signal/callable binding** (no ``reactive()`` needed):
-       Pass a ``Signal`` or callable directly to a prop on any component.
-       The prop will auto-subscribe and update without rebuilding::
-
-           count = Signal(0)
-           Text(content=count)               # Signal bound directly
-           Text(fg=lambda: "red" if x() else "blue")  # callable auto-wrapped
-
-    2. **Template lowering** (use ``reactive()``):
-       Inside ``@template_component``, wrap values with ``reactive()`` so the
-       template compiler can track which props are reactive and set up
-       fine-grained subscriptions on the mounted instance::
-
-           @template_component
-           def Counter():
-               count = Signal(0)
-               return Text(reactive(lambda: f"Count: {count()}"), id="label")
-
-    Use ``reactive()`` inside ``@template_component`` bodies. Outside templates,
-    pass Signals or callables directly to props --- they are auto-detected.
-
-    Examples:
-        Text(reactive(lambda: f"Count: {count()}"), id="count")
-
-        def panel_title() -> str:
-            return f"Count: {count()}"
-
-        Text(reactive(panel_title), id="count")
-    """
-    return TemplateBinding(source=source)
-
-
-def bind(source: object) -> TemplateBinding:
-    """Deprecated: use ``reactive()`` instead."""
-    import warnings
-
-    warnings.warn(
-        "bind() is deprecated, use reactive() instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return reactive(source)
-
-
-class MountedTemplate(Renderable):
-    """Mount a stable subtree once, then update it reactively in place.
-
-    This is the explicit architectural escape hatch for structurally stable
-    dynamic regions. ``build()`` creates the mounted subtree once.
-    ``update()`` reads signals and mutates the mounted subtree directly.
-    ``invalidate_when`` is optional and rebuilds the subtree only when its
-    structural key changes.
-
-    Use named ``build`` / ``update`` functions for anything non-trivial.
+    For named, reusable components with props, use ``@component`` instead.
     """
 
     __slots__ = (
         "_build_fn",
         "_update_fn",
         "_invalidate_when",
+        "_auto_invalidate",
+        "_auto_tracked_deps",
         "_data_cleanup",
         "_tracked_signals",
         "_updating",
@@ -143,21 +65,26 @@ class MountedTemplate(Renderable):
 
     def __init__(
         self,
-        *,
         build: Callable[[], BaseRenderable | list[BaseRenderable] | tuple[BaseRenderable, ...]],
+        *,
         update: Callable[..., None] | None = None,
         invalidate_when: Callable[[], Any] | None = None,
+        auto_invalidate: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        if invalidate_when is not None:
+            auto_invalidate = False
         self._build_fn = build
         self._update_fn = update
         self._invalidate_when = invalidate_when
+        self._auto_invalidate = auto_invalidate
+        self._auto_tracked_deps: tuple[Signal, ...] = ()
         self._data_cleanup: Callable[[], None] | None = None
         self._tracked_signals: frozenset[Signal] = frozenset()
         self._updating = False
         self._current_key: Any = _TEMPLATE_UNSET
-        self._refs: TemplateRefs = TemplateRefs()
+        self._refs: dict[str, BaseRenderable] = {}
         self._update_arity = self._resolve_update_arity(update)
         self._setup_template()
 
@@ -183,7 +110,7 @@ class MountedTemplate(Renderable):
         return 2 if len(positional) >= 2 else 1
 
     def _rebuild_refs(self, children: list[BaseRenderable]) -> None:
-        self._refs = TemplateRefs(_collect_template_refs(children))
+        self._refs = dict(_collect_template_refs(children))
 
     def _run_update(self, update_target: BaseRenderable | list[BaseRenderable]) -> None:
         if self._update_fn is None:
@@ -216,17 +143,37 @@ class MountedTemplate(Renderable):
         tracked: set[Signal] = set()
         token = _tracking_context.set(tracked)
         try:
-            next_key = (
-                self._invalidate_when() if self._invalidate_when is not None else _TEMPLATE_NO_KEY
-            )
+            # Compute the invalidation key
+            if self._auto_invalidate:
+                next_key = self._compute_auto_key()
+            elif self._invalidate_when is not None:
+                next_key = self._invalidate_when()
+            else:
+                next_key = _TEMPLATE_NO_KEY
+
             rebuilt_children: list[BaseRenderable] | None = None
             force_replace = False
-            if (
+            needs_build = (
                 self._current_key is _TEMPLATE_UNSET
                 or next_key != self._current_key
                 or not self._children
-            ):
-                rebuilt_children = _normalize_render_result(self._build_fn())
+            )
+            if needs_build:
+                if self._auto_invalidate:
+                    # Run build under a separate tracking pass to capture deps
+                    build_tracked: set[Signal] = set()
+                    build_token = _tracking_context.set(build_tracked)
+                    try:
+                        rebuilt_children = _normalize_render_result(self._build_fn())
+                    finally:
+                        _tracking_context.reset(build_token)
+                    tracked.update(build_tracked)
+                    self._auto_tracked_deps = tuple(build_tracked)
+                    # Recompute key from newly discovered deps
+                    next_key = self._snapshot_auto_key()
+                else:
+                    rebuilt_children = _normalize_render_result(self._build_fn())
+
                 force_replace = (
                     self._current_key is not _TEMPLATE_UNSET and next_key != self._current_key
                 )
@@ -240,6 +187,18 @@ class MountedTemplate(Renderable):
             _tracking_context.reset(token)
 
         return tracked, next_key, rebuilt_children, force_replace
+
+    def _compute_auto_key(self) -> tuple | object:
+        """Read previously-tracked deps to form the invalidation key."""
+        if not self._auto_tracked_deps:
+            return _TEMPLATE_NO_KEY
+        return tuple(dep.peek() for dep in self._auto_tracked_deps)
+
+    def _snapshot_auto_key(self) -> tuple | object:
+        """Snapshot current values of auto-tracked deps (no tracking)."""
+        if not self._auto_tracked_deps:
+            return _TEMPLATE_NO_KEY
+        return tuple(dep.peek() for dep in self._auto_tracked_deps)
 
     def _setup_template(self) -> None:
         from .control_flow import _apply_region_children
@@ -276,231 +235,49 @@ class MountedTemplate(Renderable):
             self._data_cleanup()
             self._data_cleanup = None
         self._tracked_signals = frozenset()
-        self._refs = TemplateRefs()
+        self._refs = {}
         super().destroy()
 
 
-def _read_template_binding_value(source: object) -> object:
-    if is_reactive(source):
-        return source()
-    return source
-
-
-def _iter_template_attrs(node: BaseRenderable) -> list[str]:
-    attrs: list[str] = []
-    seen: set[str] = set()
-    for cls in type(node).__mro__:
-        slots = getattr(cls, "__slots__", ())
-        if isinstance(slots, str):
-            slots = (slots,)
-        for attr in slots:
-            if attr not in seen:
-                seen.add(attr)
-                attrs.append(attr)
-    if hasattr(node, "__dict__"):
-        for attr in node.__dict__:
-            if attr not in seen:
-                attrs.append(attr)
-    return attrs
-
-
-def _extract_template_bindings(
-    nodes: list[BaseRenderable],
-    bindings: dict[str, object] | None = None,
-) -> dict[str, object]:
-    from .control_flow import Portal
-
-    if bindings is None:
-        bindings = {}
-    for node in nodes:
-        for attr in _iter_template_attrs(node):
-            try:
-                value = object.__getattribute__(node, attr)
-            except AttributeError:
-                continue
-            if not getattr(value, "__opentui_template_binding__", False):
-                continue
-            public_attr = attr[1:] if attr.startswith("_") else attr
-            bindings[f"{node.id}.{public_attr}"] = value.source
-            _set_template_attr(node, public_attr, _read_template_binding_value(value.source))
-        child_nodes = (
-            list(node._content_children) if isinstance(node, Portal) else list(node._children)
-        )
-        _extract_template_bindings(child_nodes, bindings)
-    return bindings
-
-
-def _resolve_template_target(
-    mounted: BaseRenderable | list[BaseRenderable],
-    refs: TemplateRefs,
-    path: str,
-) -> tuple[BaseRenderable, str]:
-    node_id, sep, attr = path.rpartition(".")
-    if not sep or not node_id or not attr:
-        raise ValueError(f"Template binding must be '<id>.<attr>' or '@root.<attr>', got {path!r}")
-    if node_id == "@root":
-        if not isinstance(mounted, BaseRenderable):
-            raise ValueError("@root bindings require a single mounted root node")
-        return mounted, attr
-    return refs.require(node_id), attr
-
-
-def _set_template_attr(target: BaseRenderable, attr: str, value: object) -> None:
-    descriptor = getattr(type(target), attr, None)
-    if isinstance(descriptor, property) and descriptor.fset is not None:
-        setattr(target, attr, value)
-        return
-
-    private_attr = f"_{attr}"
-    try:
-        old = object.__getattribute__(target, private_attr)
-    except AttributeError:
-        setattr(target, attr, value)
-        return
-
-    new_value = value
-    if attr in {"fg", "background_color", "border_color", "focused_border_color", "selection_bg"}:
-        new_value = target._parse_color(value) if value is not None else None
-    elif attr == "border_style":
-        new_value = s.parse_border_style(value)
-
-    if old is new_value or old == new_value:
-        return
-
-    object.__setattr__(target, private_attr, new_value)
-    if isinstance(target, Renderable) and private_attr in target._LAYOUT_PROPS:
-        target.mark_dirty()
-        if target._yoga_node is not None:
-            try:
-                target._yoga_node.mark_dirty()
-            except RuntimeError as e:
-                if "leaf" not in str(e) and "measure" not in str(e):
-                    raise
-    else:
-        target.mark_paint_dirty()
-
-
-class Template(MountedTemplate):
-    """Declarative mounted template with id-based reactive bindings.
-
-    Usage:
-        Template(
-            build=lambda: Box(
-                Text("", id="count"),
-                Text("", id="double"),
-                id="panel",
-            ),
-            bindings={
-                "count.content": lambda: f"Count: {count()}",
-                "double.content": lambda: f"Double: {count() * 2}",
-                "panel.border": lambda: bool(count() % 2),
-            },
-        )
-
-    Named functions are equally supported and are preferred when the template
-    is shared or the binding logic is more than a small local expression.
-    """
-
-    __slots__ = ()
-
-    def __init__(
-        self,
-        *,
-        build: Callable[[], BaseRenderable | list[BaseRenderable] | tuple[BaseRenderable, ...]],
-        bindings: dict[str, object],
-        invalidate_when: Callable[[], Any] | None = None,
-        **kwargs,
-    ):
-        def update(mounted: BaseRenderable | list[BaseRenderable], refs: TemplateRefs) -> None:
-            for path, source in bindings.items():
-                target, attr = _resolve_template_target(mounted, refs, path)
-                _set_template_attr(target, attr, _read_template_binding_value(source))
-
-        super().__init__(
-            build=build,
-            update=update,
-            invalidate_when=invalidate_when,
-            **kwargs,
-        )
-
-
-def template(
-    build: Callable[[], BaseRenderable | list[BaseRenderable] | tuple[BaseRenderable, ...]],
-    *,
-    invalidate_when: Callable[[], Any] | None = None,
-    **kwargs,
-) -> MountedTemplate:
-    """Lower a bound build tree onto MountedTemplate automatically.
-
-    Build functions can use ``reactive(...)`` for prop/text values and this helper
-    will extract those bindings into the mounted-template fast path.
-
-    This is the most Pythonic high-level entry point for stable regions:
-    write a normal build function, mark changing leaf values with ``reactive(...)``,
-    and optionally provide ``invalidate_when`` for real structural changes.
-
-    Example:
-        def build_panel():
-            return Box(
-                Text(reactive(panel_title), id="title"),
-                Text(reactive(panel_subtitle), id="subtitle"),
-                id="panel",
-                border=reactive(is_selected),
-            )
-
-        panel = template(build_panel, invalidate_when=current_mode)
-    """
-    from .control_flow import _normalize_render_result
-
-    extracted_bindings: dict[str, object] = {}
-
-    def build_with_lowering():
-        nonlocal extracted_bindings
-        built = _normalize_render_result(build())
-        extracted_bindings = _extract_template_bindings(built)
-        if len(built) == 1:
-            return built[0]
-        return built
-
-    def update(mounted: BaseRenderable | list[BaseRenderable], refs: TemplateRefs) -> None:
-        for path, source in extracted_bindings.items():
-            target, attr = _resolve_template_target(mounted, refs, path)
-            _set_template_attr(target, attr, _read_template_binding_value(source))
-
-    return MountedTemplate(
-        build=build_with_lowering,
-        update=update,
-        invalidate_when=invalidate_when,
-        **kwargs,
-    )
-
-
-def template_component(
+def component(
     fn: Callable[..., BaseRenderable | list[BaseRenderable] | tuple[BaseRenderable, ...]]
     | None = None,
     *,
     invalidate_when: Callable[..., Any] | None = None,
-    **template_kwargs,
+    **decorator_kwargs,
 ):
-    """Decorate a component function so it renders through ``template(...)``.
+    """Decorator for reactive components.
 
-    This is the preferred migration path for stable components:
-    keep authoring a normal component function, use ``reactive(...)`` for changing
-    leaf values, and opt the component into mounted-template execution.
+    The decorated function, when called, returns a ``Mount`` that rebuilds
+    when any signal read in the component body changes.  Prop-level lambdas
+    and Signals are handled by fine-grained bindings without triggering a
+    full rebuild.
 
-    Example:
-        @template_component
-        def StatusPanel():
+    Kwargs matching the function's own parameters are forwarded to the
+    function; remaining kwargs (layout, key, etc.) go to the Mount.
+
+    Usage::
+
+        @component
+        def Counter():
+            count = Signal(0, name="count")
             return Box(
-                Text(reactive(panel_title), id="title"),
-                Text(reactive(panel_subtitle), id="subtitle"),
-                id="panel",
-                border=reactive(is_selected),
+                Text(lambda: f"Count: {count()}"),
             )
 
-        @template_component(invalidate_when=lambda mode: mode())
-        def ModePanel(mode):
-            return Box(Text(reactive(lambda: mode())), id=f"mode-{mode()}")
+        Counter()                    # returns Mount
+        Counter(flex_grow=1)         # layout kwargs pass through
+
+        # Component params are separated automatically
+        @component
+        def UserCard(user):
+            return Box(Text(lambda: user.name()))
+
+        UserCard(some_user, flex_grow=1)
+
+        # Works naturally with Show/Switch
+        Show(Counter(), when=is_visible)
+        Switch(on=active_tab, cases={0: Counter, 1: LogPanel})
     """
 
     def decorate(
@@ -508,24 +285,34 @@ def template_component(
             ..., BaseRenderable | list[BaseRenderable] | tuple[BaseRenderable, ...]
         ],
     ):
-        def wrapped(*args, **kwargs):
+        try:
+            fn_params = set(inspect.signature(component_fn).parameters)
+        except (TypeError, ValueError):
+            fn_params = set()
+
+        def wrapped(*args: Any, **kwargs: Any) -> Mount:
+            fn_kwargs: dict[str, Any] = {}
+            mt_kwargs: dict[str, Any] = {}
+            for k, v in kwargs.items():
+                if k in fn_params:
+                    fn_kwargs[k] = v
+                else:
+                    mt_kwargs[k] = v
+
             def build():
-                return component_fn(*args, **kwargs)
+                return component_fn(*args, **fn_kwargs)
 
             invalidate = None
             if invalidate_when is not None:
-                invalidate = lambda: invalidate_when(*args, **kwargs)  # noqa: E731
+                invalidate = lambda: invalidate_when(*args, **fn_kwargs)  # noqa: E731
 
-            return template(
-                build,
-                invalidate_when=invalidate,
-                **template_kwargs,
-            )
+            merged = {**decorator_kwargs, **mt_kwargs}
+            return Mount(build, invalidate_when=invalidate, **merged)
 
-        wrapped.__name__ = getattr(component_fn, "__name__", "template_component")
+        wrapped.__name__ = getattr(component_fn, "__name__", "component")
         wrapped.__doc__ = component_fn.__doc__
         wrapped.__qualname__ = getattr(component_fn, "__qualname__", wrapped.__name__)
-        wrapped.__opentui_template_component__ = True
+        wrapped.__opentui_component__ = True
         return wrapped
 
     if fn is not None:
@@ -534,12 +321,6 @@ def template_component(
 
 
 __all__ = [
-    "MountedTemplate",
-    "Template",
-    "TemplateBinding",
-    "TemplateRefs",
-    "bind",
-    "reactive",
-    "template",
-    "template_component",
+    "Mount",
+    "component",
 ]

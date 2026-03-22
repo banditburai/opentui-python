@@ -40,7 +40,7 @@ def _poll_char(handler: InputHandler, char: str) -> list[KeyEvent]:
     handler.on_key(lambda event: seen.append(event))
 
     with (
-        patch("opentui.input.select.select", return_value=([0], [], [])),
+        patch("opentui.input.handler.select.select", return_value=([0], [], [])),
         patch.object(handler, "_read_char", return_value=char),
     ):
         handler.poll()
@@ -63,7 +63,7 @@ def _escape_then(handler: InputHandler, *follow_chars: str) -> list[KeyEvent]:
         return next(chars)
 
     with (
-        patch("opentui.input.select.select", return_value=([0], [], [])),
+        patch("opentui.input.handler.select.select", return_value=([0], [], [])),
         patch.object(handler, "_read_char", side_effect=fake_read),
     ):
         handler._handle_escape()
@@ -199,7 +199,7 @@ class TestSpecialKeys:
         handler.on_key(lambda event: seen.append(event))
         # ESC alone: select returns no-data for follow-up
         with (
-            patch("opentui.input.select.select", return_value=([], [], [])),
+            patch("opentui.input.handler.select.select", return_value=([], [], [])),
         ):
             handler._handle_escape()
         assert len(seen) == 1
@@ -306,7 +306,7 @@ class TestFunctionKeys:
 
         chars = iter(["P"])
         with (
-            patch("opentui.input.select.select", return_value=([0], [], [])),
+            patch("opentui.input.handler.select.select", return_value=([0], [], [])),
             patch.object(handler, "_read_char", side_effect=lambda: next(chars)),
         ):
             handler._handle_ss3()
@@ -809,7 +809,7 @@ class TestMetaSpaceAndEscapeCombinations:
             return ([], [], [])
 
         with (
-            patch("opentui.input.select.select", side_effect=select_side_effect),
+            patch("opentui.input.handler.select.select", side_effect=select_side_effect),
             patch.object(handler, "_read_char", return_value="\x1b"),
         ):
             handler._handle_escape()
@@ -859,7 +859,7 @@ class TestCtrlModifierKeys:
 
         chars = iter(["a"])
         with (
-            patch("opentui.input.select.select", return_value=([0], [], [])),
+            patch("opentui.input.handler.select.select", return_value=([0], [], [])),
             patch.object(handler, "_read_char", side_effect=lambda: next(chars)),
         ):
             handler._handle_ss3()
@@ -892,7 +892,7 @@ class TestNonAlphanumericKeysExport:
 
     def test_non_alphanumeric_keys_export(self):
         """Maps to test("nonAlphanumericKeys export")."""
-        from opentui.input import NON_ALPHANUMERIC_KEYS
+        from opentui.input.key_maps import NON_ALPHANUMERIC_KEYS
 
         assert isinstance(NON_ALPHANUMERIC_KEYS, list)
         assert len(NON_ALPHANUMERIC_KEYS) > 0
@@ -1111,7 +1111,7 @@ class TestRegularParsingDefaultsToPress:
         h._fd = 0
         evts: list[KeyEvent] = []
         h.on_key(lambda e: evts.append(e))
-        with patch("opentui.input.select.select", return_value=([], [], [])):
+        with patch("opentui.input.handler.select.select", return_value=([], [], [])):
             h._handle_escape()
         assert evts[0].event_type == "press"
 
@@ -1283,7 +1283,7 @@ class TestDoesNotFilterValidKeySequences:
         handler.on_key(lambda e: seen.append(e))
         chars = iter(["A"])
         with (
-            patch("opentui.input.select.select", return_value=([0], [], [])),
+            patch("opentui.input.handler.select.select", return_value=([0], [], [])),
             patch.object(handler, "_read_char", side_effect=lambda: next(chars)),
         ):
             handler._handle_ss3()
@@ -1297,7 +1297,7 @@ class TestDoesNotFilterValidKeySequences:
         handler.on_key(lambda e: seen.append(e))
         chars = iter(["B"])
         with (
-            patch("opentui.input.select.select", return_value=([0], [], [])),
+            patch("opentui.input.handler.select.select", return_value=([0], [], [])),
             patch.object(handler, "_read_char", side_effect=lambda: next(chars)),
         ):
             handler._handle_ss3()
@@ -1410,7 +1410,7 @@ class TestSourceFieldAlwaysRaw:
         handler.on_key(lambda e: seen.append(e))
         chars = iter(["P"])
         with (
-            patch("opentui.input.select.select", return_value=([0], [], [])),
+            patch("opentui.input.handler.select.select", return_value=([0], [], [])),
             patch.object(handler, "_read_char", side_effect=lambda: next(chars)),
         ):
             handler._handle_ss3()
@@ -1437,7 +1437,7 @@ class TestSourceFieldAlwaysRaw:
         handler._fd = 0
         seen: list[KeyEvent] = []
         handler.on_key(lambda e: seen.append(e))
-        with patch("opentui.input.select.select", return_value=([], [], [])):
+        with patch("opentui.input.handler.select.select", return_value=([], [], [])):
             handler._handle_escape()
         assert seen[0].source == "raw"
 
@@ -1780,7 +1780,7 @@ class TestMetaArrowKeysOldStyle:
             return ([], [], [])  # No DCS content follows
 
         with (
-            patch("opentui.input.select.select", side_effect=fake_select),
+            patch("opentui.input.handler.select.select", side_effect=fake_select),
             patch.object(handler, "_read_char", return_value="P"),
         ):
             handler._handle_escape()

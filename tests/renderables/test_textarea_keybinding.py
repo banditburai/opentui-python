@@ -8,7 +8,7 @@ import pytest
 
 from opentui.components.textarea_renderable import TextareaRenderable
 from opentui.events import KeyEvent
-from opentui.keymapping import KeyBinding
+from opentui.input.keymapping import KeyBinding
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -51,9 +51,9 @@ class TestTextareaKeybindingMetaKeyBindings:
 
     def test_should_bind_custom_action_to_meta_key(self):
         """Maps to test("should bind custom action to meta key")."""
-        ta = _make("Test", key_bindings=[KeyBinding(name="b", meta=True, action="buffer-home")])
+        ta = _make("Test", key_bindings=[KeyBinding(name="b", alt=True, action="buffer-home")])
         ta.goto_buffer_end()
-        # meta on binding -> alt on event
+        # alt on binding -> alt on event
         ta.handle_key(_key("b", alt=True))
         line, col = _cursor(ta)
         assert line == 0
@@ -61,7 +61,7 @@ class TestTextareaKeybindingMetaKeyBindings:
 
     def test_should_bind_meta_key_actions(self):
         """Maps to test("should bind meta key actions")."""
-        ta = _make("Test", key_bindings=[KeyBinding(name="f", meta=True, action="buffer-end")])
+        ta = _make("Test", key_bindings=[KeyBinding(name="f", alt=True, action="buffer-end")])
         ta.handle_key(_key("f", alt=True))
         line, _col = _cursor(ta)
         assert line == 0
@@ -69,7 +69,7 @@ class TestTextareaKeybindingMetaKeyBindings:
     def test_should_work_with_meta_key_for_navigation(self):
         """Maps to test("should work with meta key for navigation")."""
         ta = _make(
-            "Line 1\nLine 2", key_bindings=[KeyBinding(name="j", meta=True, action="move-down")]
+            "Line 1\nLine 2", key_bindings=[KeyBinding(name="j", alt=True, action="move-down")]
         )
         assert _cursor(ta)[0] == 0
         ta.handle_key(_key("j", alt=True))
@@ -79,7 +79,7 @@ class TestTextareaKeybindingMetaKeyBindings:
         """Maps to test("should allow meta key binding override")."""
         ta = _make(
             "Line 1\nLine 2\nLine 3",
-            key_bindings=[KeyBinding(name="k", meta=True, action="move-up")],
+            key_bindings=[KeyBinding(name="k", alt=True, action="move-up")],
         )
         ta.goto_line(2)
         assert _cursor(ta)[0] == 2
@@ -91,8 +91,8 @@ class TestTextareaKeybindingMetaKeyBindings:
         ta = _make(
             "ABC",
             key_bindings=[
-                KeyBinding(name="left", meta=True, action="line-home"),
-                KeyBinding(name="right", meta=True, action="line-end"),
+                KeyBinding(name="left", alt=True, action="line-home"),
+                KeyBinding(name="right", alt=True, action="line-end"),
             ],
         )
         ta.move_cursor_right()
@@ -107,21 +107,21 @@ class TestTextareaKeybindingMetaKeyBindings:
         """Maps to test("should support meta with shift modifier")."""
         ta = _make(
             "Hello World",
-            key_bindings=[KeyBinding(name="h", meta=True, shift=True, action="line-home")],
+            key_bindings=[KeyBinding(name="h", alt=True, shift=True, action="line-home")],
         )
         ta.goto_buffer_end()
         assert _cursor(ta)[1] == 11
-        # meta+shift on binding -> alt+shift on event, key is lowercase "h"
+        # alt+shift on binding -> alt+shift on event, key is lowercase "h"
         ta.handle_key(_key("h", alt=True, shift=True))
         assert _cursor(ta)[1] == 0
 
     def test_should_not_trigger_action_without_meta_when_meta_binding_exists(self):
         """Maps to test("should not trigger action without meta when meta binding exists")."""
-        ta = _make("Test", key_bindings=[KeyBinding(name="x", meta=True, action="delete-line")])
+        ta = _make("Test", key_bindings=[KeyBinding(name="x", alt=True, action="delete-line")])
         # 'x' without meta inserts the character
         ta.handle_key(_key("x", sequence="x"))
         assert ta.plain_text == "xTest"
-        # 'x' with meta (=alt) triggers delete-line
+        # 'x' with alt triggers delete-line
         ta.handle_key(_key("x", alt=True))
         assert ta.plain_text == ""
 
@@ -129,11 +129,11 @@ class TestTextareaKeybindingMetaKeyBindings:
         """Maps to test("should update keyBindings dynamically with setter")."""
         ta = _make("Test")
         ta.goto_buffer_end()
-        # Default meta+b = word-backward (via alt)
+        # Default alt+b = word-backward
         ta.handle_key(_key("b", alt=True))
         assert _cursor(ta)[0] == 0
         assert _cursor(ta)[1] == 0
-        # Override: meta+b -> buffer-end
+        # Override: alt+b -> buffer-end
         ta.key_bindings = [KeyBinding(name="b", meta=True, action="buffer-end")]
         ta.goto_line(0)
         assert _cursor(ta)[0] == 0
@@ -146,7 +146,7 @@ class TestTextareaKeybindingMetaKeyBindings:
         ta.handle_key(_key("right"))
         assert _cursor(ta)[1] == 1
         # Add a new binding, defaults remain
-        ta.key_bindings = [KeyBinding(name="d", meta=True, action="delete-line")]
+        ta.key_bindings = [KeyBinding(name="d", alt=True, action="delete-line")]
         ta.handle_key(_key("right"))
         assert _cursor(ta)[1] == 2
         ta.handle_key(_key("d", alt=True))
@@ -155,11 +155,11 @@ class TestTextareaKeybindingMetaKeyBindings:
     def test_should_override_default_keybindings_with_new_bindings(self):
         """Maps to test("should override default keyBindings with new bindings")."""
         ta = _make("hello world")
-        # Default meta+f = word-forward
+        # Default alt+f = word-forward
         ta.handle_key(_key("f", alt=True))
         assert _cursor(ta)[1] == 6
         # Override to buffer-end
-        ta.key_bindings = [KeyBinding(name="f", meta=True, action="buffer-end")]
+        ta.key_bindings = [KeyBinding(name="f", alt=True, action="buffer-end")]
         ta.goto_line(0)
         ta.handle_key(_key("f", alt=True))
         assert _cursor(ta)[0] == 0  # single line
@@ -180,15 +180,15 @@ class TestTextareaKeybindingMetaKeyBindings:
         assert ta.plain_text == "Line 1\n"
         assert submit_called is False
 
-        # Default: meta+return (= alt+return) -> submit
+        # Default: alt+return -> submit
         ta.handle_key(_key("return", alt=True))
         assert submit_called is True
         submit_called = False
 
-        # Swap: return -> submit, meta+return -> newline
+        # Swap: return -> submit, alt+return -> newline
         ta.key_bindings = [
-            KeyBinding(name="return", meta=True, action="newline"),
-            KeyBinding(name="linefeed", meta=True, action="newline"),
+            KeyBinding(name="return", alt=True, action="newline"),
+            KeyBinding(name="linefeed", alt=True, action="newline"),
             KeyBinding(name="return", action="submit"),
             KeyBinding(name="linefeed", action="submit"),
         ]
@@ -1022,7 +1022,7 @@ class TestTextareaKeybindingKeyBindingsSecond:
             "Hello",
             key_bindings=[
                 KeyBinding(name="d", action="delete"),
-                KeyBinding(name="d", meta=True, action="delete-line"),
+                KeyBinding(name="d", alt=True, action="delete-line"),
             ],
         )
         ta.handle_key(_key("d", sequence="d"))
@@ -1771,12 +1771,11 @@ class TestTextareaKeybindingKeyAliases:
         """Maps to test("should handle aliases with modifiers")."""
         ta = _make(
             "Line 1\nLine 2",
-            key_bindings=[KeyBinding(name="enter", meta=True, action="buffer-home")],
+            key_bindings=[KeyBinding(name="enter", alt=True, action="buffer-home")],
         )
         ta.goto_buffer_end()
         assert _cursor(ta)[0] == 1
-        # Meta+Enter should trigger buffer-home
-        # KeyBinding meta=True -> KeyEvent alt=True, and "enter" alias -> "return"
+        # Alt+Enter should trigger buffer-home ("enter" alias -> "return")
         ta.handle_key(_key("return", alt=True))
         assert _cursor(ta)[0] == 0
         assert _cursor(ta)[1] == 0
@@ -1885,7 +1884,7 @@ class TestTextareaKeybindingVisualLineNavigationMetaAE:
         ta = _make("Hello World", wrap_mode="none", width=40, height=10)
         ta._editor_view.set_viewport_size(40, 10)
         ta._edit_buffer.set_cursor(0, 6)
-        # meta on binding -> alt on event
+        # alt on binding -> alt on event
         ta.handle_key(_key("a", alt=True))
         assert _cursor(ta)[1] == 0
 

@@ -4,7 +4,7 @@ Upstream: packages/core/src/testing/integration.test.ts
 Tests ported: 11/11 (0 skipped)
 """
 
-from opentui.testing import (
+from opentui.testing.sgr import (
     SGRMouseButtons,
     SGRMouseParser,
     create_mock_mouse,

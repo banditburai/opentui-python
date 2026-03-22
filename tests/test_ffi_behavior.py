@@ -4,14 +4,10 @@ Upstream: N/A (Python-specific)
 """
 
 import pytest
-from opentui.native import (
-    NativeBuffer,
-    NativeEditBuffer,
-    NativeEditorView,
-    NativeRenderer,
-    NativeTextBuffer,
-    is_available,
-)
+from opentui.editor.edit_buffer_native import NativeEditBuffer
+from opentui.editor.editor_view_native import NativeEditorView
+from opentui.editor.text_buffer_native import NativeTextBuffer
+from opentui.native import NativeBuffer, NativeRenderer, is_available
 
 pytestmark = pytest.mark.skipif(not is_available(), reason="Native bindings not available")
 

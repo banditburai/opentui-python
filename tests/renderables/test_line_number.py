@@ -24,6 +24,7 @@ class TestLineNumberRenderable:
     async def test_reuses_gutter_raster_cache_when_clean(self):
         setup = await create_test_renderer(20, 10)
         try:
+
             class _CountingGutter(GutterRenderable):
                 __slots__ = ("draw_calls",)
 

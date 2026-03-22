@@ -6,29 +6,41 @@ optionally serialize for external use.
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+import operator as _operator_mod
 from typing import Any
 
 
-class Expr(ABC):
+class Expr:
     """Base class for expressions that can evaluate in Python."""
 
     __hash__ = None  # type: ignore[assignment]  # Mutable; __eq__ returns BinaryOp
 
-    @abstractmethod
+    def __call__(self):
+        return self.evaluate()
+
     def evaluate(self) -> Any:
-        """Evaluate this expression in Python."""
-        pass
+        """Evaluate this expression in Python.
+
+        Subclasses must override either __call__ or evaluate.
+        """
+        raise NotImplementedError(f"{type(self).__name__} must implement __call__ or evaluate")
 
     def to_js(self) -> str:
         """Convert to external format string."""
-        return repr(self.evaluate())
+        return repr(self())
 
     def __str__(self) -> str:
-        return str(self.evaluate())
+        return str(self())
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}({self.evaluate()!r})"
+        return f"{type(self).__name__}({self()!r})"
+
+    def __format__(self, spec: str) -> str:
+        return format(self(), spec)
+
+    def is_same_as(self, other) -> bool:
+        """Identity comparison (since __eq__ returns BinaryOp)."""
+        return self is other
 
     def __eq__(self, other: Any) -> BinaryOp:
         return BinaryOp(self, "==", other)
@@ -72,11 +84,32 @@ class Expr(ABC):
     def __rtruediv__(self, other: Any) -> BinaryOp:
         return BinaryOp(other, "/", self)
 
+    def __floordiv__(self, other: Any) -> BinaryOp:
+        return BinaryOp(self, "//", other)
+
+    def __rfloordiv__(self, other: Any) -> BinaryOp:
+        return BinaryOp(other, "//", self)
+
     def __mod__(self, other: Any) -> BinaryOp:
         return BinaryOp(self, "%", other)
 
     def __rmod__(self, other: Any) -> BinaryOp:
         return BinaryOp(other, "%", self)
+
+    def __pow__(self, other: Any) -> BinaryOp:
+        return BinaryOp(self, "**", other)
+
+    def __rpow__(self, other: Any) -> BinaryOp:
+        return BinaryOp(other, "**", self)
+
+    def __neg__(self) -> UnaryOp:
+        return UnaryOp("-", self)
+
+    def __pos__(self) -> UnaryOp:
+        return UnaryOp("+", self)
+
+    def __abs__(self) -> UnaryOp:
+        return UnaryOp("abs", self)
 
     def __invert__(self) -> UnaryOp:
         return UnaryOp("not", self)
@@ -94,7 +127,7 @@ class Expr(ABC):
         return BinaryOp(other, "or", self)
 
     def __bool__(self) -> bool:
-        return bool(self.evaluate())
+        return bool(self())
 
     def upper(self) -> MethodCall:
         return MethodCall(self, "upper", [])
@@ -125,7 +158,7 @@ class Expr(ABC):
         if not values:
             return Assignment(self, UnaryOp("not", self))
 
-        current = self.evaluate()
+        current = self()
         for i, v in enumerate(values):
             if current == v:
                 next_val = values[(i + 1) % len(values)]
@@ -140,6 +173,10 @@ class Expr(ABC):
         """Nullish coalescing: value ?? fallback."""
         return BinaryOp(self, "or", _ensure_expr(fallback))
 
+    def map(self, transform) -> MappedExpr:
+        """Apply a transform function to this expression's value."""
+        return MappedExpr(self, transform)
+
 
 class Literal(Expr):
     """A literal value."""
@@ -148,6 +185,9 @@ class Literal(Expr):
 
     def __init__(self, value: Any):
         self._value = value
+
+    def __call__(self):
+        return self._value
 
     def evaluate(self) -> Any:
         return self._value
@@ -165,78 +205,95 @@ class Literal(Expr):
 class PropertyAccess(Expr):
     """Access a property on an object."""
 
-    __slots__ = ("_obj", "_property")
+    __slots__ = ("_obj", "_property", "_fn")
 
     def __init__(self, obj: Expr, prop: str):
         self._obj = _ensure_expr(obj)
         self._property = prop
+        o = self._obj
+        if prop == "len":
+            self._fn = lambda: len(o())
+        else:
+            p = prop
+            self._fn = lambda: getattr(o(), p)
+
+    def __call__(self):
+        return self._fn()
 
     def evaluate(self) -> Any:
-        obj = self._obj.evaluate()
-        if self._property == "len":
-            return len(obj)
-        return getattr(obj, self._property)
+        return self._fn()
 
 
 class MethodCall(Expr):
     """Call a method on an object."""
 
-    __slots__ = ("_obj", "_method", "_args")
+    __slots__ = ("_obj", "_method", "_args", "_fn")
 
     def __init__(self, obj: Expr, method: str, args: list):
         self._obj = _ensure_expr(obj)
         self._method = method
         self._args = [_ensure_expr(a) for a in args]
+        o = self._obj
+        m = method
+        a = self._args
+        if a:
+            self._fn = lambda: getattr(o(), m)(*[x() for x in a])
+        else:
+            self._fn = lambda: getattr(o(), m)()  # noqa: PLW0108
+
+    def __call__(self):
+        return self._fn()
 
     def evaluate(self) -> Any:
-        obj = self._obj.evaluate()
-        args = [a.evaluate() for a in self._args]
-        return getattr(obj, self._method)(*args)
+        return self._fn()
+
+
+_BINARY_OPS: dict[str, Any] = {
+    "+": _operator_mod.add,
+    "-": _operator_mod.sub,
+    "*": _operator_mod.mul,
+    "/": _operator_mod.truediv,
+    "//": _operator_mod.floordiv,
+    "%": _operator_mod.mod,
+    "**": _operator_mod.pow,
+    "==": _operator_mod.eq,
+    "!=": _operator_mod.ne,
+    "<": _operator_mod.lt,
+    "<=": _operator_mod.le,
+    ">": _operator_mod.gt,
+    ">=": _operator_mod.ge,
+    "and": lambda a, b: a and b,
+    "or": lambda a, b: a or b,
+}
+
+_UNARY_OPS: dict[str, Any] = {
+    "not": _operator_mod.not_,
+    "-": _operator_mod.neg,
+    "+": _operator_mod.pos,
+    "abs": abs,
+}
 
 
 class BinaryOp(Expr):
     """Binary operation."""
 
-    __slots__ = ("_left", "_op", "_right")
+    __slots__ = ("_left", "_op", "_right", "_fn")
 
     def __init__(self, left: Any, op: str, right: Any):
         self._left = _ensure_expr(left)
         self._op = op
         self._right = _ensure_expr(right)
+        op_fn = _BINARY_OPS.get(op)
+        if op_fn is None:
+            raise ValueError(f"Unknown operator: {op}")
+        left, right = self._left, self._right
+        self._fn = lambda: op_fn(left(), right())
+
+    def __call__(self):
+        return self._fn()
 
     def evaluate(self) -> Any:
-        left = self._left.evaluate()
-        right = self._right.evaluate()
-
-        op = self._op
-        if op == "==":
-            return left == right
-        elif op == "!=":
-            return left != right
-        elif op == "<":
-            return left < right
-        elif op == "<=":
-            return left <= right
-        elif op == ">":
-            return left > right
-        elif op == ">=":
-            return left >= right
-        elif op == "+":
-            return left + right
-        elif op == "-":
-            return left - right
-        elif op == "*":
-            return left * right
-        elif op == "/":
-            return left / right
-        elif op == "%":
-            return left % right
-        elif op == "and":
-            return left and right
-        elif op == "or":
-            return left or right
-        else:
-            raise ValueError(f"Unknown operator: {op}")
+        return self._fn()
 
     def to_js(self) -> str:
         left = self._left.to_js()
@@ -254,17 +311,22 @@ class BinaryOp(Expr):
 class UnaryOp(Expr):
     """Unary operation."""
 
-    __slots__ = ("_op", "_expr")
+    __slots__ = ("_op", "_expr", "_fn")
 
     def __init__(self, op: str, expr: Expr):
         self._op = op
         self._expr = _ensure_expr(expr)
+        op_fn = _UNARY_OPS.get(op)
+        if op_fn is None:
+            raise ValueError(f"Unknown unary operator: {op}")
+        e = self._expr
+        self._fn = lambda: op_fn(e())
+
+    def __call__(self):
+        return self._fn()
 
     def evaluate(self) -> Any:
-        value = self._expr.evaluate()
-        if self._op == "not":
-            return not value
-        raise ValueError(f"Unknown unary operator: {self._op}")
+        return self._fn()
 
     def to_js(self) -> str:
         if self._op == "not":
@@ -275,20 +337,41 @@ class UnaryOp(Expr):
 class Conditional(Expr):
     """Ternary conditional: condition ? true_val : false_val."""
 
-    __slots__ = ("_condition", "_true_val", "_false_val")
+    __slots__ = ("_condition", "_true_val", "_false_val", "_fn")
 
     def __init__(self, condition: Any, true_val: Any, false_val: Any):
         self._condition = _ensure_expr(condition)
         self._true_val = _ensure_expr(true_val)
         self._false_val = _ensure_expr(false_val)
+        c, t, f = self._condition, self._true_val, self._false_val
+        self._fn = lambda: t() if c() else f()
+
+    def __call__(self):
+        return self._fn()
 
     def evaluate(self) -> Any:
-        if self._condition.evaluate():
-            return self._true_val.evaluate()
-        return self._false_val.evaluate()
+        return self._fn()
 
     def to_js(self) -> str:
         return f"({self._condition.to_js()} ? {self._true_val.to_js()} : {self._false_val.to_js()})"
+
+
+class MappedExpr(Expr):
+    """Mapped expression: applies a transform function to a source expression."""
+
+    __slots__ = ("_source", "_transform", "_fn")
+
+    def __init__(self, source, transform):
+        self._source = _ensure_expr(source)
+        self._transform = transform
+        s = self._source
+        self._fn = lambda: transform(s())
+
+    def __call__(self):
+        return self._fn()
+
+    def evaluate(self) -> Any:
+        return self._fn()
 
 
 class Assignment(Expr):
@@ -301,7 +384,7 @@ class Assignment(Expr):
         self._value = value
 
     def evaluate(self) -> Any:
-        value = self._value.evaluate()
+        value = self._value()
         # Duck-type: if target has set(), call it
         if hasattr(self._target, "set") and callable(self._target.set):
             self._target.set(value)
@@ -312,15 +395,9 @@ class Assignment(Expr):
 
 
 def _ensure_expr(value: Any) -> Expr:
-    """Ensure a value is an Expr.
-
-    Handles Signal (which has evaluate/to_js but doesn't subclass Expr)
-    via duck-typing to avoid wrapping in Literal.
-    """
+    """Ensure a value is an Expr."""
     if isinstance(value, Expr):
         return value
-    if hasattr(value, "evaluate") and hasattr(value, "to_js"):
-        return value  # type: ignore[return-value]  # Signal duck-types Expr
     return Literal(value)
 
 
@@ -366,6 +443,7 @@ __all__ = [
     "BinaryOp",
     "UnaryOp",
     "Conditional",
+    "MappedExpr",
     "PropertyAccess",
     "MethodCall",
     "Assignment",

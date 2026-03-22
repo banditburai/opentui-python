@@ -22,7 +22,8 @@ import re
 
 from opentui import test_render as _test_render
 from opentui.components.advanced import Code
-from opentui.components.box import Box, ScrollBox, ScrollContent
+from opentui.components.box import Box
+from opentui.components.scrollbox import ScrollBox, ScrollContent
 from opentui.components.control_flow import For, Show
 from opentui.components.text import Text
 from opentui.signals import Signal
@@ -349,12 +350,12 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
                 Box(
                     ScrollBox(
                         content=ScrollContent(
-                        # Text message 1
+                            # Text message 1
                             Box(
                                 Text("Let me create a file for you.", fg="#ffffff"),
                                 flex_shrink=0,
                             ),
-                        # Tool message 1: greet.ts
+                            # Tool message 1: greet.ts
                             Box(Text("Wrote src/greet.ts", fg="#00aaff"), flex_shrink=0),
                             Code(
                                 greet_code,
@@ -363,12 +364,12 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
                                 fg="#ffffff",
                                 flex_grow=1,
                             ),
-                        # Text message 2
+                            # Text message 2
                             Box(
                                 Text("I've created the greet function.", fg="#ffffff"),
                                 flex_shrink=0,
                             ),
-                        # Tool message 2: index.ts + diagnostic
+                            # Tool message 2: index.ts + diagnostic
                             Box(Text("Wrote src/index.ts", fg="#00aaff"), flex_shrink=0),
                             Code(
                                 index_code,
@@ -378,7 +379,7 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
                                 flex_grow=1,
                             ),
                             Text("Error [2:5]: Unused variable", fg="#ff0000"),
-                        # Text message 3
+                            # Text message 3
                             Box(
                                 Text("And here's the main file.", fg="#ffffff"),
                                 flex_shrink=0,
@@ -466,8 +467,8 @@ class TestLineNumberInScrollBoxHeightAndOverlapIssues:
                 ScrollBox(
                     content=ScrollContent(
                         For(
+                            _render_message,
                             each=messages,
-                            render=_render_message,
                             key_fn=lambda m: f"msg-{m['id']}",
                             key="message-list",
                         ),

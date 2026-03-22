@@ -6,7 +6,7 @@ Tests ported: 16/16 (0 skipped)
 
 import re
 
-from opentui.testing import SGRMouseButtons, create_mock_mouse
+from opentui.testing.sgr import SGRMouseButtons, create_mock_mouse
 
 
 class TestMockMouse:

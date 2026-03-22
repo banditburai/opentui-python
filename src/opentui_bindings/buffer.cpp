@@ -56,6 +56,14 @@ extern "C" {
     bool encodeUnicode(const char* text, size_t textLen, EncodedChar** outPtr, size_t* outLenPtr, uint8_t widthMethod);
     void freeUnicode(const EncodedChar* charsPtr, size_t charsLen);
     void bufferDrawChar(void* buffer, uint32_t ch, uint32_t x, uint32_t y, float* fg, float* bg, uint32_t attrs);
+
+    // Link pool functions for OSC 8 hyperlink support
+    uint32_t linkAlloc(const char* url, size_t urlLen);
+    size_t linkGetUrl(uint32_t id, char* out, size_t maxLen);
+    uint32_t attributesWithLink(uint32_t baseAttributes, uint32_t linkId);
+    uint32_t attributesGetLinkId(uint32_t attributes);
+    void clearGlobalLinkPool();
+    void setHyperlinksCapability(void* renderer, bool enabled);
 }
 
 static void resolve_fg(std::optional<std::array<float, 4>> const& opt, float out[4]) {
@@ -321,4 +329,23 @@ void bind_buffer(nb::module_& m) {
         bufferDrawChar(buffer, ch, x, y, fg_color, bg_color, attrs);
     }, nb::arg("buffer"), nb::arg("ch"), nb::arg("x"), nb::arg("y"),
        nb::arg("fg") = std::nullopt, nb::arg("bg") = std::nullopt, nb::arg("attrs") = 0);
+
+    // Link pool functions for OSC 8 hyperlink support
+    m.def("link_alloc", [](nb::bytes url) -> uint32_t {
+        return linkAlloc(url.c_str(), url.size());
+    }, nb::arg("url"));
+
+    m.def("link_get_url", [](uint32_t id, size_t maxLen) -> nb::bytes {
+        std::string out(maxLen, '\0');
+        size_t len = linkGetUrl(id, out.data(), maxLen);
+        return nb::bytes(out.data(), len);
+    }, nb::arg("id"), nb::arg("max_len") = 4096);
+
+    m.def("attributes_with_link", &attributesWithLink,
+          nb::arg("base_attributes"), nb::arg("link_id"));
+
+    m.def("attributes_get_link_id", &attributesGetLinkId,
+          nb::arg("attributes"));
+
+    m.def("clear_global_link_pool", &clearGlobalLinkPool);
 }

@@ -6,9 +6,10 @@ Tests ported: 19/19 (0 skipped)
 
 import pytest
 
-from opentui import reactive, template_component
+from opentui import component
 from opentui import test_render as _test_render
-from opentui.components.box import Box, ScrollBox, ScrollContent
+from opentui.components.box import Box
+from opentui.components.scrollbox import ScrollBox, ScrollContent
 from opentui.components.text import Span, Text
 from opentui.signals import Signal
 
@@ -249,9 +250,9 @@ class TestLayoutReactiveUpdates:
 
         counter = Signal(0, name="counter")
 
-        @template_component
+        @component
         def CounterText():
-            return Text(reactive(lambda: f"Counter: {counter()}"), id="counter")
+            return Text(lambda: f"Counter: {counter()}", id="counter")
 
         setup = await _strict_render(
             CounterText,
@@ -271,10 +272,10 @@ class TestLayoutReactiveUpdates:
 
         show_text = Signal(True, name="show")
 
-        @template_component
+        @component
         def ConditionalText():
             return Text(
-                reactive(lambda: "Always visible" + (" - Conditional text" if show_text() else "")),
+                lambda: "Always visible" + (" - Conditional text" if show_text() else ""),
                 id="conditional_text",
                 wrap_mode="none",
             )

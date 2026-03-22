@@ -5,7 +5,7 @@ Tests ported: 2/2 (0 skipped)
 """
 
 from opentui import create_test_renderer
-from opentui.components.box import ScrollBox, ScrollContent
+from opentui.components.scrollbox import ScrollBox, ScrollContent
 from opentui.components.code_renderable import CodeRenderable, SyntaxStyle
 from opentui.components.line_number_renderable import LineNumberRenderable
 from opentui.structs import RGBA

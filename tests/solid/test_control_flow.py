@@ -7,7 +7,7 @@ Three upstream tests that rely on render-level infrastructure are
 mapped to unit-level equivalents below.)
 """
 
-from opentui import reactive, template_component
+from opentui import component
 from opentui.components.base import BaseRenderable, Renderable
 from opentui.components.control_flow import For, Match, Show, Switch
 from opentui.reconciler import reconcile
@@ -31,7 +31,6 @@ def _sub_count(signal: Signal) -> int:
     return len(signal._subscribers)
 
 
-
 def _make_item(id: int, label: str = ""):
     return {"id": id, "label": label or f"item-{id}"}
 
@@ -50,7 +49,7 @@ class TestFor:
     def test_initial_build(self):
         """First _reconcile_children() builds correct children."""
         items = [_make_item(1), _make_item(2), _make_item(3)]
-        f = For(each=items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="list")
+        f = For(_render_item, each=items, key_fn=lambda e: f"item-{e['id']}", key="list")
         f._reconcile_children()
 
         assert len(f._children) == 3
@@ -61,7 +60,7 @@ class TestFor:
     def test_same_keys_skips(self):
         """Same items in same order → no-op (fast path)."""
         items = [_make_item(1), _make_item(2)]
-        f = For(each=items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="list")
+        f = For(_render_item, each=items, key_fn=lambda e: f"item-{e['id']}", key="list")
         f._reconcile_children()
 
         child_0 = f._children[0]
@@ -76,9 +75,7 @@ class TestFor:
     def test_new_item_added(self):
         """Only the new item gets rendered; existing preserved."""
         items = [_make_item(1), _make_item(2)]
-        f = For(
-            each=lambda: items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="list"
-        )
+        f = For(_render_item, each=lambda: items, key_fn=lambda e: f"item-{e['id']}", key="list")
         f._reconcile_children()
 
         old_child_0 = f._children[0]
@@ -103,8 +100,8 @@ class TestFor:
             return BaseRenderable(key=f"item-{item['id']}")
 
         f = For(
+            render_item,
             each=lambda: items,
-            render=render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
         )
@@ -119,9 +116,7 @@ class TestFor:
     def test_item_removed(self):
         """Removed item is destroyed; others preserved."""
         items = [_make_item(1), _make_item(2), _make_item(3)]
-        f = For(
-            each=lambda: items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="list"
-        )
+        f = For(_render_item, each=lambda: items, key_fn=lambda e: f"item-{e['id']}", key="list")
         f._reconcile_children()
 
         child_1 = f._children[0]
@@ -150,8 +145,8 @@ class TestFor:
             return node
 
         f = For(
+            render_item,
             each=lambda: items,
-            render=render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
         )
@@ -175,9 +170,7 @@ class TestFor:
     def test_reorder(self):
         """Reorder reuses existing children in new order."""
         items = [_make_item(1), _make_item(2), _make_item(3)]
-        f = For(
-            each=lambda: items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="list"
-        )
+        f = For(_render_item, each=lambda: items, key_fn=lambda e: f"item-{e['id']}", key="list")
         f._reconcile_children()
 
         child_1 = f._children[0]
@@ -195,9 +188,7 @@ class TestFor:
     def test_empty_to_items(self):
         """Starts empty, items added."""
         items = []
-        f = For(
-            each=lambda: items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="list"
-        )
+        f = For(_render_item, each=lambda: items, key_fn=lambda e: f"item-{e['id']}", key="list")
         f._reconcile_children()
         assert len(f._children) == 0
 
@@ -208,9 +199,7 @@ class TestFor:
     def test_items_to_empty(self):
         """All items removed."""
         items = [_make_item(1), _make_item(2)]
-        f = For(
-            each=lambda: items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="list"
-        )
+        f = For(_render_item, each=lambda: items, key_fn=lambda e: f"item-{e['id']}", key="list")
         f._reconcile_children()
         assert len(f._children) == 2
 
@@ -229,7 +218,7 @@ class TestFor:
         parent = BaseRenderable()
         items = [_make_item(1)]
         old_for = For(
-            each=lambda: items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="for"
+            _render_item, each=lambda: items, key_fn=lambda e: f"item-{e['id']}", key="for"
         )
         old_for._reconcile_children()
         parent._children = [old_for]
@@ -242,7 +231,7 @@ class TestFor:
 
         # Template For (what component function would return)
         new_for = For(
-            each=lambda: items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="for"
+            _render_item, each=lambda: items, key_fn=lambda e: f"item-{e['id']}", key="for"
         )
 
         reconcile(parent, [old_for], [new_for])
@@ -259,7 +248,7 @@ class TestFor:
         parent = BaseRenderable()
         items = [_make_item(1), _make_item(2)]
         new_for = For(
-            each=lambda: items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="for"
+            _render_item, each=lambda: items, key_fn=lambda e: f"item-{e['id']}", key="for"
         )
 
         reconcile(parent, [], [new_for])
@@ -282,7 +271,7 @@ class TestFor:
 
         # Simulate the dashboard pattern: For inside Box (like ScrollBox inside content_row)
         inner_for = For(
-            each=lambda: items, render=_render_item, key_fn=lambda e: f"item-{e['id']}", key="for"
+            _render_item, each=lambda: items, key_fn=lambda e: f"item-{e['id']}", key="for"
         )
         wrapper = Renderable(key="wrapper")
         wrapper.add(inner_for)
@@ -331,8 +320,8 @@ class TestFor:
         items = []
         parent = Renderable(key="parent", height=50)
         f = For(
+            _render_sized_item,
             each=lambda: items,
-            render=_render_sized_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
             flex_shrink=0,
@@ -387,16 +376,16 @@ class TestFor:
             box = Renderable(key=f"option-{item['id']}")
             if item.get("description"):
                 show = Show(
+                    Renderable(key="desc"),
                     when=lambda desc=item["description"]: desc,
-                    render=lambda: Renderable(key="desc"),
                     key="show-desc",
                 )
                 box.add(show)
             return box
 
         f = For(
+            render_option,
             each=lambda: items,
-            render=render_option,
             key_fn=lambda e: f"option-{e['id']}",
             key="container",
         )
@@ -443,8 +432,8 @@ class TestShow:
     def test_truthy_renders_children(self):
         """Condition truthy → render() called, children present."""
         show = Show(
+            Renderable(key="content"),
             when=lambda: True,
-            render=lambda: Renderable(key="content"),
             key="show",
         )
         assert len(show._children) == 1
@@ -454,9 +443,9 @@ class TestShow:
     def test_falsy_renders_fallback(self):
         """Condition falsy → fallback() called."""
         show = Show(
+            Renderable(key="content"),
             when=lambda: False,
-            render=lambda: Renderable(key="content"),
-            fallback=lambda: Renderable(key="fallback"),
+            fallback=Renderable(key="fallback"),
             key="show",
         )
         assert len(show._children) == 1
@@ -466,8 +455,8 @@ class TestShow:
     def test_falsy_no_fallback_empty(self):
         """Falsy, no fallback → empty children, inactive."""
         show = Show(
+            Renderable(key="content"),
             when=lambda: False,
-            render=lambda: Renderable(key="content"),
             key="show",
         )
         assert len(show._children) == 0
@@ -476,8 +465,9 @@ class TestShow:
     def test_render_returns_list(self):
         """render() can return a list of children."""
         show = Show(
+            Renderable(key="a"),
+            Renderable(key="b"),
             when=lambda: True,
-            render=lambda: [Renderable(key="a"), Renderable(key="b")],
             key="show",
         )
         assert len(show._children) == 2
@@ -491,14 +481,14 @@ class TestShow:
         def render_with_show(item):
             box = Renderable(key=f"item-{item['id']}")
             show = Show(
+                Renderable(key="detail"),
                 when=lambda: True,
-                render=lambda: Renderable(key="detail"),
                 key="show",
             )
             box.add(show)
             return box
 
-        f = For(each=items, render=render_with_show, key_fn=lambda e: f"item-{e['id']}", key="list")
+        f = For(render_with_show, each=items, key_fn=lambda e: f"item-{e['id']}", key="list")
         f._reconcile_children()
 
         assert len(f._children) == 1
@@ -512,13 +502,13 @@ class TestShow:
         """For can be wrapped in a Show."""
         items = [_make_item(1), _make_item(2)]
         show = Show(
-            when=lambda: True,
-            render=lambda: For(
+            For(
+                _render_item,
                 each=items,
-                render=_render_item,
                 key_fn=lambda e: f"item-{e['id']}",
                 key="list",
             ),
+            when=lambda: True,
             key="show",
         )
         assert len(show._children) == 1
@@ -535,8 +525,8 @@ class TestShow:
         parent = Renderable(key="container")
         first = Renderable(key="first")
         show = Show(
+            Renderable(key="second"),
             when=lambda: True,
-            render=lambda: Renderable(key="second"),
             key="show",
         )
         third = Renderable(key="third")
@@ -557,8 +547,8 @@ class TestShow:
 
         # When Show is false with no fallback, it has no children (inactive).
         show_false = Show(
+            Renderable(key="hidden"),
             when=lambda: False,
-            render=lambda: Renderable(key="hidden"),
             key="show-false",
         )
         parent2 = Renderable(key="container2")
@@ -586,9 +576,9 @@ class TestSwitch:
     def test_condition_matching(self):
         """Match objects — first truthy wins."""
         switch = Switch(
-            Match(when=lambda: False, render=lambda: Renderable(key="a")),
-            Match(when=lambda: True, render=lambda: Renderable(key="b")),
-            Match(when=lambda: True, render=lambda: Renderable(key="c")),
+            Match(Renderable(key="a"), when=lambda: False),
+            Match(Renderable(key="b"), when=lambda: True),
+            Match(Renderable(key="c"), when=lambda: True),
             key="switch",
         )
         assert len(switch._children) == 1
@@ -667,8 +657,8 @@ class TestSwitch:
     def test_condition_matching_no_truthy(self):
         """All Match conditions false → fallback."""
         switch = Switch(
-            Match(when=lambda: False, render=lambda: Renderable(key="a")),
-            Match(when=lambda: False, render=lambda: Renderable(key="b")),
+            Match(Renderable(key="a"), when=lambda: False),
+            Match(Renderable(key="b"), when=lambda: False),
             fallback=lambda: Renderable(key="fallback"),
             key="switch",
         )
@@ -692,22 +682,22 @@ class TestSwitch:
         # "list" mode — For renders list-style items
         switch_list = Switch(
             Match(
-                when=lambda: True,
-                render=lambda: For(
+                For(
+                    render_list_item,
                     each=items,
-                    render=render_list_item,
                     key_fn=lambda e: f"list-{e['id']}",
                     key="for-list",
                 ),
+                when=lambda: True,
             ),
             Match(
-                when=lambda: False,
-                render=lambda: For(
+                For(
+                    render_grid_item,
                     each=items,
-                    render=render_grid_item,
                     key_fn=lambda e: f"grid-{e['id']}",
                     key="for-grid",
                 ),
+                when=lambda: False,
             ),
             key="switch",
         )
@@ -725,22 +715,22 @@ class TestSwitch:
         # "grid" mode — second Match is true
         switch_grid = Switch(
             Match(
-                when=lambda: False,
-                render=lambda: For(
+                For(
+                    render_list_item,
                     each=items,
-                    render=render_list_item,
                     key_fn=lambda e: f"list-{e['id']}",
                     key="for-list",
                 ),
+                when=lambda: False,
             ),
             Match(
-                when=lambda: True,
-                render=lambda: For(
+                For(
+                    render_grid_item,
                     each=items,
-                    render=render_grid_item,
                     key_fn=lambda e: f"grid-{e['id']}",
                     key="for-grid",
                 ),
+                when=lambda: True,
             ),
             key="switch",
         )
@@ -767,9 +757,9 @@ class TestShowReactive:
         """Signal change swaps Show children without manual reconcile."""
         visible = Signal(True, name="visible")
         show = Show(
+            Renderable(key="content"),
             when=lambda: visible(),
-            render=lambda: Renderable(key="content"),
-            fallback=lambda: Renderable(key="hidden"),
+            fallback=Renderable(key="hidden"),
             key="show",
         )
         assert show._children[0].key == "content"
@@ -789,8 +779,8 @@ class TestShowReactive:
         """Signal becomes falsy with no fallback → empty, inactive."""
         visible = Signal(True, name="visible")
         show = Show(
+            Renderable(key="content"),
             when=lambda: visible(),
-            render=lambda: Renderable(key="content"),
             key="show",
         )
         assert len(show._children) == 1
@@ -805,8 +795,8 @@ class TestShowReactive:
         """Same branch after signal change → no child destruction."""
         visible = Signal(True, name="visible")
         show = Show(
+            Renderable(key="content"),
             when=lambda: visible(),
-            render=lambda: Renderable(key="content"),
             key="show",
         )
         child = show._children[0]
@@ -820,9 +810,9 @@ class TestShowReactive:
         visible = Signal(True, name="visible")
         destroyed = []
         show = Show(
+            Renderable(key="content"),
             when=lambda: visible(),
-            render=lambda: Renderable(key="content"),
-            fallback=lambda: Renderable(key="hidden"),
+            fallback=Renderable(key="hidden"),
             key="show",
         )
         content_child = show._children[0]
@@ -842,8 +832,8 @@ class TestShowReactive:
         """Destroying Show unsubscribes from signals."""
         visible = Signal(True, name="visible")
         show = Show(
+            Renderable(key="content"),
             when=lambda: visible(),
-            render=lambda: Renderable(key="content"),
             key="show",
         )
         assert show._condition_cleanup is not None
@@ -925,8 +915,8 @@ class TestSwitchReactive:
         """Match-based switch reactively updates on signal change."""
         score = Signal(95, name="score")
         switch = Switch(
-            Match(when=lambda: score() >= 90, render=lambda: Renderable(key="A")),
-            Match(when=lambda: score() >= 80, render=lambda: Renderable(key="B")),
+            Match(Renderable(key="A"), when=lambda: score() >= 90),
+            Match(Renderable(key="B"), when=lambda: score() >= 80),
             fallback=lambda: Renderable(key="F"),
             key="grade",
         )
@@ -960,8 +950,8 @@ class TestForReactive:
         """Signal change triggers reactive reconciliation."""
         items_sig = Signal([_make_item(1), _make_item(2)], name="items")
         f = For(
+            _render_item,
             each=lambda: items_sig(),
-            render=_render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
         )
@@ -977,8 +967,8 @@ class TestForReactive:
         """Reactive update preserves existing children by key."""
         items_sig = Signal([_make_item(1), _make_item(2)], name="items")
         f = For(
+            _render_item,
             each=lambda: items_sig(),
-            render=_render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
         )
@@ -994,8 +984,8 @@ class TestForReactive:
         """Reactive update removes and destroys deleted items."""
         items_sig = Signal([_make_item(1), _make_item(2), _make_item(3)], name="items")
         f = For(
+            _render_item,
             each=lambda: items_sig(),
-            render=_render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
         )
@@ -1012,8 +1002,8 @@ class TestForReactive:
         """Destroying For unsubscribes from signals."""
         items_sig = Signal([_make_item(1)], name="items")
         f = For(
+            _render_item,
             each=lambda: items_sig(),
-            render=_render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
         )
@@ -1038,8 +1028,8 @@ class TestSubscriptionLeakPrevention:
         visible = Signal(True, name="visible")
 
         old_show = Show(
+            Renderable(key="content"),
             when=lambda: visible(),
-            render=lambda: Renderable(key="content"),
             key="show",
         )
         parent = BaseRenderable()
@@ -1050,8 +1040,8 @@ class TestSubscriptionLeakPrevention:
 
         # Simulate full rebuild: create new Show (subscribes in __init__)
         new_show = Show(
+            Renderable(key="content"),
             when=lambda: visible(),
-            render=lambda: Renderable(key="content"),
             key="show",
         )
         assert _sub_count(visible) == initial_sub_count + 1  # Leaked if not cleaned
@@ -1092,8 +1082,8 @@ class TestSubscriptionLeakPrevention:
         items_sig = Signal([_make_item(1)], name="items")
 
         old_for = For(
+            _render_item,
             each=lambda: items_sig(),
-            render=_render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="for",
         )
@@ -1105,8 +1095,8 @@ class TestSubscriptionLeakPrevention:
         initial_sub_count = _sub_count(items_sig)
 
         new_for = For(
+            _render_item,
             each=lambda: items_sig(),
-            render=_render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="for",
         )
@@ -1120,8 +1110,8 @@ class TestSubscriptionLeakPrevention:
 
         parent = BaseRenderable()
         old_show = Show(
+            Renderable(key="c"),
             when=lambda: visible(),
-            render=lambda: Renderable(key="c"),
             key="show",
         )
         parent._children = [old_show]
@@ -1132,8 +1122,8 @@ class TestSubscriptionLeakPrevention:
         # Simulate 10 rebuilds
         for _ in range(10):
             new_show = Show(
+                Renderable(key="c"),
                 when=lambda: visible(),
-                render=lambda: Renderable(key="c"),
                 key="show",
             )
             reconcile(parent, list(parent._children), [new_show])
@@ -1157,8 +1147,8 @@ class TestShowRetracking:
         sig_b = Signal(True, name="b")
 
         show = Show(
+            Renderable(key="content"),
             when=lambda: sig_a() if mode() == "a" else sig_b(),
-            render=lambda: Renderable(key="content"),
             key="show",
         )
         assert show._current_branch == "render"
@@ -1226,9 +1216,9 @@ class TestRebuildSkip:
         def component():
             return Box(
                 Show(
+                    Text("Shown"),
                     when=lambda: visible(),
-                    render=lambda: Text("Shown"),
-                    fallback=lambda: Text("Hidden"),
+                    fallback=Text("Hidden"),
                     key="show",
                 ),
             )
@@ -1249,15 +1239,15 @@ class TestRebuildSkip:
 
         setup.destroy()
 
-    async def test_template_component_updates_stable_text(self):
+    async def test_component_updates_stable_text(self):
         """Template-lowered stable text updates reactively."""
         count = Signal(0, name="count")
 
-        @template_component
-        def component():
-            return Box(Text(reactive(lambda: f"Count: {count()}"), id="count_text"))
+        @component
+        def CountDisplay():
+            return Box(Text(lambda: f"Count: {count()}", id="count_text"))
 
-        setup = await _test_render(component, {"width": 40, "height": 10})
+        setup = await _test_render(CountDisplay, {"width": 40, "height": 10})
 
         count.set(1)
         setup.render_frame()
@@ -1271,23 +1261,23 @@ class TestRebuildSkip:
         """Signal reads in ordinary component bodies are rejected."""
         count = Signal(0, name="count")
 
-        def component():
+        def BadComponent():
             return Box(Text(f"Count: {count()}"))
 
         import pytest
 
         with pytest.raises(RuntimeError, match="reads signals in its body"):
-            await _test_render(component, {"width": 40, "height": 10})
+            await _test_render(BadComponent, {"width": 40, "height": 10})
 
-    async def test_template_components_skip_signal_tracking(self):
+    async def test_components_skip_signal_tracking(self):
         """Template components skip signal tracking and work correctly."""
         count = Signal(0, name="count")
 
-        @template_component
-        def component():
-            return Box(Text(reactive(lambda: f"Count: {count()}"), id="count_text"))
+        @component
+        def CountDisplay():
+            return Box(Text(lambda: f"Count: {count()}", id="count_text"))
 
-        setup = await _test_render(component, {"width": 40, "height": 10})
+        setup = await _test_render(CountDisplay, {"width": 40, "height": 10})
 
         count.set(2)
         setup.render_frame()
@@ -1398,8 +1388,8 @@ class TestForDataPropagation:
             return Text(item["label"], key=f"item-{item['id']}")
 
         f = For(
+            render_item,
             each=lambda: items,
-            render=render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
         )
@@ -1424,8 +1414,8 @@ class TestForDataPropagation:
             return Text(item["label"], key=f"item-{item['id']}")
 
         f = For(
+            render_item,
             each=lambda: items,
-            render=render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
         )
@@ -1452,8 +1442,8 @@ class TestForDataPropagation:
             return Text(item["label"], key=f"item-{item['id']}")
 
         f = For(
+            render_item,
             each=lambda: items_sig(),
-            render=render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
         )
@@ -1480,8 +1470,8 @@ class TestForDataPropagation:
         def component():
             return Box(
                 For(
+                    lambda item: Text(item["label"], key=f"item-{item['id']}"),
                     each=lambda: items_sig(),
-                    render=lambda item: Text(item["label"], key=f"item-{item['id']}"),
                     key_fn=lambda e: f"item-{e['id']}",
                     key="list",
                 ),
@@ -1530,8 +1520,8 @@ class TestForDataPropagation:
             return Row(item["id"])
 
         f = For(
+            render_item,
             each=lambda: items,
-            render=render_item,
             key_fn=lambda e: f"item-{e['id']}",
             key="list",
         )
@@ -1588,8 +1578,8 @@ class TestControlFlowRenderOutput:
         def component():
             return Box(
                 For(
+                    lambda item: Text(item["label"], key=f"item-{item['id']}"),
                     each=items,
-                    render=lambda item: Text(item["label"], key=f"item-{item['id']}"),
                     key_fn=lambda e: f"item-{e['id']}",
                     key="list",
                 ),
@@ -1609,8 +1599,8 @@ class TestControlFlowRenderOutput:
         def component():
             return Box(
                 Show(
+                    Text("Visible content"),
                     when=lambda: True,
-                    render=lambda: Text("Visible content"),
                     key="show",
                 ),
             )
@@ -1627,9 +1617,9 @@ class TestControlFlowRenderOutput:
         def component():
             return Box(
                 Show(
+                    Text("Primary content"),
                     when=lambda: False,
-                    render=lambda: Text("Primary content"),
-                    fallback=lambda: Text("Fallback content"),
+                    fallback=Text("Fallback content"),
                     key="show",
                 ),
             )
@@ -1648,9 +1638,9 @@ class TestControlFlowRenderOutput:
         def component():
             return Box(
                 Show(
+                    Text("Now you see me"),
                     when=lambda: visible(),
-                    render=lambda: Text("Now you see me"),
-                    fallback=lambda: Text("Now you don't"),
+                    fallback=Text("Now you don't"),
                     key="show",
                 ),
             )
@@ -1987,9 +1977,9 @@ class TestReactiveTextRebuildSkip:
             return Box(
                 Text(lambda: f"Count: {count()}", key="counter"),
                 Show(
+                    Text("Shown"),
                     when=lambda: visible(),
-                    render=lambda: Text("Shown"),
-                    fallback=lambda: Text("Hidden"),
+                    fallback=Text("Hidden"),
                     key="show",
                 ),
             )
@@ -2007,3 +1997,230 @@ class TestReactiveTextRebuildSkip:
         assert "Hidden" in frame
 
         setup.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Show/Switch layout: no display:none, flex_grow zeroing instead
+# ---------------------------------------------------------------------------
+
+
+class TestShowLayoutCollapse:
+    """Show collapses to 0px without display:none when inactive."""
+
+    async def test_inactive_show_collapses_to_zero(self):
+        """Inactive Show with no flex_grow collapses to 0px naturally."""
+
+        def component():
+            return Box(
+                Show(
+                    Text("Content"),
+                    when=lambda: False,
+                    key="show",
+                ),
+                height=20,
+                width=40,
+            )
+
+        setup = await _test_render(component, {"width": 40, "height": 20})
+        show_node = setup.renderer.root._children[0]._children[0]
+        setup.render_frame()
+        assert show_node._layout_height == 0
+        setup.destroy()
+
+    async def test_show_flex_grow_zeroed_when_inactive(self):
+        """Show with flex_grow zeros it out when inactive."""
+        visible = Signal(True, name="visible")
+
+        def component():
+            return Box(
+                Show(
+                    Text("Content"),
+                    when=visible,
+                    flex_grow=1,
+                    key="show",
+                ),
+                Text("Sibling"),
+                height=20,
+                width=40,
+            )
+
+        setup = await _test_render(component, {"width": 40, "height": 20})
+        show_node = setup.renderer.root._children[0]._children[0]
+        setup.render_frame()
+
+        # When active with flex_grow=1, Show claims flex space
+        assert show_node._layout_height > 0
+
+        # Toggle off — flex_grow should be zeroed
+        visible.set(False)
+        setup.render_frame()
+        assert show_node._layout_height == 0
+
+        # Toggle back on — flex_grow restored
+        visible.set(True)
+        setup.render_frame()
+        assert show_node._layout_height > 0
+
+        setup.destroy()
+
+    async def test_switch_flex_grow_zeroed_when_inactive(self):
+        """Switch with flex_grow zeros it out when inactive."""
+        tab = Signal(0, name="tab")
+
+        def component():
+            return Box(
+                Switch(
+                    on=tab,
+                    cases={0: Text("Tab 0")},
+                    flex_grow=1,
+                    key="switch",
+                ),
+                Text("Sibling"),
+                height=20,
+                width=40,
+            )
+
+        setup = await _test_render(component, {"width": 40, "height": 20})
+        switch_node = setup.renderer.root._children[0]._children[0]
+        setup.render_frame()
+        assert switch_node._layout_height > 0
+
+        # Switch to missing branch (no fallback) — inactive
+        tab.set(99)
+        setup.render_frame()
+        assert switch_node._layout_height == 0
+
+        # Switch back to valid branch
+        tab.set(0)
+        setup.render_frame()
+        assert switch_node._layout_height > 0
+
+        setup.destroy()
+
+    async def test_sibling_height_stable_on_show_toggle(self):
+        """Siblings maintain stable layout when Show toggles off with flex_grow."""
+        visible = Signal(True, name="visible")
+
+        def component():
+            return Box(
+                Show(
+                    Text("Content"),
+                    when=visible,
+                    flex_grow=1,
+                    key="show",
+                ),
+                Text("Stable sibling", flex_grow=1),
+                height=20,
+                width=40,
+            )
+
+        setup = await _test_render(component, {"width": 40, "height": 20})
+        sibling = setup.renderer.root._children[0]._children[1]
+        setup.render_frame()
+        initial_height = sibling._layout_height
+
+        # Toggle off — sibling should get all the flex space, not jump
+        visible.set(False)
+        setup.render_frame()
+        assert sibling._layout_height >= initial_height
+
+        setup.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Portal validation in positional children
+# ---------------------------------------------------------------------------
+
+
+class TestPortalValidation:
+    """Show and Match reject Portal as positional children."""
+
+    def test_show_rejects_portal_child(self):
+        """Show raises ValueError when given Portal as positional child."""
+        import pytest
+        from opentui.components.structural import Portal
+
+        with pytest.raises(ValueError, match="Portal"):
+            Show(Portal(Text("modal")), when=lambda: True)
+
+    def test_match_rejects_portal_child(self):
+        """Match raises ValueError when given Portal as positional child."""
+        import pytest
+        from opentui.components.structural import Portal
+
+        with pytest.raises(ValueError, match="Portal"):
+            Match(Portal(Text("modal")), when=lambda: True)
+
+    def test_show_allows_render_with_portal(self):
+        """Show with render= for Portal is accepted."""
+        from opentui.components.structural import Portal
+
+        # Should not raise
+        show = Show(when=lambda: True, render=lambda: Portal(Text("modal")))
+        assert show._render_fn is not None
+
+    def test_match_allows_render_with_portal(self):
+        """Match with render= for Portal is accepted."""
+        from opentui.components.structural import Portal
+
+        # Should not raise
+        match = Match(when=lambda: True, render=lambda: Portal(Text("modal")))
+        assert match._render_fn is not None
+
+    def test_show_rejects_nested_portal(self):
+        """Show raises ValueError when Portal is nested inside a child."""
+        import pytest
+        from opentui.components.structural import Portal
+
+        wrapper = Box(Portal(Text("nested modal")))
+        with pytest.raises(ValueError, match="Portal"):
+            Show(wrapper, when=lambda: True)
+
+
+# ---------------------------------------------------------------------------
+# Match validation
+# ---------------------------------------------------------------------------
+
+
+class TestMatchValidation:
+    """Match validates arguments at construction time."""
+
+    def test_match_requires_when(self):
+        """Match raises ValueError when when= is omitted."""
+        import pytest
+
+        with pytest.raises(ValueError, match="when="):
+            Match(Text("child"))
+
+    def test_match_rejects_children_and_render(self):
+        """Match raises ValueError when both children and render= are given."""
+        import pytest
+
+        with pytest.raises(ValueError, match="children OR render="):
+            Match(Text("child"), when=lambda: True, render=lambda: Text("other"))
+
+
+# ---------------------------------------------------------------------------
+# Switch LRU eviction safety
+# ---------------------------------------------------------------------------
+
+
+class TestSwitchLruEviction:
+    """Switch detects use-after-destroy from LRU cache eviction."""
+
+    def test_switch_detects_destroyed_singleton_case(self):
+        """Switch raises RuntimeError when re-selecting a destroyed singleton case."""
+        import pytest
+
+        tab = Signal(0, name="tab")
+        # 6 BaseRenderable cases exceeds max_cached_branches (4)
+        cases = {i: Text(f"Tab {i}") for i in range(6)}
+        sw = Switch(on=tab, cases=cases, key="switch")
+
+        # Cycle through all branches to trigger LRU eviction of branch 0
+        for i in range(1, 6):
+            tab.set(i)
+
+        # Branch 0 was evicted and destroyed; re-selecting should error
+        with pytest.raises(RuntimeError, match="LRU cache eviction"):
+            tab.set(0)

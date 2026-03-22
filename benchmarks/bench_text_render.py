@@ -33,7 +33,9 @@ async def _bench_wrapped_text() -> dict[str, int]:
         root.add(container)
 
         return collect_frame_medians(
-            setup, None, 300,
+            setup,
+            None,
+            300,
             buckets=_TEXT_RENDER_BUCKETS,
             label_prefix="text_render: wrapped_text",
         )

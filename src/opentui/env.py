@@ -105,3 +105,13 @@ class _EnvProxy:
 
 
 env = _EnvProxy()
+
+# Built-in registrations
+register_env_var(
+    EnvVarConfig(
+        name="OPENTUI_DEBUG",
+        description="Comma-separated diagnostics categories: resize,layout,visibility,dirty,all",
+        default="",
+        type="string",
+    )
+)

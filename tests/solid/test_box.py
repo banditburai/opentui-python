@@ -5,7 +5,8 @@ Tests ported: 1/1 (0 skipped)
 """
 
 from opentui import test_render as _test_render
-from opentui.components.box import Box, ScrollBox
+from opentui.components.box import Box
+from opentui.components.scrollbox import ScrollBox
 from opentui.signals import Signal
 
 

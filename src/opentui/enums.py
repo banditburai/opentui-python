@@ -77,8 +77,22 @@ class TitleAlignment(StrEnum):
 class RenderStrategy(StrEnum):
     """Stable render categories used to guide optimization architecture."""
 
-    COMMON_TREE = "common_tree"
-    NATIVE_TEXT = "native_text"
-    RETAINED_LAYER = "retained_layer"
-    HEAVY_WIDGET = "heavy_widget"
-    PYTHON_FALLBACK = "python_fallback"
+    COMMON_TREE = sys.intern("common_tree")
+    NATIVE_TEXT = sys.intern("native_text")
+    RETAINED_LAYER = sys.intern("retained_layer")
+    HEAVY_WIDGET = sys.intern("heavy_widget")
+    PYTHON_FALLBACK = sys.intern("python_fallback")
+
+
+__all__ = [
+    "FlexDirection",
+    "JustifyContent",
+    "AlignItems",
+    "FlexWrap",
+    "Overflow",
+    "Position",
+    "Display",
+    "BorderStyle",
+    "TitleAlignment",
+    "RenderStrategy",
+]

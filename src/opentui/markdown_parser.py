@@ -261,7 +261,7 @@ def parse_markdown_incremental(
         and always re-parse.  This handles cases like an incomplete heading
         (``"# Hello"`` later becoming ``"# Hello World"``).  Defaults to 2.
     """
-    if prev_state is None or len(prev_state.tokens) == 0:
+    if prev_state is None or not prev_state.tokens:
         try:
             tokens = lex(new_content)
             return ParseState(content=new_content, tokens=tokens)

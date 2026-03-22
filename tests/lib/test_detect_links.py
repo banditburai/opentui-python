@@ -5,7 +5,8 @@ Upstream: reference/opentui/packages/core/src/lib/detect-links.test.ts
 
 from __future__ import annotations
 
-from opentui.detect_links import detect_links, TextChunk
+from opentui.components.code_renderable import TextChunk
+from opentui.detect_links import detect_links
 from opentui.structs import RGBA
 
 

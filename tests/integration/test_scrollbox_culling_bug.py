@@ -16,7 +16,7 @@ class TestScrollboxCullingBug:
         """Maps to test("scrollbox culling issue: last item not visible...")."""
         from opentui import Box, ScrollBox, create_test_renderer
         from opentui.components.text_renderable import TextRenderable
-        from opentui.testing import TestRecorder
+        from opentui.testing.capture import TestRecorder
 
         setup = await create_test_renderer(width=50, height=12)
 

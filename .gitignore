@@ -47,6 +47,9 @@ PLAN.md
 progress.md
 buffer_dump/
 
+# Diagnostics
+opentui-debug.log
+
 # Benchmark baselines (machine-specific)
 benchmarks/baselines/
 

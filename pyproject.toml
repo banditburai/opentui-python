@@ -34,7 +34,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=1.3.0",
     "ruff>=0.1.0",
-    "pyright>=1.1.0",
+    "ty>=0.0.20",
     "opentui[highlighting]",
 ]
 images = [
@@ -60,9 +60,6 @@ Issues = "https://github.com/banditburai/opentui-python/issues"
 wheel.packages = ["src/opentui"]
 cmake.source-dir = "src/opentui_bindings"
 cmake.args = ["-DCMAKE_BUILD_TYPE=Release"]
-
-[tool.uv.sources]
-yoga-python = { path = "../yoga-python", editable = true }
 
 [tool.ruff]
 line-length = 100
@@ -113,18 +110,42 @@ ignore = [
 "src/opentui/hooks.py" = ["PLW0603"]
 "src/opentui/layout.py" = ["PLW0603"]
 "src/opentui/signals.py" = ["PLW0603"]
+"src/opentui/reconciler.py" = ["PLW0603"]
+"src/opentui/resource.py" = ["PLW0603"]
+"src/opentui/diagnostics.py" = ["PLW0603"]
+"src/opentui/editor/text_buffer_native.py" = ["PLW0603"]
+"src/opentui/components/scrollbox.py" = ["PLW0603"]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 
-[tool.pyright]
-pythonVersion = "3.12"
-typeCheckingMode = "basic"
+[tool.ty.environment]
+python-version = "3.12"
+
+[tool.ty.src]
 include = ["src"]
-exclude = ["tests", "examples"]
-reportMissingImports = true
-reportMissingTypeStubs = false
+
+[tool.ty.rules]
+# Structural false positives from __slots__-heavy UI framework
+unresolved-attribute = "ignore"
+# Signal/computed callable patterns (dynamic callables in base.py)
+call-non-callable = "ignore"
+call-top-callable = "ignore"
+# Signal(Expr) intentionally overrides Expr methods with different return types
+invalid-method-override = "ignore"
+# Dynamic property setters, type reassignment patterns in control flow
+invalid-assignment = "ignore"
+# Optional deps (PIL, numpy) not always installed
+unresolved-import = "warn"
+# dict.get overload resolution false positives
+no-matching-overload = "warn"
+# Type narrowing limitations with __slots__-based types
+invalid-argument-type = "warn"
+# Buffer subtype return in framebuffer (RenderBuffer is-a Buffer)
+invalid-return-type = "warn"
+# Keep existing type: ignore comments as documentation
+unused-type-ignore-comment = "ignore"
 
 [tool.pytest.ini_options]
 minversion = "7.0"

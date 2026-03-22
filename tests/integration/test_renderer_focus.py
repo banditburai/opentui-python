@@ -13,7 +13,8 @@ auto-focus the drag target.
 import pytest
 
 from opentui import create_test_renderer
-from opentui.components.box import Box, ScrollBox
+from opentui.components.box import Box
+from opentui.components.scrollbox import ScrollBox
 from opentui.components.control_flow import Portal, Show
 from opentui.events import MouseButton, MouseEvent
 from opentui.signals import Signal
@@ -415,7 +416,9 @@ class TestRendererFocus:
             setup.renderer.root.add(overlay_show)
             _render_and_layout(setup)
 
-            click_event = MouseEvent(type="down", x=background.x + 1, y=background.y + 1, button=MouseButton.LEFT)
+            click_event = MouseEvent(
+                type="down", x=background.x + 1, y=background.y + 1, button=MouseButton.LEFT
+            )
             setup.renderer._dispatch_mouse_event(click_event)
 
             portal_container = next(

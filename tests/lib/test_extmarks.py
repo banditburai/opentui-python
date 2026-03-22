@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from opentui.extmarks import ExtmarksController
+from opentui.editor.extmarks import ExtmarksController
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..colors import FOCUS_RING_BLUE
 from ..enums import RenderStrategy
 from ..signals import is_reactive
 from ..structs import display_width as _display_width
@@ -48,6 +49,8 @@ def _normalize_box_child(child: Any) -> list[BaseRenderable]:
 class Box(Renderable):
     """Box component - container with optional border and layout.
 
+    ``None`` children are silently skipped, lists are flattened.
+
     Usage:
         box = Box(
             padding=2,
@@ -68,6 +71,8 @@ class Box(Renderable):
         # Layout
         width: int | None = None,
         height: int | None = None,
+        fixed_width: int | None = None,
+        fixed_height: int | None = None,
         min_width: int | None = None,
         min_height: int | None = None,
         max_width: int | None = None,
@@ -83,6 +88,8 @@ class Box(Renderable):
         gap: int = 0,
         # Spacing
         padding: int = 0,
+        padding_x: int | None = None,
+        padding_y: int | None = None,
         padding_top: int | None = None,
         padding_right: int | None = None,
         padding_bottom: int | None = None,
@@ -94,6 +101,7 @@ class Box(Renderable):
         margin_left: int | None = None,
         # Style
         background_color: s.RGBA | str | None = None,
+        bg: s.RGBA | str | None = None,
         fg: s.RGBA | str | None = None,
         border: bool = False,
         border_style: str = "single",
@@ -124,12 +132,21 @@ class Box(Renderable):
         z_index: int = 0,
         **kwargs,
     ):
+        if bg is not None:
+            if background_color is not None:
+                raise ValueError(
+                    "Cannot pass both 'bg' and 'background_color'; use one or the other"
+                )
+            background_color = bg
+
         super().__init__(
             key=key,
             id=id,
             overflow=overflow,
             width=width,
             height=height,
+            fixed_width=fixed_width,
+            fixed_height=fixed_height,
             min_width=min_width,
             min_height=min_height,
             max_width=max_width,
@@ -144,6 +161,8 @@ class Box(Renderable):
             align_self=align_self,
             gap=gap,
             padding=padding,
+            padding_x=padding_x,
+            padding_y=padding_y,
             padding_top=padding_top,
             padding_right=padding_right,
             padding_bottom=padding_bottom,
@@ -368,7 +387,7 @@ class Box(Renderable):
             buffer.draw_text(self._title, title_x, self._y, border_color, bg)
 
     def _draw_focus_ring(self, buffer: Buffer, width: int, height: int) -> None:
-        focus_color = s.RGBA(0.3, 0.5, 1.0, 1.0)
+        focus_color = FOCUS_RING_BLUE
 
         top_y = max(0, self._y - 1)
         bottom_y = self._y + height
@@ -402,11 +421,51 @@ class Box(Renderable):
             buffer.draw_text("┘", right_x, bottom_y, focus_color, None)
 
 
-# Re-export scroll classes for backward compatibility
-from .scrollbox import LinearScrollAccel, MacOSScrollAccel, ScrollBox, ScrollContent  # noqa: E402
+# ── Layout helpers ────────────────────────────────────────────────────
+
+
+def Row(*children: Any, gap: int = 0, **kwargs) -> Box:
+    """Horizontal flex container. Shorthand for ``Box(flex_direction="row")``."""
+    return Box(*children, flex_direction="row", gap=gap, **kwargs)
+
+
+def Column(*children: Any, gap: int = 0, **kwargs) -> Box:
+    """Vertical flex container. Explicit alias for the default Box direction."""
+    return Box(*children, gap=gap, **kwargs)
+
+
+def FlexFill(*children: Any, overflow: str = "hidden", **kwargs) -> Box:
+    """Container that grows to fill parent and shrinks to zero if needed.
+
+    The standard "flex fill" pattern: ``flex_grow=1, flex_basis=0,
+    min_height=0, overflow="hidden"``.
+    """
+    kwargs.setdefault("flex_grow", 1)
+    kwargs.setdefault("flex_basis", 0)
+    kwargs.setdefault("min_height", 0)
+    return Box(*children, overflow=overflow, **kwargs)
+
+
+def Spacer(**kwargs) -> Box:
+    """Flexible spacer that fills available space."""
+    kwargs.setdefault("flex_grow", 1)
+    return Box(**kwargs)
+
+
+# Re-export for downstream consumers that import from box directly
+from .scrollbox import (  # noqa: E402, F401
+    LinearScrollAccel,
+    MacOSScrollAccel,
+    ScrollBox,
+    ScrollContent,
+)
 
 __all__ = [
     "Box",
+    "Row",
+    "Column",
+    "FlexFill",
+    "Spacer",
     "LinearScrollAccel",
     "MacOSScrollAccel",
     "ScrollBox",

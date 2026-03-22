@@ -6,7 +6,7 @@ import shlex
 from pathlib import Path
 
 from .events import AttachmentPayload, PasteEvent
-from .filters import ClipboardHandler
+from .image.encoding import ClipboardHandler
 
 
 def _decode_image_attachment(data: bytes) -> tuple[str, str]:

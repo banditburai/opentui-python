@@ -232,7 +232,9 @@ async def test_layout_common_tree_frame_reuses_current_buffer_for_top_level_chil
 
 
 @pytest.mark.asyncio
-async def test_layout_common_tree_frame_reuses_current_buffer_for_shared_parent_sibling_moves(monkeypatch):
+async def test_layout_common_tree_frame_reuses_current_buffer_for_shared_parent_sibling_moves(
+    monkeypatch,
+):
     setup = await create_test_renderer(20, 4)
     try:
         root = setup.renderer.root

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..detect_links import detect_links
 from ..enums import RenderStrategy
 from .text_renderable import TextRenderable
 
@@ -80,6 +81,7 @@ class TextChunk:
     fg: s.RGBA | None = None
     bg: s.RGBA | None = None
     attributes: int = 0
+    link: dict[str, str] | None = None
 
 
 @dataclass
@@ -152,7 +154,7 @@ class MockTreeSitterClient(TreeSitterClient):
                     with contextlib.suppress(ValueError):
                         self._highlight_futures.remove(entry)
 
-            asyncio.ensure_future(_auto_resolve())
+            asyncio.get_running_loop().create_task(_auto_resolve())
 
         return future
 
@@ -570,8 +572,8 @@ class CodeRenderable(TextRenderable):
             try:
                 result_future = client.start_highlight_once(content, filetype)
             except Exception:
-                asyncio.ensure_future(
-                    self._complete_highlight_from_coro(
+                asyncio.get_running_loop().create_task(
+                    self._complete_highlight(
                         client.highlight_once(content, filetype),
                         content,
                         filetype,
@@ -580,15 +582,15 @@ class CodeRenderable(TextRenderable):
                 )
                 return
 
-            asyncio.ensure_future(
+            asyncio.get_running_loop().create_task(
                 self._complete_highlight(result_future, content, filetype, snapshot_id)
             )
         else:
             # Fall back to calling highlight_once as a coroutine.
             # This handles: custom TreeSitterClient subclasses, monkey-patched
             # highlight_once, and any client that doesn't override start_highlight_once.
-            asyncio.ensure_future(
-                self._complete_highlight_from_coro(
+            asyncio.get_running_loop().create_task(
+                self._complete_highlight(
                     client.highlight_once(content, filetype),
                     content,
                     filetype,
@@ -598,26 +600,13 @@ class CodeRenderable(TextRenderable):
 
     async def _complete_highlight(
         self,
-        result_future: asyncio.Future,
+        awaitable: Any,
         content: str,
         filetype: str,
         snapshot_id: int,
     ) -> None:
         try:
-            result = await result_future
-            await self._process_highlight_result(result, content, filetype, snapshot_id)
-        except Exception:
-            self._handle_highlight_error(content, snapshot_id)
-
-    async def _complete_highlight_from_coro(
-        self,
-        coro,
-        content: str,
-        filetype: str,
-        snapshot_id: int,
-    ) -> None:
-        try:
-            result = await coro
+            result = await awaitable
             await self._process_highlight_result(result, content, filetype, snapshot_id)
         except Exception:
             self._handle_highlight_error(content, snapshot_id)
@@ -688,8 +677,20 @@ class CodeRenderable(TextRenderable):
 
             self._build_line_highlights(content, highlights)
 
-            plain = "".join(c.text for c in chunks)
-            self._text_buffer.set_text(plain)
+            detect_links(chunks, {"content": content, "highlights": highlights})
+
+            self._text_buffer.set_styled_text(
+                [
+                    {
+                        "text": c.text,
+                        "fg": c.fg,
+                        "bg": c.bg,
+                        "attributes": c.attributes,
+                        "link": c.link,
+                    }
+                    for c in chunks
+                ]
+            )
             self._styled_chunks = chunks
         else:
             self._text_buffer.set_text(content)

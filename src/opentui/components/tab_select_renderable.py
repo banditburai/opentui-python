@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..events import KeyEvent
-from ..keymapping import (
+from ..input.keymapping import (
     DEFAULT_KEY_ALIASES,
     KeyAliasMap,
     KeyBinding,
     build_key_bindings_map,
-    lookup_action,
+    lookup_action_for_event,
     merge_key_aliases,
     merge_key_bindings,
 )
@@ -242,15 +242,7 @@ class TabSelectRenderable(Renderable):
         return False
 
     def _lookup_action(self, event: KeyEvent) -> str | None:
-        return lookup_action(
-            event.key,
-            event.ctrl,
-            event.shift,
-            event.alt,
-            event.meta,
-            self._key_map,
-            self._key_alias_map,
-        )
+        return lookup_action_for_event(event, self._key_map, self._key_alias_map)
 
     def _dispatch_action(self, action: str) -> bool:
         if action == "move-left":

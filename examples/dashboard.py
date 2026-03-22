@@ -425,8 +425,8 @@ def log_panel():
 
     # For: keyed list — only renders genuinely new entries, preserves existing.
     entry_for = For(
+        log_entry,
         each=log_entries,
-        render=log_entry,
         key_fn=lambda e: f"entry-{e['id']}",
         key="entry-list",
         flex_shrink=0,  # Don't compress — let ScrollBox clip/scroll

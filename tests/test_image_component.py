@@ -15,7 +15,7 @@ def test_image_component_exported():
 
 def test_image_component_renders_loaded_image(monkeypatch):
     """Image should render decoded image data through ImageRenderer."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -75,7 +75,7 @@ def test_image_component_renders_loaded_image(monkeypatch):
 
 def test_image_component_auto_detects_kitty_from_env(monkeypatch):
     """AUTO protocol should enable kitty graphics for supported terminals."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -115,7 +115,7 @@ def test_image_component_auto_detects_kitty_from_env(monkeypatch):
 
 def test_image_component_respects_explicit_ascii_protocol(monkeypatch):
     """Explicit ASCII protocol should not enable terminal graphics."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -154,7 +154,7 @@ def test_image_component_respects_explicit_ascii_protocol(monkeypatch):
 
 def test_image_component_uses_grayscale_path_when_requested(monkeypatch):
     """Explicit grayscale protocol should use draw_grayscale first."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -226,7 +226,7 @@ def test_image_component_uses_alt_text_when_load_fails(monkeypatch):
 
 def test_image_component_contain_centers_scaled_image(monkeypatch):
     """Contain fit should preserve aspect ratio and center inside the box."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -278,7 +278,7 @@ def test_image_component_contain_centers_scaled_image(monkeypatch):
 
 def test_image_component_caches_resized_variant(monkeypatch):
     """Image should not recompute the same resized variant every render."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -327,7 +327,7 @@ def test_image_component_caches_resized_variant(monkeypatch):
 
 def test_image_component_does_not_redraw_same_kitty_image_each_frame(monkeypatch):
     """Graphics protocols should not retransmit the same image every render."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -371,7 +371,7 @@ def test_image_component_does_not_redraw_same_kitty_image_each_frame(monkeypatch
 
 def test_image_component_preserves_original_pixels_for_kitty(monkeypatch):
     """Kitty should keep original image pixels and only scale placement in cells."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -420,7 +420,7 @@ def test_image_component_preserves_original_pixels_for_kitty(monkeypatch):
 
 def test_image_component_clears_previous_graphics_when_geometry_changes(monkeypatch):
     """A moved/resized graphics image should clear the old placement before redraw."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -473,7 +473,7 @@ def test_image_component_clears_previous_graphics_when_geometry_changes(monkeypa
 
 def test_image_destroy_clears_graphics(monkeypatch):
     """Destroying an Image with an active kitty graphic should emit the clear escape."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
     import io
@@ -529,7 +529,7 @@ def test_image_destroy_clears_graphics(monkeypatch):
 
 def test_image_invisible_clears_graphics(monkeypatch):
     """Setting an Image invisible should clear the kitty graphic and reset signature."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
     import io
@@ -592,7 +592,7 @@ def test_image_invisible_clears_graphics(monkeypatch):
 
 def _kitty_image_helper(monkeypatch):
     """Shared helper: set up a Kitty-protocol Image with fake renderer."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -718,7 +718,7 @@ def test_image_unsuppressed_forces_redraw(monkeypatch):
 
 def test_image_no_alt_suppressed_still_skips_draw(monkeypatch):
     """Suppression should skip graphics even when no alt text is set."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 
@@ -763,7 +763,7 @@ def test_image_no_alt_suppressed_still_skips_draw(monkeypatch):
 
 def test_image_ascii_protocol_ignores_suppression(monkeypatch):
     """ASCII protocol images should not check suppression (no graphics layer)."""
-    from opentui.image import DecodedImage, ImageSource
+    from opentui.image.types import DecodedImage, ImageSource
     from opentui.components.image import Image
     import opentui.components.image as image_component
 

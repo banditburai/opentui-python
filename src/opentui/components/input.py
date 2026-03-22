@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..colors import MUTED_GRAY
 from ..events import KeyEvent
 from ..hooks import use_cursor, use_cursor_style
 from ..text_utils import measure_text, wrap_text
@@ -173,7 +174,7 @@ class Input(Renderable):
 
         if not display_text and self._placeholder:
             display_text = self._placeholder
-            text_color = s.RGBA(0.5, 0.5, 0.5, 1)
+            text_color = MUTED_GRAY
 
         if len(display_text) > width:
             display_text = display_text[:width]
@@ -243,9 +244,7 @@ class Textarea(Renderable):
 
         self._text_color = self._parse_color(text_color)
         self._placeholder_color = (
-            self._parse_color(placeholder_color)
-            if placeholder_color
-            else s.RGBA(0.4, 0.4, 0.4, 1.0)
+            self._parse_color(placeholder_color) if placeholder_color else MUTED_GRAY
         )
         self._focused_background_color = self._parse_color(focused_background_color)
         self._focused_text_color = self._parse_color(focused_text_color)
@@ -556,7 +555,7 @@ class Select(Renderable):
                 display_text = display_text[: width - 4]
             buffer.draw_text(f"▼ {display_text}", x, y, self._fg, self._background_color)
         else:
-            buffer.draw_text("▼ Select...", x, y, s.RGBA(0.5, 0.5, 0.5, 1), self._background_color)
+            buffer.draw_text("▼ Select...", x, y, MUTED_GRAY, self._background_color)
 
         if self._expanded:
             for i, opt in enumerate(self._options[:10]):  # Limit to 10 visible

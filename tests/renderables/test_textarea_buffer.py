@@ -106,24 +106,20 @@ class TestTextareaBuffer:
         def test_should_handle_unicode_characters_with_get_text_range_by_coords(self):
             """Maps to test("should handle Unicode characters with getTextRangeByCoords").
 
-            Note: The upstream test uses display-width coordinates where the
-            emoji occupies 2 columns. Our Python implementation uses character
-            offsets, so the emoji at index 6 is a single character (length 1 in
-            Python, but represented as a surrogate pair of length 2 in JS).
-            We test character-based coordinate behavior.
+            Coordinates use display-width columns (emoji 🌟 = 2 cols).
+            "Hello 🌟 World" display: H(1)e(1)l(1)l(1)o(1)' '(1)🌟(2)' '(1)W(1)... = 14 cols
             """
             ta = _make("Hello \U0001f31f World")
-            # "Hello \U0001f31f World"
-            # Characters: H(0) e(1) l(2) l(3) o(4) ' '(5) star(6) ' '(7) W(8) ...
+            # Display columns: H(0) e(1) l(2) l(3) o(4) ' '(5) star(6,7) ' '(8) W(9) ...
 
             range1 = ta.get_text_range_by_coords(0, 0, 0, 6)
             assert range1 == "Hello "
 
-            # In Python, the star emoji is 1 character at index 6
-            range2 = ta.get_text_range_by_coords(0, 6, 0, 7)
+            # Star emoji occupies 2 display columns (6-7)
+            range2 = ta.get_text_range_by_coords(0, 6, 0, 8)
             assert range2 == "\U0001f31f"
 
-            range3 = ta.get_text_range_by_coords(0, 7, 0, 13)
+            range3 = ta.get_text_range_by_coords(0, 8, 0, 14)
             assert range3 == " World"
             ta.destroy()
 

@@ -281,7 +281,7 @@ class PyTreeSitterClient:
         return future
 
     async def initialize(self) -> None:
-        """Initialize the client (no-op — lazy init)."""
+        """No-op -- initialization is lazy."""
 
     async def preload_parser(self, filetype: str) -> None:
         """Preload parser for a filetype."""

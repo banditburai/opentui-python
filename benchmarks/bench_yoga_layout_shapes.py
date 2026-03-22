@@ -74,7 +74,12 @@ async def _build_absolute_overlay():
 
 
 def _time_compute(
-    root, width: int, height: int, iterations: int = 80, *, label: str = "",
+    root,
+    width: int,
+    height: int,
+    iterations: int = 80,
+    *,
+    label: str = "",
 ) -> dict[str, int]:
     samples: list[int] = []
     for _ in range(iterations):
@@ -128,7 +133,9 @@ async def _run() -> None:
             label="yoga: plain_flow width_toggle",
         )
         print("\nplain_flow")
-        print(f"  width_toggle median={width_toggle['median_ns']:>8,}ns mean={width_toggle['mean_ns']:>8,}ns")
+        print(
+            f"  width_toggle median={width_toggle['median_ns']:>8,}ns mean={width_toggle['mean_ns']:>8,}ns"
+        )
     finally:
         flow_setup.destroy()
 
@@ -160,10 +167,16 @@ async def _run() -> None:
             state["overlay"] = modal
 
         toggle_case = _time_mutating_compute(
-            root, 120, 40, toggle_overlay, label="yoga: absolute_overlay mount_toggle",
+            root,
+            120,
+            40,
+            toggle_overlay,
+            label="yoga: absolute_overlay mount_toggle",
         )
         print("\nabsolute_overlay")
-        print(f"  mount_toggle median={toggle_case['median_ns']:>8,}ns mean={toggle_case['mean_ns']:>8,}ns")
+        print(
+            f"  mount_toggle median={toggle_case['median_ns']:>8,}ns mean={toggle_case['mean_ns']:>8,}ns"
+        )
     finally:
         absolute_setup.destroy()
 

@@ -6,14 +6,14 @@ import math
 import re
 import unicodedata
 import warnings
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any
 
-T = TypeVar("T")
+_HEX_RE = re.compile(r"[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$")
+_RGBA_RE = re.compile(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)")
 
 
-@dataclass
+@dataclass(slots=True)
 class RGBA:
     """RGBA color values (0-1 range)."""
 
@@ -44,7 +44,7 @@ class RGBA:
         elif len(hex_color) == 4:
             hex_color = hex_color[0] * 2 + hex_color[1] * 2 + hex_color[2] * 2 + hex_color[3] * 2
 
-        if not re.fullmatch(r"[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?", hex_color):
+        if not _HEX_RE.fullmatch(hex_color):
             warnings.warn(f"Invalid hex color: {hex_color}, defaulting to magenta", stacklevel=2)
             return cls(1.0, 0.0, 1.0, 1.0)
 
@@ -65,17 +65,8 @@ class RGBA:
             return f"#{_c(self.r):02x}{_c(self.g):02x}{_c(self.b):02x}"
         return f"#{_c(self.r):02x}{_c(self.g):02x}{_c(self.b):02x}{_c(self.a):02x}"
 
-    def map(self, fn: Callable[[float], T]) -> list[T]:
-        """Apply function to each channel, return [fn(r), fn(g), fn(b), fn(a)]."""
-        return [fn(self.r), fn(self.g), fn(self.b), fn(self.a)]
-
     def __str__(self) -> str:
         return f"rgba({self.r:.2f}, {self.g:.2f}, {self.b:.2f}, {self.a:.2f})"
-
-    def equals(self, other: RGBA | None) -> bool:
-        if other is None:
-            return False
-        return self.r == other.r and self.g == other.g and self.b == other.b and self.a == other.a
 
 
 ColorInput = str | RGBA
@@ -112,30 +103,6 @@ CSS_COLOR_NAMES: dict[str, str] = {
 }
 
 
-def hsv_to_rgb(h: float, s: float, v: float) -> RGBA:
-    """Convert HSV to RGBA. Hue in degrees (0-360), S and V in 0-1."""
-    i = math.floor(h / 60) % 6
-    f = h / 60 - math.floor(h / 60)
-    p = v * (1 - s)
-    q = v * (1 - f * s)
-    t = v * (1 - (1 - f) * s)
-
-    if i == 0:
-        r, g, b = v, t, p
-    elif i == 1:
-        r, g, b = q, v, p
-    elif i == 2:
-        r, g, b = p, v, t
-    elif i == 3:
-        r, g, b = p, q, v
-    elif i == 4:
-        r, g, b = t, p, v
-    else:
-        r, g, b = v, p, q
-
-    return RGBA(r, g, b, 1.0)
-
-
 def parse_color(color: ColorInput) -> RGBA:
     """Parse a color input (string or RGBA) into an RGBA value.
 
@@ -153,7 +120,7 @@ def parse_color(color: ColorInput) -> RGBA:
     if lower in CSS_COLOR_NAMES:
         return RGBA.from_hex(CSS_COLOR_NAMES[lower])
 
-    m = re.match(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)", lower)
+    m = _RGBA_RE.match(lower)
     if m:
         r = min(255, max(0, int(m.group(1))))
         g = min(255, max(0, int(m.group(2))))
@@ -186,7 +153,7 @@ def parse_color_opt(color: RGBA | str | None) -> RGBA | None:
     return None
 
 
-VALID_BORDER_STYLES = ("single", "double", "rounded", "heavy")
+VALID_BORDER_STYLES = ("single", "double", "rounded", "heavy", "round", "bold", "block")
 
 BORDER_CHARS: dict[str, dict[str, str]] = {
     "single": {
@@ -230,6 +197,9 @@ BORDER_CHARS: dict[str, dict[str, str]] = {
         "vertical": "█",
     },
 }
+# Canonical aliases: parse_border_style normalizes "round" → "rounded", "bold" → "heavy"
+BORDER_CHARS["rounded"] = BORDER_CHARS["round"]
+BORDER_CHARS["heavy"] = BORDER_CHARS["bold"]
 
 
 def get_border_chars(style: str) -> dict[str, str]:
@@ -262,6 +232,8 @@ def parse_border_style(value: Any, fallback: str = "single") -> str:
     """
     if value == "round":
         value = "rounded"
+    elif value == "bold":
+        value = "heavy"
     if is_valid_border_style(value):
         return value
 
@@ -308,7 +280,6 @@ __all__ = [
     "RGBA",
     "ColorInput",
     "CSS_COLOR_NAMES",
-    "hsv_to_rgb",
     "parse_color",
     "is_valid_border_style",
     "parse_border_style",

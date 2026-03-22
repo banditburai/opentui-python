@@ -6,6 +6,7 @@ import contextlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from .animation import Animation, Timeline
 from .signals import Signal, on_cleanup
 from .structs import RGBA
 
@@ -41,6 +42,7 @@ def get_keyboard_handlers() -> list[Callable[[KeyEvent], None]]:
 
 def clear_keyboard_handlers() -> None:
     _keyboard_handlers.clear()
+    _keyboard_handler_refs.clear()
 
 
 def get_paste_handlers() -> list[Callable[[PasteEvent], None]]:
@@ -49,6 +51,7 @@ def get_paste_handlers() -> list[Callable[[PasteEvent], None]]:
 
 def clear_paste_handlers() -> None:
     _paste_handlers.clear()
+    _paste_handler_refs.clear()
 
 
 def get_resize_handlers() -> list[Callable[[int, int], None]]:
@@ -69,6 +72,7 @@ def get_selection_handlers() -> list[Callable[[Any], None]]:
 
 def clear_selection_handlers() -> None:
     _selection_handlers.clear()
+    _selection_handler_refs.clear()
 
 
 def get_focus_handlers() -> list[Callable[[str], None]]:
@@ -224,6 +228,7 @@ def get_mouse_handlers() -> list[Callable[[MouseEvent], None]]:
 
 def clear_mouse_handlers() -> None:
     _mouse_handlers.clear()
+    _mouse_handler_refs.clear()
 
 
 _paste_handler_refs: dict[int, Callable] = {}
@@ -296,105 +301,13 @@ def use_cursor_style(style: str = "block", color: str | RGBA | None = None) -> N
 
 
 def use_timeline(options: dict | None = None) -> Timeline:
-    return Timeline(options or {})
-
-
-class Animation:
-    def __init__(
-        self,
-        target: Any,
-        property_name: str,
-        start_value: float,
-        end_value: float,
-        duration: float,
-        easing: str = "linear",
-        start_time: float = 0,
-    ):
-        self.target = target
-        self.property_name = property_name
-        self.start_value = start_value
-        self.end_value = end_value
-        self.duration = duration
-        self.easing = easing
-        self.start_time = start_time
-        self._current_value = start_value
-
-    def get_value(self, elapsed: float) -> float:
-        local_time = elapsed - self.start_time
-        if local_time < 0:
-            return self.start_value
-        if local_time >= self.duration:
-            return self.end_value
-
-        progress = local_time / self.duration
-
-        if self.easing == "ease-in":
-            progress = progress**2
-        elif self.easing == "ease-out":
-            progress = 1 - (1 - progress) ** 2
-        elif self.easing == "ease-in-out":
-            if progress < 0.5:
-                progress = 2 * progress * progress
-            else:
-                progress = 1 - (-2 * progress + 2) ** 2 / 2
-
-        return self.start_value + (self.end_value - self.start_value) * progress
-
-
-class Timeline:
-    def __init__(self, options: dict):
-        self._duration = options.get("duration", 1000)
-        self._loop = options.get("loop", False)
-        self._autoplay = options.get("autoplay", True)
-        self._on_complete = options.get("on_complete")
-        self._running = False
-        self._animations: list[Animation] = []
-        self._start_time: float | None = None
-
-    def add(
-        self,
-        target: Any,
-        properties: dict,
-        start_time: float = 0,
-        duration: float | None = None,
-        easing: str = "linear",
-    ) -> None:
-        anim_duration = duration or (self._duration / len(properties)) if properties else 200
-
-        for prop_name, end_value in properties.items():
-            start_value = getattr(target, prop_name, 0)
-            anim = Animation(
-                target=target,
-                property_name=prop_name,
-                start_value=start_value,
-                end_value=end_value,
-                duration=anim_duration,
-                easing=easing,
-                start_time=start_time,
-            )
-            self._animations.append(anim)
-
-    def update(self, elapsed: float) -> None:
-        for anim in self._animations:
-            value = anim.get_value(elapsed)
-            setattr(anim.target, anim.property_name, value)
-
-    def play(self) -> None:
-        self._running = True
-
-    def pause(self) -> None:
-        self._running = False
-
-    def restart(self) -> None:
-        self._start_time = None
-        self._running = True
-
-    def stop(self) -> None:
-        self._running = False
-
-    @property
-    def is_running(self) -> bool:
-        return self._running
+    opts = options or {}
+    return Timeline(
+        duration=opts.get("duration", 1000),
+        loop=opts.get("loop", False),
+        autoplay=opts.get("autoplay", True),
+        on_complete=opts.get("on_complete"),
+    )
 
 
 __all__ = [

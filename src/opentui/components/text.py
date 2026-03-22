@@ -5,12 +5,37 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+import yoga
+
 from .. import structs as s
+from ..colors import SELECTION_BG
+from ..editor.text_buffer_native import NativeTextBuffer
+from ..editor.text_view_native import NativeTextBufferView
 from ..enums import RenderStrategy
-from ..native import NativeTextBuffer, NativeTextBufferView
 from ..signals import Signal, _ComputedSignal, is_reactive
+from ..structs import display_width as _display_width
 from ..text_utils import measure_text, wrap_text
 from .base import Renderable
+
+
+def _truncate_with_ellipsis(text: str, max_width: int) -> str:
+    """Truncate text to *max_width* display columns, appending ellipsis."""
+    if max_width <= 0:
+        return ""
+    if max_width == 1:
+        return "\u2026"
+    target = max_width - 1  # reserve 1 col for ellipsis
+    w = 0
+    for i, ch in enumerate(text):
+        cw = _display_width(ch)
+        if w + cw > target:
+            return text[:i] + "\u2026"
+        w += cw
+    return text  # fits — shouldn't reach here if caller checked
+
+
+_MEASURE_UNDEFINED = yoga.MeasureMode.Undefined
+_MEASURE_AT_MOST = yoga.MeasureMode.AtMost
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -35,6 +60,8 @@ class Text(Renderable):
         "_italic",
         "_underline",
         "_strikethrough",
+        "_link",
+        "_ellipsis",
         "_selection_start",
         "_selection_end",
         "_selection_bg",
@@ -59,6 +86,7 @@ class Text(Renderable):
         italic: bool = False,
         underline: bool = False,
         strikethrough: bool = False,
+        ellipsis: bool = False,
         # Selection
         selection_start: int | None = None,
         selection_end: int | None = None,
@@ -73,9 +101,6 @@ class Text(Renderable):
         all_children: tuple[Any, ...]
         if isinstance(content, TextModifier):
             all_children = (content, *children)
-        elif getattr(content, "__opentui_template_binding__", False):
-            text_content = content
-            all_children = children
         elif is_reactive(content):
             reactive_content = content
             all_children = children
@@ -110,11 +135,11 @@ class Text(Renderable):
         self._set_or_bind("_italic", italic)
         self._set_or_bind("_underline", underline)
         self._set_or_bind("_strikethrough", strikethrough)
+        self._link: str | None = None
+        self._ellipsis: bool = ellipsis
         self._selection_start = selection_start
         self._selection_end = selection_end
-        self._selection_bg = (
-            self._parse_color(selection_bg) if selection_bg else s.RGBA(0.3, 0.3, 0.7, 1.0)
-        )
+        self._selection_bg = self._parse_color(selection_bg) if selection_bg else SELECTION_BG
         self._set_or_bind(
             "_wrap_mode",
             wrap_mode,
@@ -138,6 +163,14 @@ class Text(Renderable):
         self._native_text_buffer: NativeTextBuffer | None = None
         self._native_text_view: NativeTextBufferView | None = None
         self._native_render_key: tuple | None = None
+
+    @property
+    def _has_selection(self) -> bool:
+        return (
+            self._selection_start is not None
+            and self._selection_end is not None
+            and self._selection_start < self._selection_end
+        )
 
     @property
     def content(self) -> str:
@@ -166,12 +199,10 @@ class Text(Renderable):
 
     def _setup_measure_func(self) -> None:
         def measure(yoga_node, width, width_mode, height, height_mode):
-            import yoga
-
             total_padding = self._padding_left + self._padding_right
             vertical_padding = self._padding_top + self._padding_bottom
 
-            effective_width = 0 if width_mode == yoga.MeasureMode.Undefined else int(width)
+            effective_width = 0 if width_mode == _MEASURE_UNDEFINED else int(width)
 
             content_width = max(0, effective_width - total_padding)
             w, h = measure_text(self._content, content_width, self._wrap_mode)
@@ -179,7 +210,7 @@ class Text(Renderable):
             measured_w = w + total_padding
             measured_h = h + vertical_padding
 
-            if width_mode == yoga.MeasureMode.AtMost:
+            if width_mode == _MEASURE_AT_MOST:
                 measured_w = min(width, measured_w)
 
             return (measured_w, measured_h)
@@ -187,12 +218,10 @@ class Text(Renderable):
         self._yoga_node.set_measure_func(measure)
 
     def get_render_strategy(self) -> RenderStrategy:
-        has_selection = (
-            self._selection_start is not None
-            and self._selection_end is not None
-            and self._selection_start < self._selection_end
-        )
+        has_selection = self._has_selection
         if has_selection or self._render_before is not None or self._render_after is not None:
+            return RenderStrategy.PYTHON_FALLBACK
+        if self._link or self._ellipsis:
             return RenderStrategy.PYTHON_FALLBACK
         if self._wrap_mode != "none":
             return RenderStrategy.NATIVE_TEXT
@@ -213,11 +242,7 @@ class Text(Renderable):
     def _get_render_cache(
         self, available_width: int, attrs: int
     ) -> tuple[tuple[str, ...], tuple[int, int] | None]:
-        has_selection = (
-            self._selection_start is not None
-            and self._selection_end is not None
-            and self._selection_start < self._selection_end
-        )
+        has_selection = self._has_selection
         key = (
             self._content,
             available_width,
@@ -288,11 +313,7 @@ class Text(Renderable):
             available_height = int(self._layout_height) - self._padding_top - self._padding_bottom
         available_height = max(1, available_height)
         attrs = self._get_attributes()
-        has_selection = (
-            self._selection_start is not None
-            and self._selection_end is not None
-            and self._selection_start < self._selection_end
-        )
+        has_selection = self._has_selection
 
         if (
             not has_selection
@@ -303,10 +324,19 @@ class Text(Renderable):
                 or len(self._content) <= available_width
             )
         ):
-            buffer.draw_text(self._content, x, y, self._fg, self._background_color, attrs)
+            draw_content = self._content
+            if (
+                self._ellipsis
+                and available_width > 0
+                and _display_width(draw_content) > available_width
+            ):
+                draw_content = _truncate_with_ellipsis(draw_content, available_width)
+            buffer.draw_text(
+                draw_content, x, y, self._fg, self._background_color, attrs, link=self._link
+            )
             return
 
-        if not has_selection and available_width > 0:
+        if not has_selection and not self._link and available_width > 0:
             buffer.draw_text_buffer_view(
                 self._get_native_text_view(available_width, available_height, attrs), x, y
             )
@@ -319,7 +349,9 @@ class Text(Renderable):
                 buffer.fill_rect(x + before_width, y, sel_width, 1, self._selection_bg)
 
         for i, line in enumerate(lines):
-            buffer.draw_text(line, x, y + i, self._fg, self._background_color, attrs)
+            buffer.draw_text(
+                line, x, y + i, self._fg, self._background_color, attrs, link=self._link
+            )
 
 
 class TextModifier(Renderable):
@@ -479,7 +511,7 @@ class LineBreak(TextModifier):
 
 
 class Link(TextModifier):
-    """Link modifier.
+    """Link modifier — wraps children with an OSC 8 hyperlink.
 
     Usage:
         Text(Link("click here", href="https://example.com"))
@@ -491,12 +523,34 @@ class Link(TextModifier):
         href: str = "",
         **kwargs,
     ):
-        super().__init__(*children, **kwargs)
+        super().__init__(*children, underline=True, **kwargs)
         self._href = href
 
     @property
     def href(self) -> str:
         return self._href
+
+    def _collect_text_descendants(
+        self, node: Renderable, originals: list[tuple[Text, str | None]]
+    ) -> None:
+        for child in node._children:
+            if isinstance(child, Text):
+                originals.append((child, child._link))
+                child._link = self._href
+            elif isinstance(child, TextModifier):
+                self._collect_text_descendants(child, originals)
+
+    def render(self, buffer: Buffer, delta_time: float = 0) -> None:
+        if not self._visible or not self._href:
+            return super().render(buffer, delta_time)
+
+        originals: list[tuple[Text, str | None]] = []
+        self._collect_text_descendants(self, originals)
+        try:
+            super().render(buffer, delta_time)
+        finally:
+            for text_node, original_link in originals:
+                text_node._link = original_link
 
 
 __all__ = [

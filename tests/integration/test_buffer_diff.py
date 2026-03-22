@@ -4,7 +4,7 @@ Upstream: N/A (Python-specific)
 """
 
 import pytest
-from opentui.testing import BufferDiff, assert_buffer_equal
+from opentui.testing.capture import BufferDiff, assert_buffer_equal
 
 
 def test_buffer_diff_no_differences():

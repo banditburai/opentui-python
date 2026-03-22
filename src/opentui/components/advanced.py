@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import yoga
+
 from .. import structs as s
+from ..colors import MUTED_GRAY, SELECTED_TAB_BG
 from .base import Renderable
+
+_MEASURE_AT_MOST = yoga.MeasureMode.AtMost
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -27,7 +32,6 @@ class Code(Renderable):
         filetype: str = "plaintext",
         tree_sitter_client: Any = None,
         show_line_numbers: bool = True,
-        highlight_current_line: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -35,8 +39,6 @@ class Code(Renderable):
         self._content = content
         self._filetype = filetype
         self._show_line_numbers = show_line_numbers
-        self._highlight_current_line = highlight_current_line
-        self._syntax_style = None
 
         self._setup_measure_func()
 
@@ -53,8 +55,6 @@ class Code(Renderable):
 
     def _setup_measure_func(self) -> None:
         def measure(yoga_node, width, width_mode, height, height_mode):
-            import yoga
-
             total_padding = self._padding_left + self._padding_right
             vertical_padding = self._padding_top + self._padding_bottom
 
@@ -68,7 +68,7 @@ class Code(Renderable):
             measured_w = content_w + total_padding
             measured_h = num_lines + vertical_padding
 
-            if width_mode == yoga.MeasureMode.AtMost:
+            if width_mode == _MEASURE_AT_MOST:
                 measured_w = min(width, measured_w)
 
             return (measured_w, measured_h)
@@ -99,9 +99,7 @@ class Code(Renderable):
 
             if self._show_line_numbers:
                 line_num = str(i + 1).rjust(3)
-                buffer.draw_text(
-                    line_num, x, line_y, s.RGBA(0.5, 0.5, 0.5, 1), self._background_color
-                )
+                buffer.draw_text(line_num, x, line_y, MUTED_GRAY, self._background_color)
 
             code_x = x + 4 if self._show_line_numbers else x
             display_line = line[: width - 4] if self._show_line_numbers else line[:width]
@@ -124,7 +122,6 @@ class Diff(Renderable):
         old_text: str = "",
         new_text: str = "",
         mode: str = "unified",  # "unified" or "split"
-        context_lines: int = 3,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -132,14 +129,11 @@ class Diff(Renderable):
         self._old_text = old_text
         self._new_text = new_text
         self._mode = mode
-        self._context_lines = context_lines
 
         self._setup_measure_func()
 
     def _setup_measure_func(self) -> None:
         def measure(yoga_node, width, width_mode, height, height_mode):
-            import yoga
-
             total_padding = self._padding_left + self._padding_right
             vertical_padding = self._padding_top + self._padding_bottom
 
@@ -155,7 +149,7 @@ class Diff(Renderable):
             measured_w = content_w + total_padding
             measured_h = num_lines + vertical_padding
 
-            if width_mode == yoga.MeasureMode.AtMost:
+            if width_mode == _MEASURE_AT_MOST:
                 measured_w = min(width, measured_w)
 
             return (measured_w, measured_h)
@@ -224,22 +218,16 @@ class Markdown(Renderable):
     def __init__(
         self,
         content: str = "",
-        enable_syntax_highlight: bool = True,
-        enable_math: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
 
         self._content = content
-        self._enable_syntax_highlight = enable_syntax_highlight
-        self._enable_math = enable_math
 
         self._setup_measure_func()
 
     def _setup_measure_func(self) -> None:
         def measure(yoga_node, width, width_mode, height, height_mode):
-            import yoga
-
             total_padding = self._padding_left + self._padding_right
             vertical_padding = self._padding_top + self._padding_bottom
 
@@ -250,7 +238,7 @@ class Markdown(Renderable):
             measured_w = max_line_width + total_padding
             measured_h = num_lines + vertical_padding
 
-            if width_mode == yoga.MeasureMode.AtMost:
+            if width_mode == _MEASURE_AT_MOST:
                 measured_w = min(width, measured_w)
 
             return (measured_w, measured_h)
@@ -303,8 +291,6 @@ class LineNumber(Renderable):
 
     def _setup_measure_func(self) -> None:
         def measure(yoga_node, width, width_mode, height, height_mode):
-            import yoga
-
             total_padding = self._padding_left + self._padding_right
             vertical_padding = self._padding_top + self._padding_bottom
 
@@ -316,7 +302,7 @@ class LineNumber(Renderable):
             measured_w = content_w + total_padding
             measured_h = num_lines + vertical_padding
 
-            if width_mode == yoga.MeasureMode.AtMost:
+            if width_mode == _MEASURE_AT_MOST:
                 measured_w = min(width, measured_w)
 
             return (measured_w, measured_h)
@@ -338,7 +324,7 @@ class LineNumber(Renderable):
                 break
 
             num = str(self._start + i).rjust(self._gutter_width)
-            buffer.draw_text(num, x, line_y, s.RGBA(0.5, 0.5, 0.5, 1), self._background_color)
+            buffer.draw_text(num, x, line_y, MUTED_GRAY, self._background_color)
 
             content_x = x + self._gutter_width + 1
             display_line = line[: width - self._gutter_width - 1]
@@ -361,7 +347,6 @@ class AsciiFont(Renderable):
         super().__init__(**kwargs)
 
         self._content = content
-        self._font = font
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         if not self._visible or not self._content:
@@ -426,7 +411,7 @@ class TabSelect(Renderable):
         for i, tab in enumerate(self._tabs):
             is_selected = i == self._selected
 
-            bg = s.RGBA(0.2, 0.2, 0.4, 1) if is_selected else self._background_color
+            bg = SELECTED_TAB_BG if is_selected else self._background_color
 
             text = f" {tab} "
             fg = s.RGBA(1, 1, 1, 1) if is_selected else self._fg
@@ -525,14 +510,12 @@ class TextTable(Renderable):
         self,
         columns: list[str] | None = None,
         rows: list[list[str]] | None = None,
-        auto_width: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
 
         self._columns = columns or []
         self._rows = rows or []
-        self._auto_width = auto_width
 
     @property
     def columns(self) -> list[str]:
@@ -564,9 +547,7 @@ class TextTable(Renderable):
         y += 1
         current_x = x
         for w in col_widths:
-            buffer.draw_text(
-                "-" * (w + 1), current_x, y, s.RGBA(0.5, 0.5, 0.5, 1), self._background_color
-            )
+            buffer.draw_text("-" * (w + 1), current_x, y, MUTED_GRAY, self._background_color)
             current_x += w + 1
 
         for row in self._rows:

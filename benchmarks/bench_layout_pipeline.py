@@ -61,7 +61,9 @@ async def _run() -> None:
         )
 
     paint_medians = collect_frame_medians(
-        setup, paint_mutate, 50,
+        setup,
+        paint_mutate,
+        50,
         buckets=FRAME_BUCKETS,
         label_prefix="layout_pipeline: paint",
     )
@@ -75,7 +77,9 @@ async def _run() -> None:
         target.width = 41 if layout_index[0] % 2 else 40
 
     layout_medians = collect_frame_medians(
-        setup, layout_mutate, 50,
+        setup,
+        layout_mutate,
+        50,
         buckets=FRAME_BUCKETS,
         label_prefix="layout_pipeline: layout",
     )

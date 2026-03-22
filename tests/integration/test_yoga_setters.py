@@ -18,78 +18,78 @@ def _make_node() -> yoga.Node:
 
 
 # ---------------------------------------------------------------------------
-# flexGrow
+# flex_grow
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersFlexGrow:
-    """Yoga Prop Setters - flexGrow"""
+    """Yoga Prop Setters - flex_grow"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "flexGrow", 1)
+        set_yoga_prop(node, "flex_grow", 1)
         assert node.flex_grow == 1
 
     def test_accepts_0(self):
         node = _make_node()
-        set_yoga_prop(node, "flexGrow", 0)
+        set_yoga_prop(node, "flex_grow", 0)
         assert node.flex_grow == 0
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "flexGrow", 1)  # set first
-        set_yoga_prop(node, "flexGrow", None)
+        set_yoga_prop(node, "flex_grow", 1)  # set first
+        set_yoga_prop(node, "flex_grow", None)
         assert node.flex_grow == 0  # default
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "flexGrow", 1)  # set first
-        set_yoga_prop(node, "flexGrow", None)  # None == undefined
+        set_yoga_prop(node, "flex_grow", 1)  # set first
+        set_yoga_prop(node, "flex_grow", None)  # None == undefined
         assert node.flex_grow == 0
 
 
 # ---------------------------------------------------------------------------
-# flexShrink
+# flex_shrink
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersFlexShrink:
-    """Yoga Prop Setters - flexShrink"""
+    """Yoga Prop Setters - flex_shrink"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "flexShrink", 1)
+        set_yoga_prop(node, "flex_shrink", 1)
         assert node.flex_shrink == 1
 
     def test_accepts_0(self):
         node = _make_node()
-        set_yoga_prop(node, "flexShrink", 0)
+        set_yoga_prop(node, "flex_shrink", 0)
         assert node.flex_shrink == 0
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "flexShrink", 0)  # set first
-        set_yoga_prop(node, "flexShrink", None)
+        set_yoga_prop(node, "flex_shrink", 0)  # set first
+        set_yoga_prop(node, "flex_shrink", None)
         assert node.flex_shrink == 1  # default
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "flexShrink", 0)  # set first
-        set_yoga_prop(node, "flexShrink", None)
+        set_yoga_prop(node, "flex_shrink", 0)  # set first
+        set_yoga_prop(node, "flex_shrink", None)
         assert node.flex_shrink == 1
 
 
 # ---------------------------------------------------------------------------
-# flexDirection
+# flex_direction
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersFlexDirection:
-    """Yoga Prop Setters - flexDirection"""
+    """Yoga Prop Setters - flex_direction"""
 
     def test_accepts_valid_string(self):
         node = _make_node()
-        set_yoga_prop(node, "flexDirection", "row")
+        set_yoga_prop(node, "flex_direction", "row")
         assert node.flex_direction == yoga.FlexDirection.Row
 
     def test_accepts_all_valid_values(self):
@@ -100,33 +100,33 @@ class TestYogaPropSettersFlexDirection:
             ("row", yoga.FlexDirection.Row),
             ("row-reverse", yoga.FlexDirection.RowReverse),
         ]:
-            set_yoga_prop(node, "flexDirection", val)
+            set_yoga_prop(node, "flex_direction", val)
             assert node.flex_direction == expected, f"Failed for {val}"
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "flexDirection", "row")
-        set_yoga_prop(node, "flexDirection", None)
+        set_yoga_prop(node, "flex_direction", "row")
+        set_yoga_prop(node, "flex_direction", None)
         assert node.flex_direction == yoga.FlexDirection.Column  # default
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "flexDirection", "row")
-        set_yoga_prop(node, "flexDirection", None)
+        set_yoga_prop(node, "flex_direction", "row")
+        set_yoga_prop(node, "flex_direction", None)
         assert node.flex_direction == yoga.FlexDirection.Column
 
 
 # ---------------------------------------------------------------------------
-# flexWrap
+# flex_wrap
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersFlexWrap:
-    """Yoga Prop Setters - flexWrap"""
+    """Yoga Prop Setters - flex_wrap"""
 
     def test_accepts_valid_string(self):
         node = _make_node()
-        set_yoga_prop(node, "flexWrap", "wrap")
+        set_yoga_prop(node, "flex_wrap", "wrap")
         assert node.flex_wrap == yoga.Wrap.Wrap
 
     def test_accepts_all_valid_values(self):
@@ -136,33 +136,33 @@ class TestYogaPropSettersFlexWrap:
             ("wrap", yoga.Wrap.Wrap),
             ("wrap-reverse", yoga.Wrap.WrapReverse),
         ]:
-            set_yoga_prop(node, "flexWrap", val)
+            set_yoga_prop(node, "flex_wrap", val)
             assert node.flex_wrap == expected, f"Failed for {val}"
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "flexWrap", "wrap")
-        set_yoga_prop(node, "flexWrap", None)
+        set_yoga_prop(node, "flex_wrap", "wrap")
+        set_yoga_prop(node, "flex_wrap", None)
         assert node.flex_wrap == yoga.Wrap.NoWrap  # default
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "flexWrap", "wrap")
-        set_yoga_prop(node, "flexWrap", None)
+        set_yoga_prop(node, "flex_wrap", "wrap")
+        set_yoga_prop(node, "flex_wrap", None)
         assert node.flex_wrap == yoga.Wrap.NoWrap
 
 
 # ---------------------------------------------------------------------------
-# alignItems
+# align_items
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersAlignItems:
-    """Yoga Prop Setters - alignItems"""
+    """Yoga Prop Setters - align_items"""
 
     def test_accepts_valid_string(self):
         node = _make_node()
-        set_yoga_prop(node, "alignItems", "center")
+        set_yoga_prop(node, "align_items", "center")
         assert node.align_items == yoga.Align.Center
 
     def test_accepts_all_valid_values(self):
@@ -178,33 +178,33 @@ class TestYogaPropSettersAlignItems:
             ("space-around", yoga.Align.SpaceAround),
             ("space-evenly", yoga.Align.SpaceEvenly),
         ]:
-            set_yoga_prop(node, "alignItems", val)
+            set_yoga_prop(node, "align_items", val)
             assert node.align_items == expected, f"Failed for {val}"
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "alignItems", "center")
-        set_yoga_prop(node, "alignItems", None)
+        set_yoga_prop(node, "align_items", "center")
+        set_yoga_prop(node, "align_items", None)
         assert node.align_items == yoga.Align.Stretch  # default
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "alignItems", "center")
-        set_yoga_prop(node, "alignItems", None)
+        set_yoga_prop(node, "align_items", "center")
+        set_yoga_prop(node, "align_items", None)
         assert node.align_items == yoga.Align.Stretch
 
 
 # ---------------------------------------------------------------------------
-# justifyContent
+# justify_content
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersJustifyContent:
-    """Yoga Prop Setters - justifyContent"""
+    """Yoga Prop Setters - justify_content"""
 
     def test_accepts_valid_string(self):
         node = _make_node()
-        set_yoga_prop(node, "justifyContent", "center")
+        set_yoga_prop(node, "justify_content", "center")
         assert node.justify_content == yoga.Justify.Center
 
     def test_accepts_all_valid_values(self):
@@ -217,33 +217,33 @@ class TestYogaPropSettersJustifyContent:
             ("space-around", yoga.Justify.SpaceAround),
             ("space-evenly", yoga.Justify.SpaceEvenly),
         ]:
-            set_yoga_prop(node, "justifyContent", val)
+            set_yoga_prop(node, "justify_content", val)
             assert node.justify_content == expected, f"Failed for {val}"
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "justifyContent", "center")
-        set_yoga_prop(node, "justifyContent", None)
+        set_yoga_prop(node, "justify_content", "center")
+        set_yoga_prop(node, "justify_content", None)
         assert node.justify_content == yoga.Justify.FlexStart  # default
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "justifyContent", "center")
-        set_yoga_prop(node, "justifyContent", None)
+        set_yoga_prop(node, "justify_content", "center")
+        set_yoga_prop(node, "justify_content", None)
         assert node.justify_content == yoga.Justify.FlexStart
 
 
 # ---------------------------------------------------------------------------
-# alignSelf
+# align_self
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersAlignSelf:
-    """Yoga Prop Setters - alignSelf"""
+    """Yoga Prop Setters - align_self"""
 
     def test_accepts_valid_string(self):
         node = _make_node()
-        set_yoga_prop(node, "alignSelf", "center")
+        set_yoga_prop(node, "align_self", "center")
         assert node.align_self == yoga.Align.Center
 
     def test_accepts_all_valid_values(self):
@@ -259,19 +259,19 @@ class TestYogaPropSettersAlignSelf:
             ("space-around", yoga.Align.SpaceAround),
             ("space-evenly", yoga.Align.SpaceEvenly),
         ]:
-            set_yoga_prop(node, "alignSelf", val)
+            set_yoga_prop(node, "align_self", val)
             assert node.align_self == expected, f"Failed for {val}"
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "alignSelf", "center")
-        set_yoga_prop(node, "alignSelf", None)
+        set_yoga_prop(node, "align_self", "center")
+        set_yoga_prop(node, "align_self", None)
         assert node.align_self == yoga.Align.Auto  # default
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "alignSelf", "center")
-        set_yoga_prop(node, "alignSelf", None)
+        set_yoga_prop(node, "align_self", "center")
+        set_yoga_prop(node, "align_self", None)
         assert node.align_self == yoga.Align.Auto
 
 
@@ -348,186 +348,186 @@ class TestYogaPropSettersPosition:
 
 
 # ---------------------------------------------------------------------------
-# flexBasis
+# flex_basis
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersFlexBasis:
-    """Yoga Prop Setters - flexBasis"""
+    """Yoga Prop Setters - flex_basis"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "flexBasis", 100)
+        set_yoga_prop(node, "flex_basis", 100)
         fb = node.flex_basis
         assert fb.value == 100
         assert fb.unit == yoga.Unit.Point
 
     def test_accepts_auto(self):
         node = _make_node()
-        set_yoga_prop(node, "flexBasis", "auto")
+        set_yoga_prop(node, "flex_basis", "auto")
         fb = node.flex_basis
         # yoga-python lacks set_flex_basis_auto; NaN assignment yields Undefined
         assert fb.unit == yoga.Unit.Undefined
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "flexBasis", 100)
-        set_yoga_prop(node, "flexBasis", None)
+        set_yoga_prop(node, "flex_basis", 100)
+        set_yoga_prop(node, "flex_basis", None)
         fb = node.flex_basis
         assert fb.unit == yoga.Unit.Undefined
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "flexBasis", 100)
-        set_yoga_prop(node, "flexBasis", None)
+        set_yoga_prop(node, "flex_basis", 100)
+        set_yoga_prop(node, "flex_basis", None)
         fb = node.flex_basis
         assert fb.unit == yoga.Unit.Undefined
 
 
 # ---------------------------------------------------------------------------
-# minWidth
+# min_width
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersMinWidth:
-    """Yoga Prop Setters - minWidth"""
+    """Yoga Prop Setters - min_width"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "minWidth", 100)
+        set_yoga_prop(node, "min_width", 100)
         mw = node.min_width
         assert mw.value == 100
         assert mw.unit == yoga.Unit.Point
 
     def test_accepts_percentage(self):
         node = _make_node()
-        set_yoga_prop(node, "minWidth", "50%")
+        set_yoga_prop(node, "min_width", "50%")
         mw = node.min_width
         assert mw.value == 50
         assert mw.unit == yoga.Unit.Percent
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "minWidth", 100)
-        set_yoga_prop(node, "minWidth", None)
+        set_yoga_prop(node, "min_width", 100)
+        set_yoga_prop(node, "min_width", None)
         mw = node.min_width
         assert mw.unit == yoga.Unit.Undefined
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "minWidth", 100)
-        set_yoga_prop(node, "minWidth", None)
+        set_yoga_prop(node, "min_width", 100)
+        set_yoga_prop(node, "min_width", None)
         mw = node.min_width
         assert mw.unit == yoga.Unit.Undefined
 
 
 # ---------------------------------------------------------------------------
-# maxWidth
+# max_width
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersMaxWidth:
-    """Yoga Prop Setters - maxWidth"""
+    """Yoga Prop Setters - max_width"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "maxWidth", 100)
+        set_yoga_prop(node, "max_width", 100)
         mw = node.max_width
         assert mw.value == 100
         assert mw.unit == yoga.Unit.Point
 
     def test_accepts_percentage(self):
         node = _make_node()
-        set_yoga_prop(node, "maxWidth", "50%")
+        set_yoga_prop(node, "max_width", "50%")
         mw = node.max_width
         assert mw.value == 50
         assert mw.unit == yoga.Unit.Percent
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "maxWidth", 100)
-        set_yoga_prop(node, "maxWidth", None)
+        set_yoga_prop(node, "max_width", 100)
+        set_yoga_prop(node, "max_width", None)
         mw = node.max_width
         assert mw.unit == yoga.Unit.Undefined
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "maxWidth", 100)
-        set_yoga_prop(node, "maxWidth", None)
+        set_yoga_prop(node, "max_width", 100)
+        set_yoga_prop(node, "max_width", None)
         mw = node.max_width
         assert mw.unit == yoga.Unit.Undefined
 
 
 # ---------------------------------------------------------------------------
-# minHeight
+# min_height
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersMinHeight:
-    """Yoga Prop Setters - minHeight"""
+    """Yoga Prop Setters - min_height"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "minHeight", 100)
+        set_yoga_prop(node, "min_height", 100)
         mh = node.min_height
         assert mh.value == 100
         assert mh.unit == yoga.Unit.Point
 
     def test_accepts_percentage(self):
         node = _make_node()
-        set_yoga_prop(node, "minHeight", "50%")
+        set_yoga_prop(node, "min_height", "50%")
         mh = node.min_height
         assert mh.value == 50
         assert mh.unit == yoga.Unit.Percent
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "minHeight", 100)
-        set_yoga_prop(node, "minHeight", None)
+        set_yoga_prop(node, "min_height", 100)
+        set_yoga_prop(node, "min_height", None)
         mh = node.min_height
         assert mh.unit == yoga.Unit.Undefined
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "minHeight", 100)
-        set_yoga_prop(node, "minHeight", None)
+        set_yoga_prop(node, "min_height", 100)
+        set_yoga_prop(node, "min_height", None)
         mh = node.min_height
         assert mh.unit == yoga.Unit.Undefined
 
 
 # ---------------------------------------------------------------------------
-# maxHeight
+# max_height
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersMaxHeight:
-    """Yoga Prop Setters - maxHeight"""
+    """Yoga Prop Setters - max_height"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "maxHeight", 100)
+        set_yoga_prop(node, "max_height", 100)
         mh = node.max_height
         assert mh.value == 100
         assert mh.unit == yoga.Unit.Point
 
     def test_accepts_percentage(self):
         node = _make_node()
-        set_yoga_prop(node, "maxHeight", "50%")
+        set_yoga_prop(node, "max_height", "50%")
         mh = node.max_height
         assert mh.value == 50
         assert mh.unit == yoga.Unit.Percent
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "maxHeight", 100)
-        set_yoga_prop(node, "maxHeight", None)
+        set_yoga_prop(node, "max_height", 100)
+        set_yoga_prop(node, "max_height", None)
         mh = node.max_height
         assert mh.unit == yoga.Unit.Undefined
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "maxHeight", 100)
-        set_yoga_prop(node, "maxHeight", None)
+        set_yoga_prop(node, "max_height", 100)
+        set_yoga_prop(node, "max_height", None)
         mh = node.max_height
         assert mh.unit == yoga.Unit.Undefined
 
@@ -576,207 +576,207 @@ class TestYogaPropSettersMargin:
 
 
 # ---------------------------------------------------------------------------
-# marginX
+# margin_x
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersMarginX:
-    """Yoga Prop Setters - marginX"""
+    """Yoga Prop Setters - margin_x"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "marginX", 10)
+        set_yoga_prop(node, "margin_x", 10)
         m = node.get_margin(yoga.Edge.Horizontal)
         assert m.value == 10
         assert m.unit == yoga.Unit.Point
 
     def test_accepts_auto(self):
         node = _make_node()
-        set_yoga_prop(node, "marginX", "auto")
+        set_yoga_prop(node, "margin_x", "auto")
         m = node.get_margin(yoga.Edge.Horizontal)
         assert m.unit == yoga.Unit.Auto
 
     def test_accepts_percentage(self):
         node = _make_node()
-        set_yoga_prop(node, "marginX", "10%")
+        set_yoga_prop(node, "margin_x", "10%")
         m = node.get_margin(yoga.Edge.Horizontal)
         assert m.value == 10
         assert m.unit == yoga.Unit.Percent
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "marginX", 10)
-        set_yoga_prop(node, "marginX", None)
+        set_yoga_prop(node, "margin_x", 10)
+        set_yoga_prop(node, "margin_x", None)
         m = node.get_margin(yoga.Edge.Horizontal)
         assert m.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "marginX", 10)
-        set_yoga_prop(node, "marginX", None)
+        set_yoga_prop(node, "margin_x", 10)
+        set_yoga_prop(node, "margin_x", None)
         m = node.get_margin(yoga.Edge.Horizontal)
         assert m.value == 0
 
 
 # ---------------------------------------------------------------------------
-# marginY
+# margin_y
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersMarginY:
-    """Yoga Prop Setters - marginY"""
+    """Yoga Prop Setters - margin_y"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "marginY", 10)
+        set_yoga_prop(node, "margin_y", 10)
         m = node.get_margin(yoga.Edge.Vertical)
         assert m.value == 10
         assert m.unit == yoga.Unit.Point
 
     def test_accepts_auto(self):
         node = _make_node()
-        set_yoga_prop(node, "marginY", "auto")
+        set_yoga_prop(node, "margin_y", "auto")
         m = node.get_margin(yoga.Edge.Vertical)
         assert m.unit == yoga.Unit.Auto
 
     def test_accepts_percentage(self):
         node = _make_node()
-        set_yoga_prop(node, "marginY", "10%")
+        set_yoga_prop(node, "margin_y", "10%")
         m = node.get_margin(yoga.Edge.Vertical)
         assert m.value == 10
         assert m.unit == yoga.Unit.Percent
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "marginY", 10)
-        set_yoga_prop(node, "marginY", None)
+        set_yoga_prop(node, "margin_y", 10)
+        set_yoga_prop(node, "margin_y", None)
         m = node.get_margin(yoga.Edge.Vertical)
         assert m.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "marginY", 10)
-        set_yoga_prop(node, "marginY", None)
+        set_yoga_prop(node, "margin_y", 10)
+        set_yoga_prop(node, "margin_y", None)
         m = node.get_margin(yoga.Edge.Vertical)
         assert m.value == 0
 
 
 # ---------------------------------------------------------------------------
-# marginTop
+# margin_top
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersMarginTop:
-    """Yoga Prop Setters - marginTop"""
+    """Yoga Prop Setters - margin_top"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "marginTop", 10)
+        set_yoga_prop(node, "margin_top", 10)
         m = node.get_margin(yoga.Edge.Top)
         assert m.value == 10
         assert m.unit == yoga.Unit.Point
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "marginTop", 10)
-        set_yoga_prop(node, "marginTop", None)
+        set_yoga_prop(node, "margin_top", 10)
+        set_yoga_prop(node, "margin_top", None)
         m = node.get_margin(yoga.Edge.Top)
         assert m.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "marginTop", 10)
-        set_yoga_prop(node, "marginTop", None)
+        set_yoga_prop(node, "margin_top", 10)
+        set_yoga_prop(node, "margin_top", None)
         m = node.get_margin(yoga.Edge.Top)
         assert m.value == 0
 
 
 # ---------------------------------------------------------------------------
-# marginRight
+# margin_right
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersMarginRight:
-    """Yoga Prop Setters - marginRight"""
+    """Yoga Prop Setters - margin_right"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "marginRight", 10)
+        set_yoga_prop(node, "margin_right", 10)
         m = node.get_margin(yoga.Edge.Right)
         assert m.value == 10
         assert m.unit == yoga.Unit.Point
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "marginRight", 10)
-        set_yoga_prop(node, "marginRight", None)
+        set_yoga_prop(node, "margin_right", 10)
+        set_yoga_prop(node, "margin_right", None)
         m = node.get_margin(yoga.Edge.Right)
         assert m.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "marginRight", 10)
-        set_yoga_prop(node, "marginRight", None)
+        set_yoga_prop(node, "margin_right", 10)
+        set_yoga_prop(node, "margin_right", None)
         m = node.get_margin(yoga.Edge.Right)
         assert m.value == 0
 
 
 # ---------------------------------------------------------------------------
-# marginBottom
+# margin_bottom
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersMarginBottom:
-    """Yoga Prop Setters - marginBottom"""
+    """Yoga Prop Setters - margin_bottom"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "marginBottom", 10)
+        set_yoga_prop(node, "margin_bottom", 10)
         m = node.get_margin(yoga.Edge.Bottom)
         assert m.value == 10
         assert m.unit == yoga.Unit.Point
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "marginBottom", 10)
-        set_yoga_prop(node, "marginBottom", None)
+        set_yoga_prop(node, "margin_bottom", 10)
+        set_yoga_prop(node, "margin_bottom", None)
         m = node.get_margin(yoga.Edge.Bottom)
         assert m.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "marginBottom", 10)
-        set_yoga_prop(node, "marginBottom", None)
+        set_yoga_prop(node, "margin_bottom", 10)
+        set_yoga_prop(node, "margin_bottom", None)
         m = node.get_margin(yoga.Edge.Bottom)
         assert m.value == 0
 
 
 # ---------------------------------------------------------------------------
-# marginLeft
+# margin_left
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersMarginLeft:
-    """Yoga Prop Setters - marginLeft"""
+    """Yoga Prop Setters - margin_left"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "marginLeft", 10)
+        set_yoga_prop(node, "margin_left", 10)
         m = node.get_margin(yoga.Edge.Left)
         assert m.value == 10
         assert m.unit == yoga.Unit.Point
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "marginLeft", 10)
-        set_yoga_prop(node, "marginLeft", None)
+        set_yoga_prop(node, "margin_left", 10)
+        set_yoga_prop(node, "margin_left", None)
         m = node.get_margin(yoga.Edge.Left)
         assert m.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "marginLeft", 10)
-        set_yoga_prop(node, "marginLeft", None)
+        set_yoga_prop(node, "margin_left", 10)
+        set_yoga_prop(node, "margin_left", None)
         m = node.get_margin(yoga.Edge.Left)
         assert m.value == 0
 
@@ -819,195 +819,195 @@ class TestYogaPropSettersPadding:
 
 
 # ---------------------------------------------------------------------------
-# paddingX
+# padding_x
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersPaddingX:
-    """Yoga Prop Setters - paddingX"""
+    """Yoga Prop Setters - padding_x"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingX", 10)
+        set_yoga_prop(node, "padding_x", 10)
         p = node.get_padding(yoga.Edge.Horizontal)
         assert p.value == 10
         assert p.unit == yoga.Unit.Point
 
     def test_accepts_percentage(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingX", "10%")
+        set_yoga_prop(node, "padding_x", "10%")
         p = node.get_padding(yoga.Edge.Horizontal)
         assert p.value == 10
         assert p.unit == yoga.Unit.Percent
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingX", 10)
-        set_yoga_prop(node, "paddingX", None)
+        set_yoga_prop(node, "padding_x", 10)
+        set_yoga_prop(node, "padding_x", None)
         p = node.get_padding(yoga.Edge.Horizontal)
         assert p.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingX", 10)
-        set_yoga_prop(node, "paddingX", None)
+        set_yoga_prop(node, "padding_x", 10)
+        set_yoga_prop(node, "padding_x", None)
         p = node.get_padding(yoga.Edge.Horizontal)
         assert p.value == 0
 
 
 # ---------------------------------------------------------------------------
-# paddingY
+# padding_y
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersPaddingY:
-    """Yoga Prop Setters - paddingY"""
+    """Yoga Prop Setters - padding_y"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingY", 10)
+        set_yoga_prop(node, "padding_y", 10)
         p = node.get_padding(yoga.Edge.Vertical)
         assert p.value == 10
         assert p.unit == yoga.Unit.Point
 
     def test_accepts_percentage(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingY", "10%")
+        set_yoga_prop(node, "padding_y", "10%")
         p = node.get_padding(yoga.Edge.Vertical)
         assert p.value == 10
         assert p.unit == yoga.Unit.Percent
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingY", 10)
-        set_yoga_prop(node, "paddingY", None)
+        set_yoga_prop(node, "padding_y", 10)
+        set_yoga_prop(node, "padding_y", None)
         p = node.get_padding(yoga.Edge.Vertical)
         assert p.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingY", 10)
-        set_yoga_prop(node, "paddingY", None)
+        set_yoga_prop(node, "padding_y", 10)
+        set_yoga_prop(node, "padding_y", None)
         p = node.get_padding(yoga.Edge.Vertical)
         assert p.value == 0
 
 
 # ---------------------------------------------------------------------------
-# paddingTop
+# padding_top
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersPaddingTop:
-    """Yoga Prop Setters - paddingTop"""
+    """Yoga Prop Setters - padding_top"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingTop", 10)
+        set_yoga_prop(node, "padding_top", 10)
         p = node.get_padding(yoga.Edge.Top)
         assert p.value == 10
         assert p.unit == yoga.Unit.Point
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingTop", 10)
-        set_yoga_prop(node, "paddingTop", None)
+        set_yoga_prop(node, "padding_top", 10)
+        set_yoga_prop(node, "padding_top", None)
         p = node.get_padding(yoga.Edge.Top)
         assert p.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingTop", 10)
-        set_yoga_prop(node, "paddingTop", None)
+        set_yoga_prop(node, "padding_top", 10)
+        set_yoga_prop(node, "padding_top", None)
         p = node.get_padding(yoga.Edge.Top)
         assert p.value == 0
 
 
 # ---------------------------------------------------------------------------
-# paddingRight
+# padding_right
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersPaddingRight:
-    """Yoga Prop Setters - paddingRight"""
+    """Yoga Prop Setters - padding_right"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingRight", 10)
+        set_yoga_prop(node, "padding_right", 10)
         p = node.get_padding(yoga.Edge.Right)
         assert p.value == 10
         assert p.unit == yoga.Unit.Point
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingRight", 10)
-        set_yoga_prop(node, "paddingRight", None)
+        set_yoga_prop(node, "padding_right", 10)
+        set_yoga_prop(node, "padding_right", None)
         p = node.get_padding(yoga.Edge.Right)
         assert p.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingRight", 10)
-        set_yoga_prop(node, "paddingRight", None)
+        set_yoga_prop(node, "padding_right", 10)
+        set_yoga_prop(node, "padding_right", None)
         p = node.get_padding(yoga.Edge.Right)
         assert p.value == 0
 
 
 # ---------------------------------------------------------------------------
-# paddingBottom
+# padding_bottom
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersPaddingBottom:
-    """Yoga Prop Setters - paddingBottom"""
+    """Yoga Prop Setters - padding_bottom"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingBottom", 10)
+        set_yoga_prop(node, "padding_bottom", 10)
         p = node.get_padding(yoga.Edge.Bottom)
         assert p.value == 10
         assert p.unit == yoga.Unit.Point
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingBottom", 10)
-        set_yoga_prop(node, "paddingBottom", None)
+        set_yoga_prop(node, "padding_bottom", 10)
+        set_yoga_prop(node, "padding_bottom", None)
         p = node.get_padding(yoga.Edge.Bottom)
         assert p.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingBottom", 10)
-        set_yoga_prop(node, "paddingBottom", None)
+        set_yoga_prop(node, "padding_bottom", 10)
+        set_yoga_prop(node, "padding_bottom", None)
         p = node.get_padding(yoga.Edge.Bottom)
         assert p.value == 0
 
 
 # ---------------------------------------------------------------------------
-# paddingLeft
+# padding_left
 # ---------------------------------------------------------------------------
 
 
 class TestYogaPropSettersPaddingLeft:
-    """Yoga Prop Setters - paddingLeft"""
+    """Yoga Prop Setters - padding_left"""
 
     def test_accepts_valid_number(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingLeft", 10)
+        set_yoga_prop(node, "padding_left", 10)
         p = node.get_padding(yoga.Edge.Left)
         assert p.value == 10
         assert p.unit == yoga.Unit.Point
 
     def test_accepts_null(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingLeft", 10)
-        set_yoga_prop(node, "paddingLeft", None)
+        set_yoga_prop(node, "padding_left", 10)
+        set_yoga_prop(node, "padding_left", None)
         p = node.get_padding(yoga.Edge.Left)
         assert p.value == 0
 
     def test_accepts_undefined(self):
         node = _make_node()
-        set_yoga_prop(node, "paddingLeft", 10)
-        set_yoga_prop(node, "paddingLeft", None)
+        set_yoga_prop(node, "padding_left", 10)
+        set_yoga_prop(node, "padding_left", None)
         p = node.get_padding(yoga.Edge.Left)
         assert p.value == 0
 

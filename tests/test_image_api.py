@@ -22,7 +22,7 @@ def test_image_api_exports():
 
 def test_image_source_from_path():
     """Path sources should normalize to an ImageSource."""
-    from opentui.image import ImageSource
+    from opentui.image.types import ImageSource
 
     source = ImageSource.from_value("logo.png")
 
@@ -33,7 +33,7 @@ def test_image_source_from_path():
 
 def test_image_source_from_bytes():
     """Byte sources should normalize to an ImageSource."""
-    from opentui.image import ImageSource
+    from opentui.image.types import ImageSource
 
     source = ImageSource.from_value(b"\x89PNG\r\n\x1a\n", mime_type="image/png")
 
@@ -44,7 +44,7 @@ def test_image_source_from_bytes():
 
 def test_decoded_image_is_frozen():
     """Decoded image metadata should be immutable."""
-    from opentui.image import DecodedImage
+    from opentui.image.types import DecodedImage
 
     image = DecodedImage(data=b"\x00" * 16, width=2, height=2)
 
@@ -54,7 +54,7 @@ def test_decoded_image_is_frozen():
 
 def test_image_source_rejects_empty_input():
     """Normalization should reject empty values."""
-    from opentui.image import ImageSource
+    from opentui.image.types import ImageSource
 
     with pytest.raises(ValueError, match="Image source cannot be empty"):
         ImageSource.from_value("")

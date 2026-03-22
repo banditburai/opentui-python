@@ -4,7 +4,7 @@ Upstream: packages/core/src/lib/keymapping.test.ts
 Tests ported: 29/29 (0 skipped)
 """
 
-from opentui.keymapping import (
+from opentui.input.keymapping import (
     DEFAULT_KEY_ALIASES,
     KeyBinding,
     build_key_bindings_map,
@@ -23,9 +23,9 @@ class TestGetKeyBindingKey:
         binding = KeyBinding(name="x", action="test", meta=True)
         key = get_key_binding_key(binding)
         assert "x" in key
-        # meta flag should be 1
+        # Format: name:ctrl:shift:alt:meta — meta is position 4
         parts = key.split(":")
-        assert parts[3] == "1"  # meta position
+        assert parts[4] == "1"  # meta position
 
     def test_should_generate_different_keys_for_different_modifiers(self):
         """Maps to it("should generate different keys for different modifiers")."""
@@ -41,12 +41,12 @@ class TestGetKeyBindingKey:
         assert parts[1] == "1"  # ctrl
         assert parts[2] == "1"  # shift
 
-    def test_should_generate_key_with_super_modifier(self):
-        """Maps to it("should generate key with super modifier")."""
-        binding = KeyBinding(name="s", action="save", super_key=True)
+    def test_should_generate_key_with_alt_modifier(self):
+        """Alt modifier maps to position 3 in key format."""
+        binding = KeyBinding(name="a", action="test", alt=True)
         key = get_key_binding_key(binding)
         parts = key.split(":")
-        assert parts[4] == "1"  # super position
+        assert parts[3] == "1"  # alt position
 
 
 class TestMergeKeyBindings:
@@ -229,19 +229,19 @@ class TestKeyBindingToString:
     def test_should_convert_key_binding_with_all_modifiers(self):
         """Maps to it("should convert key binding with all modifiers")."""
         result = key_binding_to_string(
-            KeyBinding(name="z", action="test", ctrl=True, shift=True, meta=True, super_key=True)
+            KeyBinding(name="z", action="test", ctrl=True, shift=True, alt=True, meta=True)
         )
-        assert result == "ctrl+shift+meta+super+z"
+        assert result == "ctrl+shift+alt+meta+z"
 
     def test_should_convert_key_binding_with_meta_modifier(self):
         """Maps to it("should convert key binding with meta modifier")."""
         result = key_binding_to_string(KeyBinding(name="x", action="cut", meta=True))
         assert result == "meta+x"
 
-    def test_should_convert_key_binding_with_super_modifier(self):
-        """Maps to it("should convert key binding with super modifier")."""
-        result = key_binding_to_string(KeyBinding(name="s", action="save", super_key=True))
-        assert result == "super+s"
+    def test_should_convert_key_binding_with_alt_modifier(self):
+        """Maps to it("should convert key binding with alt modifier")."""
+        result = key_binding_to_string(KeyBinding(name="s", action="save", alt=True))
+        assert result == "alt+s"
 
     def test_should_handle_special_keys_correctly(self):
         """Maps to it("should handle special keys correctly")."""

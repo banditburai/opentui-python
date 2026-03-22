@@ -25,8 +25,10 @@ from opentui.palette import (
     MockPaletteStdout,
     TerminalColors,
     TerminalPaletteDetector,
-    _OSC4_RE,
-    _OSC_SPECIAL_RE,
+)
+from opentui.palette.common import (
+    OSC4_RE as _OSC4_RE,
+    OSC_SPECIAL_RE as _OSC_SPECIAL_RE,
     _scale_component,
     _to_hex,
 )

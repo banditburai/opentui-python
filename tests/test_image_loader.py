@@ -46,7 +46,7 @@ class _FakePillowImageModule:
 
 def test_load_raster_without_pillow_raises_clear_error(monkeypatch):
     """Raster loading should explain when Pillow is missing."""
-    from opentui import image_loader
+    from opentui.image import loader as image_loader
 
     monkeypatch.setattr(
         image_loader,
@@ -60,7 +60,7 @@ def test_load_raster_without_pillow_raises_clear_error(monkeypatch):
 
 def test_load_png_path_to_rgba(tmp_path, monkeypatch):
     """Raster file paths should decode to RGBA bytes."""
-    from opentui import image_loader
+    from opentui.image import loader as image_loader
 
     path = tmp_path / "sample.png"
     path.write_bytes(b"fake png bytes")
@@ -79,7 +79,7 @@ def test_load_png_path_to_rgba(tmp_path, monkeypatch):
 
 def test_load_png_bytes_to_rgba(monkeypatch):
     """Raster bytes should decode to RGBA bytes."""
-    from opentui import image_loader
+    from opentui.image import loader as image_loader
 
     png_bytes = b"\x89PNG\r\n\x1a\npayload"
 
@@ -100,7 +100,7 @@ def test_load_png_bytes_to_rgba(monkeypatch):
 
 def test_load_svg_without_backend_raises_clear_error(monkeypatch):
     """SVG rasterization should explain when the backend is missing."""
-    from opentui import image_loader
+    from opentui.image import loader as image_loader
 
     monkeypatch.setattr(
         image_loader,
@@ -114,7 +114,7 @@ def test_load_svg_without_backend_raises_clear_error(monkeypatch):
 
 def test_load_svg_to_rgba_with_backend(monkeypatch):
     """SVG sources should rasterize through the configured backend."""
-    from opentui import image_loader
+    from opentui.image import loader as image_loader
 
     class FakeCairoSVG:
         @staticmethod

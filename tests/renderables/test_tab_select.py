@@ -10,7 +10,7 @@ from opentui.components.tab_select_renderable import (
     TabSelectRenderableEvents,
 )
 from opentui.events import KeyEvent
-from opentui.keymapping import KeyBinding
+from opentui.input.keymapping import KeyBinding
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────

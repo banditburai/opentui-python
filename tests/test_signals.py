@@ -3,6 +3,7 @@
 Upstream: N/A (Python-specific)
 """
 
+from opentui.expr import BinaryOp, Conditional, Expr, MappedExpr, UnaryOp
 from opentui.signals import (
     Batch,
     ReadableSignal,
@@ -11,6 +12,7 @@ from opentui.signals import (
     computed,
     effect,
     untrack,
+    val,
 )
 
 
@@ -28,7 +30,7 @@ class TestSignal:
     def test_create_and_get(self):
         s = Signal(0, name="count")
         assert s() == 0
-        assert s.get() == 0
+        assert s.peek() == 0
 
     def test_set_and_notify(self):
         s = Signal(0, name="count")
@@ -202,6 +204,11 @@ class TestSignal:
         s2 = Signal(0, name="kebab-case")
         assert s2.name == "kebab-case"
 
+    def test_signal_is_expr(self):
+        """Signal extends Expr."""
+        s = Signal(0, name="x")
+        assert isinstance(s, Expr)
+
 
 class TestComputed:
     def setup_method(self):
@@ -237,12 +244,19 @@ class TestComputed:
         assert c() == 20
 
     def test_computed_is_readonly(self):
+        """_ComputedSignal.set/add/toggle raise AttributeError (fail-fast)."""
         a = Signal(1, name="a")
         c = computed(lambda: a() + 1, a)
         assert c() == 2
-        assert not hasattr(c, "set")
-        assert not hasattr(c, "add")
-        assert not hasattr(c, "toggle")
+        import pytest
+
+        with pytest.raises(AttributeError, match="Cannot set"):
+            c.set(99)
+        with pytest.raises(AttributeError, match="Cannot add"):
+            c.add(1)
+        with pytest.raises(AttributeError, match="Cannot toggle"):
+            c.toggle()
+        assert c() == 2  # Value unchanged
 
     def test_dispose(self):
         a = Signal(1, name="a")
@@ -307,6 +321,12 @@ class TestComputed:
         assert c() == 101
         a.set(5)
         assert c() == 105
+
+    def test_computed_is_expr(self):
+        """_ComputedSignal extends Expr."""
+        a = Signal(0, name="a")
+        c = computed(lambda: a(), a)
+        assert isinstance(c, Expr)
 
 
 class TestEffect:
@@ -874,8 +894,8 @@ class TestDiamondDependency:
     def test_deep_diamond(self):
         """Three-level diamond: A -> B,C -> D,E -> F fires once."""
         a = Signal(1, name="a")
-        b = computed(lambda: a() + 1, a)       # depth 1
-        c = computed(lambda: a() + 2, a)       # depth 1
+        b = computed(lambda: a() + 1, a)  # depth 1
+        c = computed(lambda: a() + 2, a)  # depth 1
         d = computed(lambda: b() + c(), b, c)  # depth 2
         e = computed(lambda: b() * c(), b, c)  # depth 2
         f = computed(lambda: d() + e(), d, e)  # depth 3
@@ -919,3 +939,297 @@ class TestDiamondDependency:
         base.set(2)
         assert log_a == [10]
         assert log_b == [10]
+
+
+class TestVal:
+    """Tests for the val() unwrapper function."""
+
+    def setup_method(self):
+        _SignalState.get_instance().reset()
+
+    def test_val_plain_signal(self):
+        s = Signal(42, name="x")
+        assert val(s) == 42
+
+    def test_val_computed_signal(self):
+        s = Signal(1, name="x")
+        c = computed(lambda: s() + 1)
+        assert val(c) == 2
+
+    def test_val_stale_computed(self):
+        """val() recomputes stale computed that has no subscribers."""
+        s = Signal(1, name="x")
+        c = computed(lambda: s() * 10)
+        assert val(c) == 10
+        # Change dep without subscribers — computed becomes stale
+        s.set(2)
+        # val() should trigger recomputation
+        assert val(c) == 20
+
+    def test_val_expr(self):
+        s = Signal(5, name="x")
+        expr = s + 5
+        assert val(expr) == 10
+
+    def test_val_callable(self):
+        assert val(lambda: 99) == 99
+
+    def test_val_plain_value(self):
+        assert val(42) == 42
+        assert val("hello") == "hello"
+        assert val(None) is None
+
+    def test_val_set_none(self):
+        """Signal.set(None) works correctly via Python path."""
+        s = Signal(42, name="x")
+        s.set(None)
+        assert s() is None
+        assert val(s) is None
+
+    def test_val_toggle_with_values(self):
+        """Signal.toggle(*values) cycles through provided values."""
+        s = Signal("a", name="x")
+        s.toggle("a", "b", "c")
+        assert s() == "b"
+        s.toggle("a", "b", "c")
+        assert s() == "c"
+        s.toggle("a", "b", "c")
+        assert s() == "a"
+
+    def test_val_toggle_unknown_current(self):
+        """toggle(*values) with unknown current resets to first."""
+        s = Signal("z", name="x")
+        s.toggle("a", "b", "c")
+        assert s() == "a"
+
+
+class TestExprOperators:
+    """Tests for Expr-based operators on Signal — lazy callable expressions."""
+
+    def setup_method(self):
+        _SignalState.get_instance().reset()
+
+    # --- Type checks: operators return Expr subclasses ---
+
+    def test_comparison_returns_expr(self):
+        s = Signal(5, name="x")
+        for expr in [s == 5, s != 3, s > 0, s >= 5, s < 10, s <= 5]:
+            assert isinstance(expr, BinaryOp), f"{expr!r} should be BinaryOp"
+
+    def test_arithmetic_returns_expr(self):
+        s = Signal(10, name="x")
+        for expr in [s + 1, s - 1, s * 2, s / 2, s // 3, s % 3, s**2]:
+            assert isinstance(expr, BinaryOp), f"{expr!r} should be BinaryOp"
+
+    def test_reverse_operators_return_expr(self):
+        s = Signal(5, name="x")
+        for expr in [1 + s, 10 - s, 2 * s, 20 / s, 20 // s, 7 % s, 2**s]:
+            assert isinstance(expr, BinaryOp), f"{expr!r} should be BinaryOp"
+
+    def test_unary_operators_return_expr(self):
+        s = Signal(5, name="x")
+        for expr in [-s, +s, abs(s)]:
+            assert isinstance(expr, UnaryOp), f"{expr!r} should be UnaryOp"
+
+    def test_invert_returns_expr(self):
+        s = Signal(5, name="x")
+        assert isinstance(~s, UnaryOp)
+
+    # --- Evaluation correctness ---
+
+    def test_comparison_evaluation(self):
+        s = Signal(5, name="x")
+        assert (s == 5)() is True
+        assert (s == 3)() is False
+        assert (s != 3)() is True
+        assert (s > 3)() is True
+        assert (s >= 5)() is True
+        assert (s < 10)() is True
+        assert (s <= 4)() is False
+
+    def test_arithmetic_evaluation(self):
+        s = Signal(10, name="x")
+        assert (s + 5)() == 15
+        assert (s - 3)() == 7
+        assert (s * 2)() == 20
+        assert (s / 4)() == 2.5
+        assert (s // 3)() == 3
+        assert (s % 3)() == 1
+        assert (s**2)() == 100
+
+    def test_reverse_operator_evaluation(self):
+        s = Signal(3, name="x")
+        assert (10 - s)() == 7
+        assert (2 * s)() == 6
+        # String concat requires signal holding a string value
+        t = Signal("world", name="t")
+        assert ("hello " + t)() == "hello world"
+
+    def test_unary_evaluation(self):
+        s = Signal(5, name="x")
+        assert (-s)() == -5
+        assert (+s)() == 5
+        assert abs(Signal(-7, name="y"))() == 7
+        # __invert__ is logical NOT (not bitwise ~) for DSL/JS compatibility
+        assert (~Signal(0, name="z"))() is True
+        assert (~Signal(1, name="w"))() is False
+
+    # --- Laziness: tracks signal changes ---
+
+    def test_expr_updates_when_signal_changes(self):
+        s = Signal(5, name="x")
+        expr = s * 2
+        assert expr() == 10
+        s.set(20)
+        assert expr() == 40
+
+    def test_comparison_updates_when_signal_changes(self):
+        s = Signal(5, name="x")
+        expr = s > 3
+        assert expr() is True
+        s.set(1)
+        assert expr() is False
+
+    def test_chained_operators(self):
+        s = Signal(10, name="x")
+        expr = (s + 1) > 5
+        assert isinstance(expr, BinaryOp)
+        assert expr() is True
+        s.set(2)
+        assert expr() is False  # (2 + 1) > 5 == False
+
+    def test_signal_to_signal_operator(self):
+        a = Signal(10, name="a")
+        b = Signal(3, name="b")
+        expr = a + b
+        assert isinstance(expr, BinaryOp)
+        assert expr() == 13
+        a.set(20)
+        assert expr() == 23
+        b.set(7)
+        assert expr() == 27
+
+    def test_computed_in_operator(self):
+        a = Signal(2, name="a")
+        c = computed(lambda: a() * 3)
+        expr = c > 5
+        assert isinstance(expr, BinaryOp)
+        assert expr() is True  # 6 > 5
+        a.set(1)
+        assert expr() is False  # 3 > 5
+
+    # --- .if_() ---
+
+    def test_if_basic(self):
+        s = Signal(True, name="flag")
+        expr = (s == True).if_("yes", "no")  # noqa: E712
+        assert isinstance(expr, Conditional)
+        assert expr() == "yes"
+        s.set(False)
+        assert expr() == "no"
+
+    def test_if_on_signal(self):
+        s = Signal(5, name="x")
+        expr = s.if_("truthy", "falsy")
+        assert expr() == "truthy"
+        s.set(0)
+        assert expr() == "falsy"
+
+    def test_if_unwraps_signal_values(self):
+        flag = Signal(True, name="flag")
+        a = Signal("green", name="a")
+        b = Signal("red", name="b")
+        expr = flag.if_(a, b)
+        assert expr() == "green"
+        a.set("blue")
+        assert expr() == "blue"
+        flag.set(False)
+        assert expr() == "red"
+
+    def test_if_with_none_default(self):
+        s = Signal(True, name="flag")
+        expr = s.if_("visible")
+        assert expr() == "visible"
+        s.set(False)
+        assert expr() is None
+
+    # --- .map() ---
+
+    def test_map_on_expr(self):
+        s = Signal(5, name="x")
+        expr = (s * 2).map(lambda v: f"val={v}")
+        assert isinstance(expr, MappedExpr)
+        assert expr() == "val=10"
+        s.set(3)
+        assert expr() == "val=6"
+
+    # --- Hashability ---
+
+    def test_expr_not_hashable(self):
+        s = Signal(5, name="x")
+        expr = s > 0
+        import pytest
+
+        with pytest.raises(TypeError):
+            hash(expr)
+
+    def test_signal_still_hashable(self):
+        s = Signal(5, name="x")
+        h = hash(s)
+        assert h == id(s)
+        # Can use in sets/dicts
+        d = {s: "value"}
+        assert d[s] == "value"
+
+    def test_computed_still_hashable(self):
+        s = Signal(5, name="x")
+        c = computed(lambda: s() * 2)
+        h = hash(c)
+        assert h == id(c)
+
+    # --- is_same_as ---
+
+    def test_is_same_as(self):
+        a = Signal(5, name="a")
+        b = Signal(5, name="b")
+        assert a.is_same_as(a) is True
+        assert a.is_same_as(b) is False
+
+    # --- __bool__, __str__, __format__ on Expr ---
+
+    def test_bool_on_expr(self):
+        s = Signal(5, name="x")
+        expr = s > 0
+        assert bool(expr) is True
+        s.set(-1)
+        assert bool(expr) is False
+
+    def test_str_on_expr(self):
+        s = Signal(42, name="x")
+        expr = s + 0
+        assert str(expr) == "42"
+
+    def test_format_on_expr(self):
+        s = Signal(3.14159, name="x")
+        expr = s + 0
+        assert f"{expr:.2f}" == "3.14"
+
+    # --- Expr operators chain with other Expr ---
+
+    def test_expr_to_expr_comparison(self):
+        a = Signal(10, name="a")
+        b = Signal(3, name="b")
+        expr = (a - b) == 7
+        assert isinstance(expr, BinaryOp)
+        assert expr() is True
+        a.set(5)
+        assert expr() is False  # (5 - 3) == 7
+
+    def test_expr_to_expr_arithmetic(self):
+        a = Signal(2, name="a")
+        b = Signal(3, name="b")
+        expr = (a * 10) + (b * 100)
+        assert isinstance(expr, BinaryOp)
+        assert expr() == 320
+        a.set(5)
+        assert expr() == 350

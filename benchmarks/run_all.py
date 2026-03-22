@@ -22,7 +22,13 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 try:
-    from benchmarks.harness import compare_results, load_baseline, print_comparison, registry, save_baseline
+    from benchmarks.harness import (
+        compare_results,
+        load_baseline,
+        print_comparison,
+        registry,
+        save_baseline,
+    )
 except ImportError:
     from harness import compare_results, load_baseline, print_comparison, registry, save_baseline
 
@@ -32,6 +38,7 @@ def _run_reactivity() -> None:
     print("  Reactivity Benchmarks")
     print("=" * 95)
     from benchmarks.bench_reactivity import main as reactivity_main
+
     reactivity_main()
 
 
@@ -40,6 +47,7 @@ def _run_render_matrix() -> None:
     print("  Render Matrix Benchmarks")
     print("=" * 95)
     from benchmarks.bench_render_matrix import _run
+
     asyncio.run(_run())
 
 
@@ -48,6 +56,7 @@ def _run_layout_pipeline() -> None:
     print("  Layout Pipeline Benchmarks")
     print("=" * 95)
     from benchmarks.bench_layout_pipeline import _run
+
     asyncio.run(_run())
 
 
@@ -56,6 +65,7 @@ def _run_yoga_layout_shapes() -> None:
     print("  Yoga Layout Shape Benchmarks")
     print("=" * 95)
     from benchmarks.bench_yoga_layout_shapes import _run
+
     asyncio.run(_run())
 
 
@@ -64,6 +74,7 @@ def _run_text_render() -> None:
     print("  Text Render Benchmarks")
     print("=" * 95)
     from benchmarks.bench_text_render import _run
+
     asyncio.run(_run())
 
 
@@ -79,15 +90,26 @@ _SUITES = [
 def main() -> None:
     parser = argparse.ArgumentParser(description="OpenTUI benchmark runner")
     parser.add_argument(
-        "--save", nargs="?", const="baseline", default=None, metavar="NAME",
+        "--save",
+        nargs="?",
+        const="baseline",
+        default=None,
+        metavar="NAME",
         help="Save results as a baseline (default name: 'baseline')",
     )
     parser.add_argument(
-        "--compare", nargs="?", const="baseline", default=None, metavar="NAME",
+        "--compare",
+        nargs="?",
+        const="baseline",
+        default=None,
+        metavar="NAME",
         help="Compare results against a saved baseline",
     )
     parser.add_argument(
-        "--suite", nargs="*", default=None, metavar="NAME",
+        "--suite",
+        nargs="*",
+        default=None,
+        metavar="NAME",
         help=f"Run only specific suites. Available: {', '.join(n for n, _ in _SUITES)}",
     )
     args = parser.parse_args()
@@ -121,8 +143,7 @@ def main() -> None:
         baseline = load_baseline(args.compare)
         if baseline is None:
             print(
-                f"\nNo baseline found for '{args.compare}'. "
-                f"Run with --save first.",
+                f"\nNo baseline found for '{args.compare}'. Run with --save first.",
                 file=sys.stderr,
             )
             sys.exit(1)

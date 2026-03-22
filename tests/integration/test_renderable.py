@@ -12,6 +12,7 @@ import yoga
 from opentui import layout as yoga_layout
 from opentui.components.base import BaseRenderable, Renderable, is_renderable
 from opentui.renderer import CliRenderer, CliRendererConfig, RootRenderable
+from opentui.renderer.layout import clear_all_dirty
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +178,7 @@ class TestBaseRenderable:
         clean_sibling = _ExplodingCleanNode()
         root = _Node(dirty=True, children=[dirty_branch, clean_sibling])
 
-        CliRenderer._clear_all_dirty(root)
+        clear_all_dirty(root)
 
         assert root._dirty is False
         assert dirty_branch._dirty is False

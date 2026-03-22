@@ -12,10 +12,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-# ---------------------------------------------------------------------------
-# Easing functions
-# ---------------------------------------------------------------------------
-
 
 def _linear(t: float) -> float:
     return t
@@ -147,11 +143,6 @@ EASING_FUNCTIONS: dict[str, Callable[..., float]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Data structures
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class JSAnimation:
     """Animation state passed to onUpdate callbacks."""
@@ -221,11 +212,6 @@ class _TimelineItem:
     start_time: float = 0.0
     timeline: Timeline | None = None
     timeline_started: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Internal evaluation functions
-# ---------------------------------------------------------------------------
 
 
 def _capture_initial_values(item: _AnimationItem) -> None:
@@ -406,11 +392,6 @@ def _evaluate_item(
         _evaluate_animation(item, timeline_time, delta_time)  # type: ignore[arg-type]
     elif item.type == "callback":
         _evaluate_callback(item, timeline_time)  # type: ignore[arg-type]
-
-
-# ---------------------------------------------------------------------------
-# Timeline
-# ---------------------------------------------------------------------------
 
 
 class Timeline:
@@ -602,7 +583,6 @@ class Timeline:
         return self
 
     def _reset_items(self) -> None:
-        """Reset all items for a loop restart."""
         for item in self.items:
             if item.type == "callback":
                 cb: _CallbackItem = item  # type: ignore[assignment]
@@ -665,17 +645,15 @@ class Timeline:
         for item in self.items:
             _evaluate_item(item, self.current_time, delta_time)
 
-        # Remove completed "once" items (iterate backwards)
-        i = len(self.items) - 1
-        while i >= 0:
-            item = self.items[i]
-            if (
+        self.items = [
+            item
+            for item in self.items
+            if not (
                 item.type == "animation"
                 and getattr(item, "once", False)
                 and getattr(item, "completed", False)
-            ):
-                self.items.pop(i)
-            i -= 1
+            )
+        ]
 
         if self.loop and self.current_time >= self.duration:
             overshoot = self.current_time % self.duration
@@ -695,6 +673,23 @@ class Timeline:
             self._notify_state_change()
 
     @property
+    def is_running(self) -> bool:
+        """Whether the timeline is currently playing.
+
+        Alias for ``is_playing``, kept for API compatibility with
+        ``use_timeline()`` consumers.
+        """
+        return self.is_playing
+
+    def stop(self) -> None:
+        """Stop playback (alias for ``pause()``).
+
+        Provided for API compatibility with the simplified Timeline
+        that was previously defined in ``hooks.py``.
+        """
+        self.pause()
+
+    @property
     def progress(self) -> float:
         """Current progress as a 0..1 fraction."""
         if self.duration <= 0:
@@ -702,9 +697,10 @@ class Timeline:
         return min(self.current_time / self.duration, 1.0)
 
 
-# ---------------------------------------------------------------------------
-# TimelineEngine
-# ---------------------------------------------------------------------------
+# Backward-compatible alias — the hooks.py simplified ``Animation`` class
+# was exported publicly.  ``JSAnimation`` is the closest equivalent in the
+# full animation engine.
+Animation = JSAnimation
 
 
 class TimelineEngine:
@@ -716,16 +712,13 @@ class TimelineEngine:
         self.defaults = {"frame_rate": 60}
 
     def register(self, timeline: Timeline) -> None:
-        """Register a timeline with the engine."""
         if timeline not in self._timelines:
             self._timelines.add(timeline)
 
     def unregister(self, timeline: Timeline) -> None:
-        """Unregister a timeline from the engine."""
         self._timelines.discard(timeline)
 
     def clear(self) -> None:
-        """Remove all timelines."""
         self._timelines.clear()
 
     def update(self, delta_time: float) -> None:
@@ -746,7 +739,7 @@ def create_timeline(
     on_complete: Callable[[], None] | None = None,
     on_pause: Callable[[], None] | None = None,
 ) -> Timeline:
-    """Create a new Timeline and register it with the global engine.
+    """Registers the timeline with the global engine.
 
     Args:
         duration: Timeline duration in ms.
@@ -754,9 +747,6 @@ def create_timeline(
         autoplay: Whether to auto-play (default True).
         on_complete: Called when the timeline completes (non-looping only).
         on_pause: Called when the timeline is paused.
-
-    Returns:
-        A new Timeline instance.
     """
     timeline = Timeline(
         duration=duration,

@@ -5,7 +5,8 @@ Tests ported: 4/4 (0 skipped)
 """
 
 from opentui import test_render as _test_render
-from opentui.components.box import Box, ScrollBox, ScrollContent
+from opentui.components.box import Box
+from opentui.components.scrollbox import ScrollBox, ScrollContent
 from opentui.components.control_flow import For
 from opentui.components.text import Text
 from opentui.signals import Signal
@@ -28,8 +29,8 @@ class TestScrollBoxStickyScrollBehavior:
             return ScrollBox(
                 content=ScrollContent(
                     For(
+                        lambda item: Box(Text(item), key=f"line-{item}"),
                         each=items,
-                        render=lambda item: Box(Text(item), key=f"line-{item}"),
                         key_fn=lambda item: f"line-{item}",
                         key="items",
                     )
@@ -81,8 +82,8 @@ class TestScrollBoxStickyScrollBehavior:
             return ScrollBox(
                 content=ScrollContent(
                     For(
+                        lambda item: Box(Text(item), key=f"line-{item}"),
                         each=items,
-                        render=lambda item: Box(Text(item), key=f"line-{item}"),
                         key_fn=lambda item: f"line-{item}",
                         key="items",
                     )
@@ -135,8 +136,8 @@ class TestScrollBoxStickyScrollBehavior:
             return ScrollBox(
                 content=ScrollContent(
                     For(
+                        lambda item: Box(Text(item), key=f"line-{item}"),
                         each=items,
-                        render=lambda item: Box(Text(item), key=f"line-{item}"),
                         key_fn=lambda item: f"line-{item}",
                         key="items",
                     )
@@ -196,8 +197,8 @@ class TestScrollBoxStickyScrollBehavior:
             sb = ScrollBox(
                 content=ScrollContent(
                     For(
+                        lambda item: Box(Text(item), key=f"line-{item}"),
                         each=items,
-                        render=lambda item: Box(Text(item), key=f"line-{item}"),
                         key_fn=lambda item: f"line-{item}",
                         key="items",
                     ),

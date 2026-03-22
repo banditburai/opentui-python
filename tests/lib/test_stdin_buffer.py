@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from opentui.stdin_buffer import StdinBuffer
+from opentui.input.stdin_buffer import StdinBuffer
 
 
 @pytest.fixture

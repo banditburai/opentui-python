@@ -108,6 +108,7 @@ class ScrollBox(Box):
         scroll_y: bool = True,
         sticky_scroll: bool = False,
         sticky_start: str | None = None,
+        sticky_threshold: int = 0,
         scroll_acceleration: Any | None = None,
         scroll_offset_x: int = 0,
         scroll_offset_y: int = 0,
@@ -146,6 +147,7 @@ class ScrollBox(Box):
         self._scroll_y = scroll_y
         self._sticky_scroll = sticky_scroll
         self._sticky_start = sticky_start
+        self._sticky_threshold = sticky_threshold
         self._scroll_acceleration = scroll_acceleration or LinearScrollAccel()
         self._scroll_offset_x = scroll_offset_x
         self._scroll_offset_y = scroll_offset_y
@@ -387,15 +389,16 @@ class ScrollBox(Box):
 
         scroll_x = self._scroll_offset_x if offset_x is None else offset_x
         scroll_y = self._scroll_offset_y if offset_y is None else offset_y
+        th = self._sticky_threshold
 
         if self._sticky_start == "top":
-            return scroll_y <= 0
+            return scroll_y <= th
         if self._sticky_start == "bottom":
-            return scroll_y >= self._max_scroll_y()
+            return scroll_y >= self._max_scroll_y() - th
         if self._sticky_start == "left":
-            return scroll_x <= 0
+            return scroll_x <= th
         if self._sticky_start == "right":
-            return scroll_x >= self._max_scroll_x()
+            return scroll_x >= self._max_scroll_x() - th
         return False
 
     def _update_sticky_state(self) -> None:
@@ -404,6 +407,7 @@ class ScrollBox(Box):
 
         max_scroll_y = self._max_scroll_y()
         max_scroll_x = self._max_scroll_x()
+        th = self._sticky_threshold
 
         if self._scroll_offset_y <= 0:
             self._sticky_scroll_top = True
@@ -413,7 +417,7 @@ class ScrollBox(Box):
                 or (self._sticky_start == "bottom" and max_scroll_y == 0)
             ):
                 self._has_manual_scroll = False
-        elif self._scroll_offset_y >= max_scroll_y:
+        elif self._scroll_offset_y >= max_scroll_y - th:
             self._sticky_scroll_top = False
             self._sticky_scroll_bottom = True
             if not self._is_applying_sticky_scroll and self._sticky_start == "bottom":
@@ -430,7 +434,7 @@ class ScrollBox(Box):
                 or (self._sticky_start == "right" and max_scroll_x == 0)
             ):
                 self._has_manual_scroll = False
-        elif self._scroll_offset_x >= max_scroll_x:
+        elif self._scroll_offset_x >= max_scroll_x - th:
             self._sticky_scroll_left = False
             self._sticky_scroll_right = True
             if not self._is_applying_sticky_scroll and self._sticky_start == "right":

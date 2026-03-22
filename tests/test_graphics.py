@@ -11,7 +11,7 @@ class TestImageRenderer:
 
     def test_image_renderer_accepts_capabilities(self):
         """Test that ImageRenderer accepts TerminalCapabilities."""
-        from opentui.filters import ImageRenderer
+        from opentui.image.encoding import ImageRenderer
         from opentui.renderer import Buffer, TerminalCapabilities
 
         class MockBuffer:
@@ -27,7 +27,7 @@ class TestImageRenderer:
 
     def test_image_renderer_defaults_capabilities(self):
         """Test that ImageRenderer defaults to empty capabilities."""
-        from opentui.filters import ImageRenderer
+        from opentui.image.encoding import ImageRenderer
         from opentui.renderer import Buffer
 
         class MockBuffer:
@@ -42,7 +42,7 @@ class TestImageRenderer:
 
     def test_image_renderer_has_draw_methods(self):
         """Test that ImageRenderer has the draw methods."""
-        from opentui.filters import ImageRenderer
+        from opentui.image.encoding import ImageRenderer
         from opentui.renderer import TerminalCapabilities
 
         class MockBuffer:
@@ -58,7 +58,7 @@ class TestImageRenderer:
 
     def test_image_renderer_checks_capabilities_for_draw(self):
         """Test that draw methods check capabilities."""
-        from opentui.filters import ImageRenderer
+        from opentui.image.encoding import ImageRenderer
         from opentui.renderer import TerminalCapabilities
 
         class MockBuffer:
@@ -76,7 +76,7 @@ class TestImageRenderer:
 
     def test_draw_image_falls_back_to_plain_without_graphics(self):
         """draw_image should use the plain fallback when graphics are unavailable."""
-        from opentui.filters import ImageRenderer
+        from opentui.image.encoding import ImageRenderer
 
         class MockBuffer:
             def __init__(self):
@@ -99,7 +99,7 @@ class TestImageRenderer:
 
     def test_draw_image_plain_writes_ascii_rows(self):
         """Plain fallback should render visible rows to the buffer."""
-        from opentui.filters import ImageRenderer
+        from opentui.image.encoding import ImageRenderer
 
         class MockBuffer:
             def __init__(self):
@@ -143,7 +143,7 @@ class TestImageRenderer:
 
     def test_draw_image_prefers_sixel_for_positioned_graphics(self):
         """SIXEL should be used before non-positioned native packed drawing."""
-        from opentui.filters import ImageRenderer
+        from opentui.image.encoding import ImageRenderer
         from opentui.renderer import TerminalCapabilities
 
         class MockBuffer:
@@ -165,8 +165,8 @@ class TestImageRenderer:
 
     def test_draw_image_uses_kitty_with_png_encoding(self, monkeypatch):
         """Kitty protocol should be used with encoded PNG data when available."""
-        from opentui import filters
-        from opentui.filters import ImageRenderer
+        from opentui.image import encoding as image_encoding
+        from opentui.image.encoding import ImageRenderer
         from opentui.renderer import TerminalCapabilities
 
         class MockBuffer:
@@ -178,7 +178,7 @@ class TestImageRenderer:
         called = {}
 
         monkeypatch.setattr(
-            filters,
+            image_encoding,
             "_encode_png_from_rgba",
             lambda data, width, height: (
                 called.__setitem__("encode", (data, width, height)) or b"png"
@@ -198,21 +198,9 @@ class TestImageRenderer:
 class TestImageConversion:
     """Tests for image data conversion utilities."""
 
-    def test_convert_to_packed_basic(self):
-        """Test basic RGBA to packed conversion."""
-        from opentui.filters import _convert_to_packed
-
-        # Simple 2x2 red image
-        data = bytes([255, 0, 0, 255] * 4)  # 4 pixels, RGBA
-
-        packed, pitch = _convert_to_packed(data, 2, 2)
-
-        assert pitch == 8  # 2 * 4 bytes per pixel
-        assert len(packed) == 16  # 2 * 2 * 4 bytes
-
     def test_convert_to_grayscale_basic(self):
         """Test RGBA to grayscale conversion."""
-        from opentui.filters import _convert_to_grayscale
+        from opentui.image.encoding import _convert_to_grayscale
 
         # Red, Green, Blue, White pixels
         data = bytes(
@@ -246,7 +234,7 @@ class TestClipboardHandler:
 
     def test_clipboard_handler_detects_png(self):
         """Test that ClipboardHandler detects PNG data."""
-        from opentui.filters import ClipboardHandler
+        from opentui.image.encoding import ClipboardHandler
         from opentui.renderer import TerminalCapabilities
 
         handler = ClipboardHandler(TerminalCapabilities())
@@ -259,7 +247,7 @@ class TestClipboardHandler:
 
     def test_clipboard_handler_detects_jpeg(self):
         """Test that ClipboardHandler detects JPEG data."""
-        from opentui.filters import ClipboardHandler
+        from opentui.image.encoding import ClipboardHandler
         from opentui.renderer import TerminalCapabilities
 
         handler = ClipboardHandler(TerminalCapabilities())
@@ -272,7 +260,7 @@ class TestClipboardHandler:
 
     def test_clipboard_handler_rejects_text(self):
         """Test that ClipboardHandler rejects text data."""
-        from opentui.filters import ClipboardHandler
+        from opentui.image.encoding import ClipboardHandler
         from opentui.renderer import TerminalCapabilities
 
         handler = ClipboardHandler(TerminalCapabilities())
@@ -288,7 +276,7 @@ class TestSixelEncoding:
 
     def test_sixel_encode_basic(self):
         """Test basic SIXEL encoding."""
-        from opentui.filters import _encode_sixel
+        from opentui.image.encoding import _encode_sixel
 
         # 10x10 red pixels
         data = bytes([255, 0, 0, 255] * 100)
@@ -300,7 +288,7 @@ class TestSixelEncoding:
 
     def test_sixel_encode_small_image(self):
         """Test SIXEL encoding with small image."""
-        from opentui.filters import _encode_sixel
+        from opentui.image.encoding import _encode_sixel
 
         # 2x2 image
         data = bytes([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255])
@@ -311,7 +299,7 @@ class TestSixelEncoding:
 
     def test_sixel_encode_with_transparency(self):
         """Test SIXEL encoding with transparent pixels."""
-        from opentui.filters import _encode_sixel
+        from opentui.image.encoding import _encode_sixel
 
         # 2x2 with some transparent pixels
         data = bytes(
@@ -344,7 +332,7 @@ class TestKittyEncoding:
 
     def test_kitty_encode_basic(self):
         """Test basic Kitty encoding."""
-        from opentui.filters import _encode_kitty
+        from opentui.image.encoding import _encode_kitty
 
         data = bytes([255, 0, 0, 255] * 100)
         result = _encode_kitty(data, chunk_id=1, width=10, height=10)
@@ -358,7 +346,7 @@ class TestKittyEncoding:
 
     def test_kitty_encode_multiple_chunks(self):
         """Test Kitty encoding with large data splits into chunks."""
-        from opentui.filters import _encode_kitty
+        from opentui.image.encoding import _encode_kitty
 
         # Very large data that will need multiple chunks after compression
         data = bytes([i % 256 for i in range(50000)])
@@ -369,7 +357,7 @@ class TestKittyEncoding:
 
     def test_kitty_encode_with_position(self):
         """Test Kitty encoding with position."""
-        from opentui.filters import _encode_kitty
+        from opentui.image.encoding import _encode_kitty
 
         data = bytes([255, 0, 0, 255] * 100)
         result = _encode_kitty(data, chunk_id=5, width=10, height=10, x=5, y=10)
@@ -384,7 +372,7 @@ class TestKittyEncoding:
         """Direct Kitty payloads should base64-encode the original image bytes."""
         import base64
 
-        from opentui.filters import _encode_kitty
+        from opentui.image.encoding import _encode_kitty
 
         data = b"\x89PNG\r\n\x1a\nfake-png-data"
         result = _encode_kitty(data, chunk_id=7, width=10, height=10)
@@ -395,7 +383,7 @@ class TestKittyEncoding:
 
     def test_clear_kitty_graphics(self):
         """Test Kitty clear graphics escape sequence."""
-        from opentui.filters import _clear_kitty_graphics
+        from opentui.image.encoding import _clear_kitty_graphics
 
         # Clear all
         result = _clear_kitty_graphics(None)
@@ -407,7 +395,7 @@ class TestKittyEncoding:
 
     def test_wrap_kitty_for_tmux(self, monkeypatch):
         """Kitty chunks should be DCS-wrapped for tmux sessions."""
-        from opentui.filters import _wrap_kitty_for_transport
+        from opentui.image.encoding import _wrap_kitty_for_transport
 
         monkeypatch.setenv("TMUX", "/tmp/tmux.sock,123,0")
 

@@ -5,19 +5,29 @@ from typing import TYPE_CHECKING, Any
 
 from .. import hooks
 from .. import structs as s
+from ..colors import MUTED_GRAY
+from ..editor.edit_buffer_native import NativeEditBuffer
+from ..editor.editor_view_native import NativeEditorView
 from ..enums import RenderStrategy
 from ..events import KeyEvent, PasteEvent
-from ..keymapping import (
+from ..input.keymapping import (
     DEFAULT_KEY_ALIASES,
     KeyAliasMap,
     KeyBinding,
     build_key_bindings_map,
-    lookup_action,
+    init_key_bindings,
+    lookup_action_for_event,
     merge_key_aliases,
     merge_key_bindings,
 )
-from ..native import NativeEditBuffer, NativeEditorView
-from .base import Renderable
+from .base import Renderable, _parse_color_static, _Prop
+from .textarea_text_utils import (
+    line_col_to_offset,
+    next_word_boundary,
+    offset_to_line_col,
+    prev_word_boundary,
+    str_display_width,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,29 +56,29 @@ _DEFAULT_TEXTAREA_BINDINGS: list[KeyBinding] = [
     KeyBinding(name="end", action="select-buffer-end", shift=True),
     KeyBinding(name="a", action="select-line-home", ctrl=True, shift=True),
     KeyBinding(name="e", action="select-line-end", ctrl=True, shift=True),
-    KeyBinding(name="a", action="visual-line-home", meta=True),
-    KeyBinding(name="e", action="visual-line-end", meta=True),
-    KeyBinding(name="a", action="select-visual-line-home", meta=True, shift=True),
-    KeyBinding(name="e", action="select-visual-line-end", meta=True, shift=True),
-    KeyBinding(name="f", action="word-forward", meta=True),
-    KeyBinding(name="b", action="word-backward", meta=True),
-    KeyBinding(name="right", action="word-forward", meta=True),
-    KeyBinding(name="left", action="word-backward", meta=True),
+    KeyBinding(name="a", action="visual-line-home", alt=True),
+    KeyBinding(name="e", action="visual-line-end", alt=True),
+    KeyBinding(name="a", action="select-visual-line-home", alt=True, shift=True),
+    KeyBinding(name="e", action="select-visual-line-end", alt=True, shift=True),
+    KeyBinding(name="f", action="word-forward", alt=True),
+    KeyBinding(name="b", action="word-backward", alt=True),
+    KeyBinding(name="right", action="word-forward", alt=True),
+    KeyBinding(name="left", action="word-backward", alt=True),
     KeyBinding(name="right", action="word-forward", ctrl=True),
     KeyBinding(name="left", action="word-backward", ctrl=True),
-    KeyBinding(name="f", action="select-word-forward", meta=True, shift=True),
-    KeyBinding(name="b", action="select-word-backward", meta=True, shift=True),
-    KeyBinding(name="right", action="select-word-forward", meta=True, shift=True),
-    KeyBinding(name="left", action="select-word-backward", meta=True, shift=True),
+    KeyBinding(name="f", action="select-word-forward", alt=True, shift=True),
+    KeyBinding(name="b", action="select-word-backward", alt=True, shift=True),
+    KeyBinding(name="right", action="select-word-forward", alt=True, shift=True),
+    KeyBinding(name="left", action="select-word-backward", alt=True, shift=True),
     KeyBinding(name="backspace", action="backspace"),
     KeyBinding(name="backspace", action="backspace", shift=True),
     KeyBinding(name="delete", action="delete"),
     KeyBinding(name="delete", action="delete", shift=True),
     KeyBinding(name="d", action="delete", ctrl=True),
     KeyBinding(name="w", action="delete-word-backward", ctrl=True),
-    KeyBinding(name="backspace", action="delete-word-backward", meta=True),
-    KeyBinding(name="d", action="delete-word-forward", meta=True),
-    KeyBinding(name="delete", action="delete-word-forward", meta=True),
+    KeyBinding(name="backspace", action="delete-word-backward", alt=True),
+    KeyBinding(name="d", action="delete-word-forward", alt=True),
+    KeyBinding(name="delete", action="delete-word-forward", alt=True),
     KeyBinding(name="delete", action="delete-word-forward", ctrl=True),
     KeyBinding(name="backspace", action="delete-word-backward", ctrl=True),
     KeyBinding(name="k", action="delete-to-line-end", ctrl=True),
@@ -76,13 +86,13 @@ _DEFAULT_TEXTAREA_BINDINGS: list[KeyBinding] = [
     KeyBinding(name="d", action="delete-line", ctrl=True, shift=True),
     KeyBinding(name="return", action="newline"),
     KeyBinding(name="linefeed", action="newline"),
-    KeyBinding(name="a", action="select-all", super_key=True),
+    KeyBinding(name="a", action="select-all", meta=True),
     KeyBinding(name="z", action="undo", ctrl=True),
     KeyBinding(name="-", action="undo", ctrl=True),
     KeyBinding(name=".", action="redo", ctrl=True, shift=True),
-    KeyBinding(name="z", action="undo", meta=True),
-    KeyBinding(name="z", action="redo", meta=True, shift=True),
-    KeyBinding(name="return", action="submit", meta=True),
+    KeyBinding(name="z", action="undo", alt=True),
+    KeyBinding(name="z", action="redo", alt=True, shift=True),
+    KeyBinding(name="return", action="submit", alt=True),
 ]
 
 
@@ -216,9 +226,7 @@ class TextareaRenderable(Renderable):
 
         self._placeholder_str = placeholder
         self._placeholder_color = (
-            self._parse_color(placeholder_color)
-            if placeholder_color
-            else s.RGBA(0.5, 0.5, 0.5, 1.0)
+            self._parse_color(placeholder_color) if placeholder_color else MUTED_GRAY
         )
 
         self._text_color = self._parse_color(text_color)
@@ -253,17 +261,12 @@ class TextareaRenderable(Renderable):
         self._on_content_change = on_content_change
         self._on_cursor_change = on_cursor_change
 
-        self._key_bindings = list(_DEFAULT_TEXTAREA_BINDINGS)
-        self._key_alias_map = dict(DEFAULT_KEY_ALIASES)
-        if key_bindings:
-            self._key_bindings = merge_key_bindings(self._key_bindings, key_bindings)
-        if key_alias_map:
-            self._key_alias_map = merge_key_aliases(self._key_alias_map, key_alias_map)
-        self._key_map = build_key_bindings_map(self._key_bindings, self._key_alias_map)
+        self._key_bindings, self._key_alias_map, self._key_map = init_key_bindings(
+            _DEFAULT_TEXTAREA_BINDINGS, key_bindings, key_alias_map
+        )
 
         self._is_destroyed = False
 
-        # Expose a key handler for the renderer's event forwarding system
         self._key_handler = self.handle_key
 
         self._setup_measure_func()
@@ -279,7 +282,6 @@ class TextareaRenderable(Renderable):
         if tab_indicator_color is not None:
             self.tab_indicator_color = tab_indicator_color
 
-        # Mark as scroll target for renderer scroll event routing
         self._is_scroll_target = True
 
         # Auto-scroll state
@@ -287,7 +289,6 @@ class TextareaRenderable(Renderable):
         self._auto_scroll_accumulator: float = 0.0
         self._scroll_speed: float = 16.0  # lines per second
 
-        # Register mouse event handlers for selection and scrolling
         self._on_mouse_down = self._handle_mouse_down
         self._on_mouse_drag = self._handle_mouse_drag
         self._on_mouse_drag_end = self._handle_mouse_drag_end
@@ -338,59 +339,12 @@ class TextareaRenderable(Renderable):
         self._placeholder_str = v
         self.mark_paint_dirty()
 
-    @property
-    def placeholder_color(self) -> s.RGBA | None:
-        return self._placeholder_color
-
-    @placeholder_color.setter
-    def placeholder_color(self, v: s.RGBA | str | None) -> None:
-        self._placeholder_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def text_color(self) -> s.RGBA | None:
-        return self._text_color
-
-    @text_color.setter
-    def text_color(self, v: s.RGBA | str | None) -> None:
-        self._text_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def background_color(self) -> s.RGBA | None:
-        return self._background_color
-
-    @background_color.setter
-    def background_color(self, v: s.RGBA | str | None) -> None:
-        self._background_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def focused_background_color(self) -> s.RGBA | None:
-        return self._focused_bg_color
-
-    @focused_background_color.setter
-    def focused_background_color(self, v: s.RGBA | str | None) -> None:
-        self._focused_bg_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def focused_text_color(self) -> s.RGBA | None:
-        return self._focused_text_color
-
-    @focused_text_color.setter
-    def focused_text_color(self, v: s.RGBA | str | None) -> None:
-        self._focused_text_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def cursor_color(self) -> s.RGBA | None:
-        return self._cursor_color
-
-    @cursor_color.setter
-    def cursor_color(self, v: s.RGBA | str | None) -> None:
-        self._cursor_color = self._parse_color(v)
-        self.mark_paint_dirty()
+    placeholder_color = _Prop("_placeholder_color", _parse_color_static, paint_only=True)
+    text_color = _Prop("_text_color", _parse_color_static, paint_only=True)
+    background_color = _Prop("_background_color", _parse_color_static, paint_only=True)
+    focused_background_color = _Prop("_focused_bg_color", _parse_color_static, paint_only=True)
+    focused_text_color = _Prop("_focused_text_color", _parse_color_static, paint_only=True)
+    cursor_color = _Prop("_cursor_color", _parse_color_static, paint_only=True)
 
     @property
     def selectable(self) -> bool:
@@ -400,23 +354,8 @@ class TextareaRenderable(Renderable):
     def selectable(self, value: bool) -> None:
         self._selectable = value
 
-    @property
-    def selection_bg(self) -> s.RGBA | None:
-        return self._selection_bg_color
-
-    @selection_bg.setter
-    def selection_bg(self, value: s.RGBA | str | None) -> None:
-        self._selection_bg_color = self._parse_color(value)
-        self.mark_paint_dirty()
-
-    @property
-    def selection_fg(self) -> s.RGBA | None:
-        return self._selection_fg_color
-
-    @selection_fg.setter
-    def selection_fg(self, value: s.RGBA | str | None) -> None:
-        self._selection_fg_color = self._parse_color(value)
-        self.mark_paint_dirty()
+    selection_bg = _Prop("_selection_bg_color", _parse_color_static, paint_only=True)
+    selection_fg = _Prop("_selection_fg_color", _parse_color_static, paint_only=True)
 
     def should_start_selection(self, x: int, y: int) -> bool:
         if not self._selectable:
@@ -545,21 +484,18 @@ class TextareaRenderable(Renderable):
         return _nb.text_buffer.text_buffer_get_line_highlights(text_buf_ptr, line_idx)
 
     def remove_highlights_by_ref(self, hl_ref: int) -> None:
-        """Remove all highlights with the given reference ID."""
         from ..native import _nb
 
         text_buf_ptr = self._edit_buffer.get_text_buffer_ptr()
         _nb.text_buffer.text_buffer_remove_highlights_by_ref(text_buf_ptr, hl_ref)
 
     def clear_line_highlights(self, line_idx: int) -> None:
-        """Clear all highlights for a specific line."""
         from ..native import _nb
 
         text_buf_ptr = self._edit_buffer.get_text_buffer_ptr()
         _nb.text_buffer.text_buffer_clear_line_highlights(text_buf_ptr, line_idx)
 
     def clear_all_highlights(self) -> None:
-        """Clear all highlights across all lines."""
         from ..native import _nb
 
         text_buf_ptr = self._edit_buffer.get_text_buffer_ptr()
@@ -681,7 +617,6 @@ class TextareaRenderable(Renderable):
 
     @property
     def has_selection(self) -> bool:
-        # Check native editor view when cross-renderable selection is active
         if getattr(self, "_cross_renderable_selection_active", False):
             try:
                 if self._editor_view.has_selection():
@@ -696,7 +631,6 @@ class TextareaRenderable(Renderable):
 
     @property
     def selection(self) -> tuple[int, int] | None:
-        # Check native editor view when cross-renderable selection is active
         if getattr(self, "_cross_renderable_selection_active", False):
             try:
                 native_sel = self._editor_view.get_selection()
@@ -729,7 +663,6 @@ class TextareaRenderable(Renderable):
         self.mark_paint_dirty()
 
     def get_selected_text(self) -> str:
-        # Check native editor view when cross-renderable selection is active
         if getattr(self, "_cross_renderable_selection_active", False):
             try:
                 native_text = self._editor_view.get_selected_text()
@@ -820,8 +753,8 @@ class TextareaRenderable(Renderable):
         if sel is None:
             return False
         text = self.plain_text
-        start_pos = self._offset_to_line_col(text, sel[0])
-        end_pos = self._offset_to_line_col(text, sel[1])
+        start_pos = offset_to_line_col(text, sel[0])
+        end_pos = offset_to_line_col(text, sel[1])
         self._edit_buffer.delete_range(start_pos[0], start_pos[1], end_pos[0], end_pos[1])
         self._edit_buffer.set_cursor(start_pos[0], start_pos[1])
         self.clear_selection()
@@ -885,8 +818,8 @@ class TextareaRenderable(Renderable):
             line_end += 1  # include \n
         elif line > 0:
             line_start -= 1
-        start_pos = self._offset_to_line_col(text, line_start)
-        end_pos = self._offset_to_line_col(text, line_end)
+        start_pos = offset_to_line_col(text, line_start)
+        end_pos = offset_to_line_col(text, line_end)
         self._edit_buffer.delete_range(start_pos[0], start_pos[1], end_pos[0], end_pos[1])
         new_text = self._edit_buffer.get_text()
         new_lines = new_text.split("\n")
@@ -902,7 +835,7 @@ class TextareaRenderable(Renderable):
         lines = text.split("\n")
         if line >= len(lines):
             return
-        line_display_width = self._str_display_width(lines[line])
+        line_display_width = str_display_width(lines[line])
         if col >= line_display_width:
             return
         self._edit_buffer.delete_range(line, col, line, line_display_width)
@@ -920,37 +853,37 @@ class TextareaRenderable(Renderable):
 
     def move_word_forward(self, select: bool = False) -> None:
         text = self.plain_text
-        offset = self._line_col_to_offset(text, *self.cursor_position)
-        new_offset = self._next_word_boundary(text, offset)
+        offset = line_col_to_offset(text, *self.cursor_position)
+        new_offset = next_word_boundary(text, offset)
         if select:
             self._extend_selection(offset, new_offset)
         else:
             self.clear_selection()
-        new_pos = self._offset_to_line_col(text, new_offset)
+        new_pos = offset_to_line_col(text, new_offset)
         self._edit_buffer.set_cursor(new_pos[0], new_pos[1])
         self._notify_cursor_changed()
         self.mark_paint_dirty()
 
     def move_word_backward(self, select: bool = False) -> None:
         text = self.plain_text
-        offset = self._line_col_to_offset(text, *self.cursor_position)
-        new_offset = self._prev_word_boundary(text, offset)
+        offset = line_col_to_offset(text, *self.cursor_position)
+        new_offset = prev_word_boundary(text, offset)
         if select:
             self._extend_selection(offset, new_offset)
         else:
             self.clear_selection()
-        new_pos = self._offset_to_line_col(text, new_offset)
+        new_pos = offset_to_line_col(text, new_offset)
         self._edit_buffer.set_cursor(new_pos[0], new_pos[1])
         self._notify_cursor_changed()
         self.mark_paint_dirty()
 
     def delete_word_forward(self) -> None:
         text = self.plain_text
-        offset = self._line_col_to_offset(text, *self.cursor_position)
-        end_offset = self._next_word_boundary(text, offset)
+        offset = line_col_to_offset(text, *self.cursor_position)
+        end_offset = next_word_boundary(text, offset)
         if end_offset == offset:
             return
-        end_pos = self._offset_to_line_col(text, end_offset)
+        end_pos = offset_to_line_col(text, end_offset)
         line, col = self.cursor_position
         self._edit_buffer.delete_range(line, col, end_pos[0], end_pos[1])
         self._notify_content_changed()
@@ -958,11 +891,11 @@ class TextareaRenderable(Renderable):
 
     def delete_word_backward(self) -> None:
         text = self.plain_text
-        offset = self._line_col_to_offset(text, *self.cursor_position)
-        start_offset = self._prev_word_boundary(text, offset)
+        offset = line_col_to_offset(text, *self.cursor_position)
+        start_offset = prev_word_boundary(text, offset)
         if start_offset == offset:
             return
-        start_pos = self._offset_to_line_col(text, start_offset)
+        start_pos = offset_to_line_col(text, start_offset)
         line, col = self.cursor_position
         self._edit_buffer.delete_range(start_pos[0], start_pos[1], line, col)
         self._edit_buffer.set_cursor(start_pos[0], start_pos[1])
@@ -972,7 +905,7 @@ class TextareaRenderable(Renderable):
     def move_cursor_left(self, select: bool = False) -> None:
         if select:
             text = self.plain_text
-            offset = self._line_col_to_offset(text, *self.cursor_position)
+            offset = line_col_to_offset(text, *self.cursor_position)
             new_offset = max(0, offset - 1)
             self._extend_selection(offset, new_offset)
         else:
@@ -984,7 +917,7 @@ class TextareaRenderable(Renderable):
     def move_cursor_right(self, select: bool = False) -> None:
         if select:
             text = self.plain_text
-            offset = self._line_col_to_offset(text, *self.cursor_position)
+            offset = line_col_to_offset(text, *self.cursor_position)
             new_offset = min(len(text), offset + 1)
             self._extend_selection(offset, new_offset)
         else:
@@ -993,43 +926,31 @@ class TextareaRenderable(Renderable):
         self._notify_cursor_changed()
         self.mark_paint_dirty()
 
-    def move_cursor_up(self, select: bool = False) -> None:
+    def _move_cursor_vertical(self, direction: str, select: bool = False) -> None:
+        if direction == "up":
+            visual_fn = self._editor_view.move_up_visual
+            buffer_fn = self._edit_buffer.move_cursor_up
+        else:
+            visual_fn = self._editor_view.move_down_visual
+            buffer_fn = self._edit_buffer.move_cursor_down
+        move = visual_fn if self._wrap_mode != "none" else buffer_fn
         if select:
             text = self.plain_text
-            old_offset = self._line_col_to_offset(text, *self.cursor_position)
-            if self._wrap_mode != "none":
-                self._editor_view.move_up_visual()
-            else:
-                self._edit_buffer.move_cursor_up()
-            new_offset = self._line_col_to_offset(text, *self.cursor_position)
+            old_offset = line_col_to_offset(text, *self.cursor_position)
+            move()
+            new_offset = line_col_to_offset(text, *self.cursor_position)
             self._extend_selection(old_offset, new_offset)
         else:
             self.clear_selection()
-            if self._wrap_mode != "none":
-                self._editor_view.move_up_visual()
-            else:
-                self._edit_buffer.move_cursor_up()
+            move()
         self._notify_cursor_changed()
         self.mark_paint_dirty()
 
+    def move_cursor_up(self, select: bool = False) -> None:
+        self._move_cursor_vertical("up", select)
+
     def move_cursor_down(self, select: bool = False) -> None:
-        if select:
-            text = self.plain_text
-            old_offset = self._line_col_to_offset(text, *self.cursor_position)
-            if self._wrap_mode != "none":
-                self._editor_view.move_down_visual()
-            else:
-                self._edit_buffer.move_cursor_down()
-            new_offset = self._line_col_to_offset(text, *self.cursor_position)
-            self._extend_selection(old_offset, new_offset)
-        else:
-            self.clear_selection()
-            if self._wrap_mode != "none":
-                self._editor_view.move_down_visual()
-            else:
-                self._edit_buffer.move_cursor_down()
-        self._notify_cursor_changed()
-        self.mark_paint_dirty()
+        self._move_cursor_vertical("down", select)
 
     def goto_line_home(self, select: bool = False) -> None:
         """Move cursor to start of current line.
@@ -1042,20 +963,19 @@ class TextareaRenderable(Renderable):
         lines = text.split("\n")
 
         if col == 0 and line > 0:
-            # Wrap to end of previous line
             target_line = line - 1
-            target_col = self._str_display_width(lines[target_line])
+            target_col = str_display_width(lines[target_line])
             if select:
-                old_offset = self._line_col_to_offset(text, line, col)
-                new_offset = self._line_col_to_offset(text, target_line, target_col)
+                old_offset = line_col_to_offset(text, line, col)
+                new_offset = line_col_to_offset(text, target_line, target_col)
                 self._extend_selection(old_offset, new_offset)
             else:
                 self.clear_selection()
             self._edit_buffer.set_cursor(target_line, target_col)
         else:
             if select:
-                old_offset = self._line_col_to_offset(text, line, col)
-                new_offset = self._line_col_to_offset(text, line, 0)
+                old_offset = line_col_to_offset(text, line, col)
+                new_offset = line_col_to_offset(text, line, 0)
                 self._extend_selection(old_offset, new_offset)
             else:
                 self.clear_selection()
@@ -1074,23 +994,22 @@ class TextareaRenderable(Renderable):
         lines = text.split("\n")
         if line >= len(lines):
             return
-        line_display_width = self._str_display_width(lines[line])
+        line_display_width = str_display_width(lines[line])
 
         if col >= line_display_width and line < len(lines) - 1:
-            # Wrap to start of next line
             target_line = line + 1
             target_col = 0
             if select:
-                old_offset = self._line_col_to_offset(text, line, col)
-                new_offset = self._line_col_to_offset(text, target_line, target_col)
+                old_offset = line_col_to_offset(text, line, col)
+                new_offset = line_col_to_offset(text, target_line, target_col)
                 self._extend_selection(old_offset, new_offset)
             else:
                 self.clear_selection()
             self._edit_buffer.set_cursor(target_line, target_col)
         else:
             if select:
-                old_offset = self._line_col_to_offset(text, line, col)
-                new_offset = self._line_col_to_offset(text, line, line_display_width)
+                old_offset = line_col_to_offset(text, line, col)
+                new_offset = line_col_to_offset(text, line, line_display_width)
                 self._extend_selection(old_offset, new_offset)
             else:
                 self.clear_selection()
@@ -1106,15 +1025,14 @@ class TextareaRenderable(Renderable):
         (without wrap-around behavior).
         """
         text = self.plain_text
-        old_offset = self._line_col_to_offset(text, *self.cursor_position)
+        old_offset = line_col_to_offset(text, *self.cursor_position)
 
-        # Use EditorView's getVisualSOL to find visual line start
         sol = self._editor_view.get_visual_sol()
         target_line = sol.logical_row
         target_col = sol.logical_col
 
         if select:
-            new_offset = self._line_col_to_offset(text, target_line, target_col)
+            new_offset = line_col_to_offset(text, target_line, target_col)
             self._extend_selection(old_offset, new_offset)
         else:
             self.clear_selection()
@@ -1131,15 +1049,14 @@ class TextareaRenderable(Renderable):
         (without wrap-around behavior).
         """
         text = self.plain_text
-        old_offset = self._line_col_to_offset(text, *self.cursor_position)
+        old_offset = line_col_to_offset(text, *self.cursor_position)
 
-        # Use EditorView's getVisualEOL to find visual line end
         eol = self._editor_view.get_visual_eol()
         target_line = eol.logical_row
         target_col = eol.logical_col
 
         if select:
-            new_offset = self._line_col_to_offset(text, target_line, target_col)
+            new_offset = line_col_to_offset(text, target_line, target_col)
             self._extend_selection(old_offset, new_offset)
         else:
             self.clear_selection()
@@ -1151,7 +1068,7 @@ class TextareaRenderable(Renderable):
     def goto_buffer_home(self, select: bool = False) -> None:
         if select:
             text = self.plain_text
-            old_offset = self._line_col_to_offset(text, *self.cursor_position)
+            old_offset = line_col_to_offset(text, *self.cursor_position)
             self._extend_selection(old_offset, 0)
         else:
             self.clear_selection()
@@ -1163,9 +1080,9 @@ class TextareaRenderable(Renderable):
         text = self.plain_text
         lines = text.split("\n")
         last_line = max(0, len(lines) - 1)
-        last_col = self._str_display_width(lines[last_line]) if lines else 0
+        last_col = str_display_width(lines[last_line]) if lines else 0
         if select:
-            old_offset = self._line_col_to_offset(text, *self.cursor_position)
+            old_offset = line_col_to_offset(text, *self.cursor_position)
             self._extend_selection(old_offset, len(text))
         else:
             self.clear_selection()
@@ -1213,7 +1130,9 @@ class TextareaRenderable(Renderable):
             self._on_paste_handler(event)
         if event.default_prevented:
             return
-        text = event.text if hasattr(event, "text") else str(event)
+        text = getattr(event, "text", None)
+        if text is None:
+            text = str(event)
         if text:
             self.insert_text(text)
 
@@ -1248,7 +1167,6 @@ class TextareaRenderable(Renderable):
         if not self._focused:
             return False
 
-        # Call onKeyDown handler first (can preventDefault)
         if self._on_key_down_handler:
             self._on_key_down_handler(event)
             if event.default_prevented:
@@ -1275,15 +1193,7 @@ class TextareaRenderable(Renderable):
         return False
 
     def _lookup_action(self, event: KeyEvent) -> str | None:
-        return lookup_action(
-            event.key,
-            event.ctrl,
-            event.shift,
-            event.alt,
-            event.meta,
-            self._key_map,
-            self._key_alias_map,
-        )
+        return lookup_action_for_event(event, self._key_map, self._key_alias_map)
 
     def _dispatch_action(self, action: str) -> bool:
         handler = self._ACTION_TABLE.get(action)
@@ -1348,7 +1258,7 @@ class TextareaRenderable(Renderable):
         buf_line = max(0, min(buf_line, max_line))
 
         if buf_line < len(lines):
-            line_width = self._str_display_width(lines[buf_line])
+            line_width = str_display_width(lines[buf_line])
             buf_col = max(0, min(buf_col, line_width))
         else:
             buf_col = 0
@@ -1406,7 +1316,7 @@ class TextareaRenderable(Renderable):
 
         focus_line = max(0, min(focus_line, max_line))
         if focus_line < len(lines):
-            line_width = self._str_display_width(lines[focus_line])
+            line_width = str_display_width(lines[focus_line])
             focus_col = max(0, min(focus_col, line_width))
         else:
             focus_col = 0
@@ -1415,7 +1325,7 @@ class TextareaRenderable(Renderable):
         anchor_col = self._drag_anchor_col
         anchor_line = max(0, min(anchor_line, max_line))
         if anchor_line < len(lines):
-            anchor_col = max(0, min(anchor_col, self._str_display_width(lines[anchor_line])))
+            anchor_col = max(0, min(anchor_col, str_display_width(lines[anchor_line])))
         else:
             anchor_col = 0
 
@@ -1440,8 +1350,8 @@ class TextareaRenderable(Renderable):
                 self._selection_start = None
                 self._selection_end = None
         except Exception:
-            anchor_offset = self._line_col_to_offset(text, anchor_line, anchor_col)
-            focus_offset = self._line_col_to_offset(text, focus_line, focus_col)
+            anchor_offset = line_col_to_offset(text, anchor_line, anchor_col)
+            focus_offset = line_col_to_offset(text, focus_line, focus_col)
             self._selection_start = min(anchor_offset, focus_offset)
             self._selection_end = max(anchor_offset, focus_offset)
 
@@ -1514,7 +1424,6 @@ class TextareaRenderable(Renderable):
                 self.mark_paint_dirty()
 
         elif direction in ("left", "right"):
-            # Horizontal scroll (only when wrapping is disabled)
             if self._wrap_mode != "none":
                 return
 
@@ -1589,7 +1498,7 @@ class TextareaRenderable(Renderable):
 
         focus_line = max(0, min(focus_line, max_line))
         if focus_line < len(lines):
-            line_width = self._str_display_width(lines[focus_line])
+            line_width = str_display_width(lines[focus_line])
             focus_col = max(0, min(focus_col, line_width))
         else:
             focus_col = 0
@@ -1597,8 +1506,8 @@ class TextareaRenderable(Renderable):
         anchor_line = self._drag_anchor_line
         anchor_col = self._drag_anchor_col
 
-        anchor_offset = self._line_col_to_offset(text, anchor_line, anchor_col)
-        focus_offset = self._line_col_to_offset(text, focus_line, focus_col)
+        anchor_offset = line_col_to_offset(text, anchor_line, anchor_col)
+        focus_offset = line_col_to_offset(text, focus_line, focus_col)
         self._selection_start = min(anchor_offset, focus_offset)
         self._selection_end = max(anchor_offset, focus_offset)
 
@@ -1613,170 +1522,8 @@ class TextareaRenderable(Renderable):
 
     def _extend_selection(self, old_offset: int, new_offset: int) -> None:
         if self._selection_start is None:
-            # Start new selection from old position
             self._selection_start = old_offset
         self._selection_end = new_offset
-
-    @staticmethod
-    def _str_display_width(s: str) -> int:
-        return sum(TextareaRenderable._char_display_width(ch) for ch in s)
-
-    @staticmethod
-    def _char_display_width(ch: str) -> int:
-        cp = ord(ch)
-        # CJK Unified Ideographs
-        if 0x4E00 <= cp <= 0x9FFF:
-            return 2
-        # CJK Extension A
-        if 0x3400 <= cp <= 0x4DBF:
-            return 2
-        # CJK Extension B-I (supplementary)
-        if 0x20000 <= cp <= 0x3134F:
-            return 2
-        # CJK Compatibility Ideographs
-        if 0xF900 <= cp <= 0xFAFF:
-            return 2
-        # Hangul Syllables
-        if 0xAC00 <= cp <= 0xD7AF:
-            return 2
-        # CJK Punctuation (Ideographic full stop, etc.)
-        if 0x3000 <= cp <= 0x303F:
-            return 2
-        # Fullwidth forms
-        if 0xFF01 <= cp <= 0xFF60:
-            return 2
-        if 0xFFE0 <= cp <= 0xFFE6:
-            return 2
-        # Hiragana
-        if 0x3040 <= cp <= 0x309F:
-            return 2
-        # Katakana
-        if 0x30A0 <= cp <= 0x30FF:
-            return 2
-        return 1
-
-    @staticmethod
-    def _offset_to_line_col(text: str, offset: int) -> tuple[int, int]:
-        """Convert a character offset to (line, display_col).
-
-        Returns display-width columns (CJK chars count as 2).
-        """
-        offset = max(0, min(offset, len(text)))
-        line = 0
-        col = 0
-        for i in range(offset):
-            if text[i] == "\n":
-                line += 1
-                col = 0
-            else:
-                col += TextareaRenderable._char_display_width(text[i])
-        return (line, col)
-
-    @staticmethod
-    def _line_col_to_offset(text: str, line: int, col: int) -> int:
-        """Convert (line, display_col) to a character offset.
-
-        Accepts display-width columns (CJK chars count as 2).
-        """
-        offset = 0
-        current_line = 0
-        for ch in text:
-            if current_line == line:
-                break
-            if ch == "\n":
-                current_line += 1
-            offset += 1
-        # Now offset is at the start of the target line.
-        # Walk display columns to find the character offset.
-        display_col = 0
-        while offset < len(text) and text[offset] != "\n" and display_col < col:
-            display_col += TextareaRenderable._char_display_width(text[offset])
-            offset += 1
-        return offset
-
-    @staticmethod
-    def _char_class(ch: str) -> int:
-        """Classify a character for word boundary detection.
-
-        Returns 0 for whitespace, 1 for CJK/ideograph, 2 for other (ASCII, etc).
-        """
-        if ch in (" ", "\n", "\t"):
-            return 0
-        cp = ord(ch)
-        # CJK Unified Ideographs
-        if 0x4E00 <= cp <= 0x9FFF:
-            return 1
-        # CJK Extension A
-        if 0x3400 <= cp <= 0x4DBF:
-            return 1
-        # CJK Extension B-I (supplementary)
-        if 0x20000 <= cp <= 0x3134F:
-            return 1
-        # CJK Compatibility Ideographs
-        if 0xF900 <= cp <= 0xFAFF:
-            return 1
-        # Hangul Syllables
-        if 0xAC00 <= cp <= 0xD7AF:
-            return 1
-        # CJK Punctuation (Ideographic full stop, etc.)
-        if 0x3000 <= cp <= 0x303F:
-            return 1
-        # Fullwidth forms
-        if 0xFF00 <= cp <= 0xFFEF:
-            return 1
-        # Hiragana
-        if 0x3040 <= cp <= 0x309F:
-            return 1
-        # Katakana
-        if 0x30A0 <= cp <= 0x30FF:
-            return 1
-        return 2
-
-    @staticmethod
-    def _next_word_boundary(text: str, offset: int) -> int:
-        length = len(text)
-        if offset >= length:
-            return length
-        pos = offset
-        cls = TextareaRenderable._char_class
-        start_class = cls(text[pos])
-        if start_class == 0:
-            # In whitespace: skip whitespace, then the following word group,
-            # then trailing whitespace
-            while pos < length and cls(text[pos]) == 0:
-                pos += 1
-            if pos < length:
-                word_class = cls(text[pos])
-                while pos < length and cls(text[pos]) == word_class:
-                    pos += 1
-                while pos < length and cls(text[pos]) == 0:
-                    pos += 1
-            return pos
-        else:
-            # Skip same-class chars (CJK group or ASCII group)
-            while pos < length and cls(text[pos]) == start_class:
-                pos += 1
-            # Skip trailing whitespace
-            while pos < length and cls(text[pos]) == 0:
-                pos += 1
-            return pos
-
-    @staticmethod
-    def _prev_word_boundary(text: str, offset: int) -> int:
-        if offset <= 0:
-            return 0
-        pos = offset
-        cls = TextareaRenderable._char_class
-        # Skip whitespace
-        while pos > 0 and cls(text[pos - 1]) == 0:
-            pos -= 1
-        if pos <= 0:
-            return 0
-        prev_class = cls(text[pos - 1])
-        # Skip same-class chars (CJK group or ASCII group)
-        while pos > 0 and cls(text[pos - 1]) == prev_class:
-            pos -= 1
-        return pos
 
     def _notify_content_changed(self) -> None:
         if self._yoga_node is not None:
@@ -1807,7 +1554,7 @@ class TextareaRenderable(Renderable):
 
             lines = text.split("\n")
             line_count = len(lines)
-            max_line_width = max((self._str_display_width(line) for line in lines), default=1)
+            max_line_width = max((str_display_width(line) for line in lines), default=1)
 
             if self._wrap_mode == "none":
                 measured_w = max(1, max_line_width)
@@ -1865,8 +1612,8 @@ class TextareaRenderable(Renderable):
         end_col: int,
     ) -> str:
         text = self.plain_text
-        s_off = self._line_col_to_offset(text, start_line, start_col)
-        e_off = self._line_col_to_offset(text, end_line, end_col)
+        s_off = line_col_to_offset(text, start_line, start_col)
+        e_off = line_col_to_offset(text, end_line, end_col)
         text_len = len(text)
         s_off = max(0, min(s_off, text_len))
         e_off = max(0, min(e_off, text_len))
@@ -1878,13 +1625,13 @@ class TextareaRenderable(Renderable):
     def cursor_offset(self) -> int:
         text = self.plain_text
         line, col = self.cursor_position
-        return self._line_col_to_offset(text, line, col)
+        return line_col_to_offset(text, line, col)
 
     @cursor_offset.setter
     def cursor_offset(self, offset: int) -> None:
         text = self.plain_text
         offset = max(0, min(offset, len(text)))
-        pos = self._offset_to_line_col(text, offset)
+        pos = offset_to_line_col(text, offset)
         self._edit_buffer.set_cursor(pos[0], pos[1])
         self._notify_cursor_changed()
         self.mark_paint_dirty()
@@ -1952,7 +1699,6 @@ class TextareaRenderable(Renderable):
         # Save and restore viewport state because draw_editor_view may
         # trigger internal follow-cursor logic that adjusts the viewport.
         try:
-            # Sync selection state + colors to the native EditorView before drawing
             sel = self.selection
             if sel is not None:
                 self._editor_view.set_selection(

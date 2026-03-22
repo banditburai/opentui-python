@@ -2,7 +2,33 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
+
+
+class _EventPropagationMixin:
+    """Shared event propagation behavior for KeyEvent, MouseEvent, PasteEvent."""
+
+    def stop_propagation(self) -> None:
+        """Stop event from propagating to parent handlers."""
+        self._propagation_stopped = True
+
+    stop = stop_propagation
+
+    def prevent_default(self) -> None:
+        """Prevent default action for this event."""
+        self._default_prevented = True
+
+    prevent = prevent_default
+
+    @property
+    def propagation_stopped(self) -> bool:
+        return self._propagation_stopped
+
+    @property
+    def default_prevented(self) -> bool:
+        return self._default_prevented
 
 
 class MouseButton:
@@ -30,7 +56,7 @@ class AttachmentPayload:
 
 
 @dataclass
-class KeyEvent:
+class KeyEvent(_EventPropagationMixin):
     """Keyboard event.
 
     Attributes:
@@ -71,22 +97,6 @@ class KeyEvent:
     _propagation_stopped: bool = field(default=False, repr=False)
     _default_prevented: bool = field(default=False, repr=False)
 
-    def stop_propagation(self) -> None:
-        """Stop event from propagating to parent handlers."""
-        self._propagation_stopped = True
-
-    def prevent_default(self) -> None:
-        """Prevent default action for this event."""
-        self._default_prevented = True
-
-    @property
-    def propagation_stopped(self) -> bool:
-        return self._propagation_stopped
-
-    @property
-    def default_prevented(self) -> bool:
-        return self._default_prevented
-
     @property
     def name(self) -> str:
         """Alias for key."""
@@ -109,7 +119,7 @@ class KeyEvent:
 
 
 @dataclass
-class MouseEvent:
+class MouseEvent(_EventPropagationMixin):
     """Mouse event.
 
     Attributes:
@@ -141,22 +151,6 @@ class MouseEvent:
     _propagation_stopped: bool = field(default=False, repr=False)
     _default_prevented: bool = field(default=False, repr=False)
 
-    def stop_propagation(self) -> None:
-        """Stop event from propagating to parent handlers."""
-        self._propagation_stopped = True
-
-    def prevent_default(self) -> None:
-        """Prevent default action for this event."""
-        self._default_prevented = True
-
-    @property
-    def propagation_stopped(self) -> bool:
-        return self._propagation_stopped
-
-    @property
-    def default_prevented(self) -> bool:
-        return self._default_prevented
-
     @property
     def name(self) -> str:
         """Alias for type."""
@@ -167,7 +161,7 @@ class MouseEvent:
 
 
 @dataclass
-class PasteEvent:
+class PasteEvent(_EventPropagationMixin):
     """Paste event.
 
     Attributes:
@@ -179,22 +173,6 @@ class PasteEvent:
     attachments: list[AttachmentPayload] = field(default_factory=list)
     _propagation_stopped: bool = field(default=False, repr=False)
     _default_prevented: bool = field(default=False, repr=False)
-
-    def stop_propagation(self) -> None:
-        """Stop event from propagating to parent handlers."""
-        self._propagation_stopped = True
-
-    def prevent_default(self) -> None:
-        """Prevent default action for this event."""
-        self._default_prevented = True
-
-    @property
-    def propagation_stopped(self) -> bool:
-        return self._propagation_stopped
-
-    @property
-    def default_prevented(self) -> bool:
-        return self._default_prevented
 
     def __str__(self) -> str:
         text = self.text or ""
@@ -270,6 +248,102 @@ class Keys:
     CLEAR = "clear"
 
 
+def handler(
+    callback: Callable[..., Any],
+    *args: Any,
+    stop: bool = False,
+    prevent: bool = False,
+    pass_event: bool = False,
+) -> Callable[[Any], None]:
+    """Create event handler with eagerly captured args.
+
+    Solves stale closures in loops and stop_propagation boilerplate.
+
+    Args:
+        callback: The function to call when the event fires.
+        *args: Arguments captured eagerly (not lazily) for the callback.
+        stop: If True, calls ``event.stop_propagation()`` before the callback.
+        prevent: If True, calls ``event.prevent_default()`` before the callback.
+        pass_event: If True, the event object is passed as the first argument
+            to ``callback`` (before ``*args``).
+
+    Examples::
+
+        handler(do_save)
+        handler(select_item, item_id, stop=True)
+        handler(handle_click, item_id, stop=True, pass_event=True)
+    """
+    # Pre-select the right body at creation time to avoid per-dispatch branching.
+    if stop and prevent:
+        if pass_event:
+
+            def _handler(event: Any) -> None:
+                event.stop_propagation()
+                event.prevent_default()
+                callback(event, *args)
+        else:
+
+            def _handler(event: Any) -> None:
+                event.stop_propagation()
+                event.prevent_default()
+                callback(*args)
+    elif stop:
+        if pass_event:
+
+            def _handler(event: Any) -> None:
+                event.stop_propagation()
+                callback(event, *args)
+        else:
+
+            def _handler(event: Any) -> None:
+                event.stop_propagation()
+                callback(*args)
+    elif prevent:
+        if pass_event:
+
+            def _handler(event: Any) -> None:
+                event.prevent_default()
+                callback(event, *args)
+        else:
+
+            def _handler(event: Any) -> None:
+                event.prevent_default()
+                callback(*args)
+    elif pass_event:
+
+        def _handler(event: Any) -> None:
+            callback(event, *args)
+    else:
+
+        def _handler(event: Any) -> None:
+            callback(*args)
+
+    return _handler
+
+
+def click_handler(
+    callback: Callable[..., Any],
+    *args: Any,
+) -> Callable[[Any], None]:
+    """Shorthand for left-click handlers with auto stop_propagation.
+
+    Only fires on left button (button==0). Automatically stops propagation.
+    The event object is NOT passed to callback.
+
+    Examples::
+
+        Box(on_mouse_down=click_handler(select_item, item.id))
+    """
+
+    def _handler(event: Any) -> None:
+        if getattr(event, "button", -1) != 0:
+            return
+        event.stop_propagation()
+        callback(*args)
+
+    return _handler
+
+
 __all__ = [
     "AttachmentPayload",
     "KeyEvent",
@@ -279,4 +353,6 @@ __all__ = [
     "ResizeEvent",
     "Keys",
     "MouseButton",
+    "click_handler",
+    "handler",
 ]

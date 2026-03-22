@@ -96,6 +96,7 @@ class TestErrorBoundaryFallback:
 
     def test_error_triggers_fallback(self):
         """Exception in render function switches to fallback children."""
+
         def bad_render():
             raise ValueError("render failed")
 
@@ -154,6 +155,7 @@ class TestErrorBoundaryFallback:
 
     def test_fallback_multiple_children(self):
         """Fallback function can return a list of children."""
+
         def bad_render():
             raise ValueError("fail")
 
@@ -171,6 +173,7 @@ class TestErrorBoundaryFallback:
     def test_different_exception_types(self):
         """ErrorBoundary catches various exception types."""
         for exc_class in (ValueError, RuntimeError, TypeError, KeyError, IndexError):
+
             def bad_render(exc=exc_class):
                 raise exc("test error")
 
@@ -415,6 +418,7 @@ class TestErrorBoundaryNested:
             fallback=lambda err, reset: Text("inner fallback", key="inner-fb"),
             key="inner-eb",
         )
+
         # The generator trick above is tricky; use a simpler approach
         def inner_bad():
             raise ValueError("inner fail")
@@ -443,6 +447,7 @@ class TestErrorBoundaryNested:
 
     def test_outer_catches_when_inner_not_wrapped(self):
         """If there is no inner boundary, error propagates to outer."""
+
         def outer_render():
             raise RuntimeError("uncaught inner")
 
@@ -565,6 +570,7 @@ class TestErrorBoundaryEdgeCases:
 
     def test_fallback_returns_single_renderable(self):
         """Fallback returning a single Renderable (not a list) works."""
+
         def bad():
             raise ValueError("fail")
 
@@ -577,6 +583,7 @@ class TestErrorBoundaryEdgeCases:
 
     def test_error_message_preserved_in_fallback(self):
         """The error message is preserved and accessible in fallback."""
+
         def bad():
             raise ValueError("detailed error message")
 
@@ -611,9 +618,11 @@ class TestErrorBoundaryEdgeCases:
 
     def test_render_error_with_traceback_info(self):
         """ErrorBoundary preserves the full exception object with traceback context."""
+
         def deep_error():
             def inner():
                 raise RuntimeError("deep")
+
             inner()
 
         eb = ErrorBoundary(

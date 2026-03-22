@@ -4,10 +4,10 @@ import pytest
 
 from opentui.components.base import BaseRenderable, Renderable
 from opentui.components.box import Box
-from opentui.components.control_flow import Dynamic, MemoBlock, Portal, Template, reactive, template, template_component
+from opentui.components.control_flow import Dynamic, MemoBlock, Portal, component
 from opentui.components.text import Text
 from opentui import test_render as _test_render
-from opentui.components.control_flow import MountedTemplate
+from opentui.components.control_flow import Mount
 from opentui.reconciler import reconcile
 from opentui.signals import Batch, Signal, _ComputedSignal, _tracking_context, computed
 from opentui.structs import RGBA
@@ -594,7 +594,6 @@ class TestRunOnce:
         assert text._content == "Count: 42"
 
 
-
 class TestDynamic:
     """Mounted dynamic region updates without forcing parent rebuilds."""
 
@@ -794,9 +793,7 @@ class TestDynamic:
         count = Signal(0, name="count")
         box = Box(
             lambda: (
-                f"Count: {count()}"
-                if mode() == "text"
-                else Text(f"Node: {count()}", key="node")
+                f"Count: {count()}" if mode() == "text" else Text(f"Node: {count()}", key="node")
             )
         )
         region = box._children[0]
@@ -912,7 +909,7 @@ class TestMemoBlock:
         assert memo._children[0] is branch_a
 
 
-class TestMountedTemplate:
+class TestMount:
     """Stable mounted subtree with imperative reactive updates."""
 
     def test_mounted_template_updates_boxed_subtree_in_place(self):
@@ -934,7 +931,7 @@ class TestMountedTemplate:
             mounted._border = bool(count() % 2)
             mounted.mark_dirty()
 
-        template = MountedTemplate(build=build, update=update)
+        template = Mount(build, update=update)
         panel = template._children[0]
         count_text = panel._children[0]
         double_text = panel._children[1]
@@ -964,7 +961,7 @@ class TestMountedTemplate:
             mounted._children[0].content = f"{mode()}:{count()}"
             mounted.mark_dirty()
 
-        template = MountedTemplate(build=build, update=update, invalidate_when=lambda: mode())
+        template = Mount(build, update=update, invalidate_when=lambda: mode())
         panel_a = template._children[0]
 
         count.set(1)
@@ -987,15 +984,15 @@ class TestMountedTemplate:
             )
 
         def update(mounted, refs):
-            panel = refs.require("panel")
-            count_text = refs.require("count_text")
-            double_text = refs.require("double_text")
+            panel = refs["panel"]
+            count_text = refs["count_text"]
+            double_text = refs["double_text"]
             assert mounted is panel
             count_text.content = f"Count: {count()}"
             double_text.content = f"Double: {count() * 2}"
             panel.mark_dirty()
 
-        template = MountedTemplate(build=build, update=update)
+        template = Mount(build, update=update)
         panel = template._children[0]
         count_text = panel.find_descendant_by_id("count_text")
         double_text = panel.find_descendant_by_id("double_text")
@@ -1024,15 +1021,19 @@ class TestMountedTemplate:
             )
 
         def update(mounted, refs):
-            portal_text = refs.require("portal-text")
+            portal_text = refs["portal-text"]
             assert isinstance(mounted, Portal)
             portal_text.content = f"Count: {count()}"
 
-        mounted = MountedTemplate(build=build, update=update)
+        mounted = Mount(build, update=update)
         root.add(mounted)
         mounted._configure_yoga_properties()
 
-        container = next(child for child in root._children if getattr(child, "key", None) == "portal-container-portal")
+        container = next(
+            child
+            for child in root._children
+            if getattr(child, "key", None) == "portal-container-portal"
+        )
         portal_text = container._children[0]
         assert portal_text._content == "Count: 0"
 
@@ -1043,26 +1044,21 @@ class TestMountedTemplate:
 
 
 class TestTemplate:
-    """Higher-level declarative API over MountedTemplate."""
+    """Mount with inline reactive props (replaces old Template declarative bindings)."""
 
-    def test_template_bindings_update_boxed_subtree_in_place(self):
+    def test_mount_updates_boxed_subtree_in_place(self):
         count = Signal(0, name="count")
-        template = Template(
-            build=lambda: Box(
-                Text("", id="count_text"),
-                Text("", id="double_text"),
+        mt = Mount(
+            lambda: Box(
+                Text(lambda: f"Count: {count()}", id="count_text"),
+                Text(lambda: f"Double: {count() * 2}", id="double_text"),
                 id="panel",
                 padding=1,
-                border=False,
-            ),
-            bindings={
-                "count_text.content": lambda: f"Count: {count()}",
-                "double_text.content": lambda: f"Double: {count() * 2}",
-                "panel.border": lambda: bool(count() % 2),
-            },
+                border=lambda: bool(count() % 2),
+            )
         )
 
-        panel = template._children[0]
+        panel = mt._children[0]
         count_text = panel.find_descendant_by_id("count_text")
         double_text = panel.find_descendant_by_id("double_text")
 
@@ -1074,52 +1070,52 @@ class TestTemplate:
 
         count.set(1)
 
-        assert template._children[0] is panel
+        assert mt._children[0] is panel
         assert panel.find_descendant_by_id("count_text") is count_text
         assert panel.find_descendant_by_id("double_text") is double_text
         assert panel._border is True
         assert count_text._content == "Count: 1"
         assert double_text._content == "Double: 2"
 
-    def test_template_invalidates_structure_when_requested(self):
+    def test_mount_invalidates_structure_when_requested(self):
         mode = Signal("a", name="mode")
         count = Signal(0, name="count")
-        template = Template(
-            build=lambda: Box(Text("", id="value"), id=f"panel-{mode()}"),
-            bindings={
-                "value.content": lambda: f"{mode()}:{count()}",
-            },
+        mt = Mount(
+            lambda: Box(
+                Text(lambda: f"{mode()}:{count()}", id="value"),
+                id=f"panel-{mode()}",
+            ),
             invalidate_when=lambda: mode(),
         )
 
-        panel_a = template._children[0]
+        panel_a = mt._children[0]
         value_a = panel_a.find_descendant_by_id("value")
         assert value_a is not None
         assert value_a._content == "a:0"
 
         count.set(1)
-        assert template._children[0] is panel_a
+        assert mt._children[0] is panel_a
         assert value_a._content == "a:1"
 
         mode.set("b")
-        panel_b = template._children[0]
+        panel_b = mt._children[0]
         value_b = panel_b.find_descendant_by_id("value")
         assert value_b is not None
         assert panel_b is not panel_a
         assert value_b._content == "b:1"
 
 
-class TestTemplateLowering:
-    """Lower bound build trees onto mounted-template execution."""
+class TestMountReactiveProps:
+    """Mount-based reactive prop binding tests."""
 
-    def test_template_helper_lowers_bound_tree(self):
+    def test_mount_lowers_bound_tree(self):
         count = Signal(0, name="count")
-        lowered = template(
+        lowered = Mount(
             lambda: Box(
-                Text(reactive(lambda: f"Count: {count()}"), id="count_text"),
-                Text(reactive(lambda: f"Double: {count() * 2}"), id="double_text"),
+                Text(lambda: f"Count: {count()}", id="count_text"),
+                Text(lambda: f"Double: {count() * 2}", id="double_text"),
                 id="panel",
-                border=reactive(lambda: bool(count() % 2)),
+                border=lambda: bool(count() % 2),
             )
         )
 
@@ -1140,13 +1136,13 @@ class TestTemplateLowering:
         assert double_text._content == "Double: 2"
         assert panel._border is True
 
-    def test_template_helper_updates_bindings_inside_portal(self):
+    def test_mount_updates_bindings_inside_portal(self):
         root = Renderable(key="root", width=80, height=24)
         count = Signal(0, name="count")
 
-        lowered = template(
+        lowered = Mount(
             lambda: Portal(
-                Text(reactive(lambda: f"Count: {count()}"), id="portal-text"),
+                Text(lambda: f"Count: {count()}", id="portal-text"),
                 mount=root,
                 key="portal",
             )
@@ -1154,7 +1150,11 @@ class TestTemplateLowering:
         root.add(lowered)
         lowered._configure_yoga_properties()
 
-        container = next(child for child in root._children if getattr(child, "key", None) == "portal-container-portal")
+        container = next(
+            child
+            for child in root._children
+            if getattr(child, "key", None) == "portal-container-portal"
+        )
         portal_text = container._children[0]
         assert portal_text._content == "Count: 0"
 
@@ -1163,12 +1163,12 @@ class TestTemplateLowering:
         assert container._children[0] is portal_text
         assert portal_text._content == "Count: 5"
 
-    def test_template_helper_respects_invalidation(self):
+    def test_mount_respects_invalidation(self):
         mode = Signal("a", name="mode")
         count = Signal(0, name="count")
-        lowered = template(
+        lowered = Mount(
             lambda: Box(
-                Text(reactive(lambda: f"{mode()}:{count()}"), id="value"),
+                Text(lambda: f"{mode()}:{count()}", id="value"),
                 id=f"panel-{mode()}",
             ),
             invalidate_when=lambda: mode(),
@@ -1190,7 +1190,7 @@ class TestTemplateLowering:
         assert panel_b is not panel_a
         assert value_b._content == "b:1"
 
-    def test_template_helper_supports_named_binding_functions(self):
+    def test_mount_supports_named_binding_functions(self):
         count = Signal(0, name="count")
 
         def count_text() -> str:
@@ -1204,13 +1204,13 @@ class TestTemplateLowering:
 
         def build_panel():
             return Box(
-                Text(reactive(count_text), id="count_text"),
-                Text(reactive(double_text), id="double_text"),
+                Text(count_text, id="count_text"),
+                Text(double_text, id="double_text"),
                 id="panel",
-                border=reactive(panel_border),
+                border=panel_border,
             )
 
-        lowered = template(build_panel)
+        lowered = Mount(build_panel)
         panel = lowered._children[0]
         count_node = panel.find_descendant_by_id("count_text")
         double_node = panel.find_descendant_by_id("double_text")
@@ -1228,16 +1228,16 @@ class TestTemplateLowering:
         assert panel._border is True
 
     @pytest.mark.asyncio
-    async def test_template_helper_renders_with_bindings(self):
+    async def test_mount_renders_with_bindings(self):
         count = Signal(0, name="count")
         calls = 0
 
         def app():
             nonlocal calls
             calls += 1
-            return template(
+            return Mount(
                 lambda: Box(
-                    Text(reactive(lambda: f"Count: {count()}"), id="count_text"),
+                    Text(lambda: f"Count: {count()}", id="count_text"),
                     id="panel",
                 )
             )
@@ -1259,16 +1259,16 @@ class TestTemplateLowering:
 class TestTemplateComponent:
     """Component-level migration path onto mounted-template execution."""
 
-    def test_template_component_updates_in_place(self):
+    def test_component_updates_in_place(self):
         count = Signal(0, name="count")
 
-        @template_component
+        @component
         def CounterPanel():
             return Box(
-                Text(reactive(lambda: f"Count: {count()}"), id="count_text"),
-                Text(reactive(lambda: f"Double: {count() * 2}"), id="double_text"),
+                Text(lambda: f"Count: {count()}", id="count_text"),
+                Text(lambda: f"Double: {count() * 2}", id="double_text"),
                 id="panel",
-                border=reactive(lambda: bool(count() % 2)),
+                border=lambda: bool(count() % 2),
             )
 
         panel_component = CounterPanel()
@@ -1289,14 +1289,14 @@ class TestTemplateComponent:
         assert double_text._content == "Double: 2"
         assert panel._border is True
 
-    def test_template_component_invalidates_when_requested(self):
+    def test_component_invalidates_when_requested(self):
         mode = Signal("a", name="mode")
         count = Signal(0, name="count")
 
-        @template_component(invalidate_when=lambda current_mode: current_mode())
+        @component(invalidate_when=lambda current_mode: current_mode())
         def ModePanel(current_mode):
             return Box(
-                Text(reactive(lambda: f"{current_mode()}:{count()}"), id="value"),
+                Text(lambda: f"{current_mode()}:{count()}", id="value"),
                 id=f"panel-{current_mode()}",
             )
 
@@ -1318,16 +1318,16 @@ class TestTemplateComponent:
         assert value_b._content == "b:1"
 
     @pytest.mark.asyncio
-    async def test_template_component_skips_parent_rebuild_in_renderer(self):
+    async def test_component_skips_parent_rebuild_in_renderer(self):
         count = Signal(0, name="count")
         calls = 0
 
-        @template_component
+        @component
         def CounterPanel():
             nonlocal calls
             calls += 1
             return Box(
-                Text(reactive(lambda: f"Count: {count()}"), id="count_text"),
+                Text(lambda: f"Count: {count()}", id="count_text"),
                 id="panel",
             )
 

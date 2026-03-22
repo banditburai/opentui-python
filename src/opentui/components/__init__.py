@@ -10,8 +10,8 @@ from .advanced import (
     TabSelect,
     TextTable,
 )
-from .base import BaseRenderable, LayoutOptions, Renderable, StyleOptions
-from .box import Box, LinearScrollAccel, MacOSScrollAccel, ScrollBox, ScrollContent
+from .base import BaseRenderable, LayoutRect, Renderable
+from .box import Box, Column, FlexFill, Row, Spacer
 from .code_renderable import (
     CodeRenderable,
     MockTreeSitterClient,
@@ -23,19 +23,15 @@ from .control_flow import (
     Dynamic,
     ErrorBoundary,
     For,
+    Lazy,
     Match,
     MemoBlock,
-    MountedTemplate,
+    Mount,
     Portal,
     Show,
     Suspense,
     Switch,
-    Template,
-    TemplateBinding,
-    bind,
-    reactive,
-    template,
-    template_component,
+    component,
 )
 from .diff_renderable import DiffRenderable
 from .framebuffer import FrameBuffer
@@ -51,6 +47,7 @@ from .line_number_renderable import (
     LineSign,
 )
 from .scrollbar import ScrollBar
+from .scrollbox import LinearScrollAccel, MacOSScrollAccel, ScrollBox, ScrollContent
 from .select_renderable import SelectRenderable
 from .slider_renderable import SliderRenderable
 from .text import Bold, Italic, LineBreak, Link, Span, Text, TextModifier, Underline
@@ -61,9 +58,8 @@ from .textnode import StyledChunk, TextNode, TextStyle, is_textnode_renderable
 __all__ = [
     # Base
     "BaseRenderable",
+    "LayoutRect",
     "Renderable",
-    "LayoutOptions",
-    "StyleOptions",
     # Box
     "Box",
     "ScrollContent",
@@ -96,18 +92,14 @@ __all__ = [
     # Control flow
     "Dynamic",
     "For",
+    "Lazy",
     "MemoBlock",
-    "MountedTemplate",
+    "Mount",
     "Portal",
     "Show",
     "Switch",
     "Match",
-    "Template",
-    "TemplateBinding",
-    "bind",
-    "reactive",
-    "template",
-    "template_component",
+    "component",
     "ErrorBoundary",
     "Suspense",
     # New components
@@ -131,6 +123,11 @@ __all__ = [
     "LineNumberRenderable",
     "LineSign",
     "VRenderable",
+    # Helpers
+    "Row",
+    "Column",
+    "FlexFill",
+    "Spacer",
     "CodeRenderable",
     "MockTreeSitterClient",
     "SyntaxStyle",

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .. import layout as yoga_layout
@@ -24,12 +23,53 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class Match:
-    """A branch condition for Switch. Not a Renderable; just configuration."""
+def _subtree_contains_portal(node: BaseRenderable) -> bool:
+    """Check if a node's subtree contains a Portal.
 
-    when: Callable[[], Any]
-    render: Callable[[], BaseRenderable | list[BaseRenderable]]
+    Only detects Portals present at construction time. Portals added
+    dynamically (e.g. inside @component children that build lazily)
+    are not caught by this check.
+    """
+    if isinstance(node, Portal):
+        return True
+    return any(_subtree_contains_portal(child) for child in node._children)
+
+
+class Match:
+    """A branch condition for Switch. Not a Renderable; just configuration.
+
+    Usage (positional children):
+        Match(Text("Home"), when=tab == "home")
+
+    Usage (render= for deferred/factory creation):
+        Match(when=is_visible, render=lambda: Portal(...))
+    """
+
+    __slots__ = ("when", "_render_fn")
+
+    def __init__(self, *children, when=None, render=None):
+        if when is None:
+            raise ValueError("Match requires a when= condition")
+        if children and render is not None:
+            raise ValueError("Match accepts positional children OR render=, not both")
+        self.when = when
+        if children:
+            for c in children:
+                if isinstance(c, BaseRenderable) and _subtree_contains_portal(c):
+                    raise ValueError(
+                        "Match does not support Portal as a positional child. "
+                        "Use render=lambda: Portal(...) instead."
+                    )
+            _pre = list(children)
+            self._render_fn = lambda: _pre
+        elif render is not None:
+            self._render_fn = render
+        else:
+            raise ValueError("Match requires children or render=")
+
+    @property
+    def render(self):
+        return self._render_fn
 
 
 class Portal(Renderable):
@@ -371,6 +411,7 @@ __all__ = [
     "ErrorBoundary",
     "Match",
     "Portal",
+    "_subtree_contains_portal",  # internal: used by control_flow.py
     "Suspense",
     "_register_suspense_resource",
     "_suspense_stack",

@@ -5,7 +5,9 @@ Tests: 45 total (45 implemented)
 """
 
 import pytest
-from opentui.native import NativeTextBuffer, NativeTextBufferView, is_available
+from opentui.editor.text_buffer_native import NativeTextBuffer
+from opentui.editor.text_view_native import NativeTextBufferView
+from opentui.native import is_available
 
 pytestmark = pytest.mark.skipif(not is_available(), reason="Native bindings not available")
 

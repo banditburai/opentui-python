@@ -32,10 +32,10 @@ def test_ffi_has_native_layout_apply_function():
 async def test_renderer_activates_native_layout_apply_path():
     """A real render pass should resolve the native layout walker."""
     from opentui import Box, Text, create_test_renderer
-    from opentui import renderer as renderer_mod
+    from opentui.renderer.native import _NATIVE_LAYOUT_CACHE, _NOT_LOADED
 
-    renderer_mod._NATIVE_LAYOUT_CACHE["fn"] = renderer_mod._NOT_LOADED
-    renderer_mod._NATIVE_LAYOUT_CACHE["offsets"] = None
+    _NATIVE_LAYOUT_CACHE["fn"] = _NOT_LOADED
+    _NATIVE_LAYOUT_CACHE["offsets"] = None
 
     setup = await create_test_renderer(80, 24)
     try:
@@ -47,9 +47,9 @@ async def test_renderer_activates_native_layout_apply_path():
 
         setup.render_frame()
 
-        assert renderer_mod._NATIVE_LAYOUT_CACHE["fn"] is not None
-        assert renderer_mod._NATIVE_LAYOUT_CACHE["offsets"] is not None
-        assert renderer_mod._NATIVE_LAYOUT_CACHE["fn"].__module__ == "yoga.yoga"
+        assert _NATIVE_LAYOUT_CACHE["fn"] is not None
+        assert _NATIVE_LAYOUT_CACHE["offsets"] is not None
+        assert _NATIVE_LAYOUT_CACHE["fn"].__module__ == "yoga.yoga"
     finally:
         setup.destroy()
 

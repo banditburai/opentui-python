@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from opentui.extmarks import ExtmarksController, _string_width
+from opentui.editor.extmarks import ExtmarksController, _string_width
 
 
 # ---------------------------------------------------------------------------

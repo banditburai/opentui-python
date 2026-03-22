@@ -6,17 +6,47 @@ import contextlib
 import itertools
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import yoga
 
+from .. import diagnostics as _diag
 from .. import layout as yoga_layout
 from .. import structs as s
 from ..enums import RenderStrategy
 from ..signals import _HAS_NATIVE, Signal, _ComputedSignal, _tracking_context
 
 log = logging.getLogger(__name__)
+
+
+class LayoutRect(NamedTuple):
+    """Computed layout rectangle for a renderable."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+    padding_left: int = 0
+    padding_right: int = 0
+    padding_top: int = 0
+    padding_bottom: int = 0
+
+    @property
+    def content_x(self) -> int:
+        return self.x + self.padding_left
+
+    @property
+    def content_y(self) -> int:
+        return self.y + self.padding_top
+
+    @property
+    def content_width(self) -> int:
+        return max(0, self.width - self.padding_left - self.padding_right)
+
+    @property
+    def content_height(self) -> int:
+        return max(0, self.height - self.padding_top - self.padding_bottom)
+
 
 # Pointer identity with C++-interned strings enables O(1) comparison in yoga.
 import sys as _sys
@@ -120,15 +150,14 @@ _NATIVE_CACHE: dict[str, Any] = {
 
 
 def _get_yoga_configurator() -> Any:
-    """Lazy import of the native YogaConfigurator."""
     if _NATIVE_CACHE["yoga_configurator_loaded"]:
         return _NATIVE_CACHE["yoga_configurator"]
     _NATIVE_CACHE["yoga_configurator_loaded"] = True
     if not _HAS_NATIVE:
         return None
-    import sys
+    from .. import ffi
 
-    nb = sys.modules.get("opentui_bindings")
+    nb = ffi.get_native()
     if nb is not None:
         try:
             _NATIVE_CACHE["yoga_configurator"] = nb.yoga_configure.YogaConfigurator()
@@ -139,15 +168,14 @@ def _get_yoga_configurator() -> Any:
 
 
 def _get_create_prop_binding() -> Any:
-    """Lazy import of the native create_prop_binding function."""
     create_prop_binding = _NATIVE_CACHE["create_prop_binding"]
     if create_prop_binding is not None:
         return create_prop_binding
     if not _HAS_NATIVE:
         return None
-    import sys
+    from .. import ffi
 
-    nb = sys.modules.get("opentui_bindings")
+    nb = ffi.get_native()
     if nb is not None:
         try:
             _NATIVE_CACHE["create_prop_binding"] = nb.native_signals.create_prop_binding
@@ -158,7 +186,6 @@ def _get_create_prop_binding() -> Any:
 
 
 def _get_configure_node_fast() -> Any:
-    """Lazy resolve of yoga.configure_node_fast without a module-global write in hot code."""
     if _NATIVE_CACHE["configure_node_fast_loaded"]:
         return _NATIVE_CACHE["configure_node_fast"]
     configure_node_fast = getattr(yoga, "configure_node_fast", None)
@@ -167,7 +194,14 @@ def _get_configure_node_fast() -> Any:
     return configure_node_fast
 
 
+class _PropBinding(NamedTuple):
+    source: object
+    cleanup: Callable
+    unsub_only: Callable
+
+
 if TYPE_CHECKING:
+    from ..events import KeyEvent, MouseEvent, PasteEvent
     from ..renderer import Buffer
 
 
@@ -175,73 +209,11 @@ _SENTINEL = object()
 _UNSET_FLEX_SHRINK = object()
 
 
-class _PropBinding(NamedTuple):
-    """A reactive prop binding: source, cleanup, and unsub-only callables."""
-
-    source: object
-    cleanup: Callable
-    unsub_only: Callable
-
-
 _renderable_id_counter = itertools.count(1)
 
 
 def _next_id() -> int:
     return next(_renderable_id_counter)
-
-
-@dataclass
-class LayoutOptions:
-    width: int | str | None = None
-    height: int | str | None = None
-    min_width: int | str | None = None
-    min_height: int | str | None = None
-    max_width: int | str | None = None
-    max_height: int | str | None = None
-    flex_grow: float = 0
-    flex_shrink: float = 1
-    flex_direction: str = "column"
-    flex_wrap: str = "nowrap"
-    flex_basis: float | str | None = None
-    justify_content: str = "flex-start"
-    align_items: str = "stretch"
-    align_self: str | None = None
-    gap: int = 0
-    overflow: str = "visible"
-    position: str = "relative"
-    padding: int = 0
-    padding_top: int | None = None
-    padding_right: int | None = None
-    padding_bottom: int | None = None
-    padding_left: int | None = None
-    padding_x: int | None = None
-    padding_y: int | None = None
-    margin: int = 0
-    margin_top: int | None = None
-    margin_right: int | None = None
-    margin_bottom: int | None = None
-    margin_left: int | None = None
-    margin_x: int | None = None
-    margin_y: int | None = None
-    opacity: float = 1.0
-    z_index: int = 0
-    top: float | str | None = None
-    right: float | str | None = None
-    bottom: float | str | None = None
-    left: float | str | None = None
-    translate_x: float = 0
-    translate_y: float = 0
-
-
-@dataclass
-class StyleOptions:
-    background_color: s.RGBA | None = None
-    fg: s.RGBA | None = None
-    border: bool = False
-    border_style: str = "single"
-    border_color: s.RGBA | None = None
-    title: str | None = None
-    title_alignment: str = "left"
 
 
 def is_renderable(obj: Any) -> bool:
@@ -324,8 +296,6 @@ class _Prop:
 
 
 class BaseRenderable:
-    """Base class for all renderables."""
-
     # Global registry mapping renderable num to instance (OpenTUI core pattern).
     # Entries are removed in destroy() — size is bounded by live renderables.
     renderables_by_number: dict[int, BaseRenderable] = {}
@@ -398,13 +368,15 @@ class BaseRenderable:
 
     @property
     def layout_width(self) -> int:
-        """Computed layout width (set by yoga after layout pass)."""
         return self._layout_width
 
     @property
     def layout_height(self) -> int:
-        """Computed layout height (set by yoga after layout pass)."""
         return self._layout_height
+
+    @property
+    def layout_rect(self) -> LayoutRect:
+        return LayoutRect(self._x, self._y, self._layout_width, self._layout_height)
 
     @property
     def parent(self) -> BaseRenderable | None:
@@ -412,8 +384,10 @@ class BaseRenderable:
 
     @property
     def children(self) -> tuple[BaseRenderable, ...]:
-        """Read-only view of this renderable's children."""
         return self.get_children()
+
+    def render(self, buffer: Buffer, delta_time: float = 0) -> None:
+        pass
 
     @property
     def is_dirty(self) -> bool:
@@ -427,6 +401,8 @@ class BaseRenderable:
         amortised cost).  Use this for changes that affect layout (size, flex,
         padding, visibility, etc.).
         """
+        if _diag._enabled & _diag.DIRTY:
+            _diag.log_dirty(self, "layout")
         self._dirty = True
         node = self
         while node is not None and not node._subtree_dirty:
@@ -442,6 +418,8 @@ class BaseRenderable:
         layout pass and repaint only the affected subtrees — saving 80-90% of
         frame time for visual-only updates.
         """
+        if _diag._enabled & _diag.DIRTY:
+            _diag.log_dirty(self, "paint")
         self._dirty = True
         node = self
         while node is not None and not node._paint_subtree_dirty:
@@ -463,39 +441,30 @@ class BaseRenderable:
             node._hit_paint_dirty = True
             node = node._parent
 
+    def _get_renderer(self) -> Any | None:
+        """Walk to the root renderable and return its renderer, or None."""
+        node: BaseRenderable | None = self
+        while node is not None and node._parent is not None:
+            node = node._parent
+        return getattr(node, "_renderer", None) if node is not None else None
+
     def _queue_structural_clear_rect(self, rect: tuple[int, int, int, int]) -> None:
         x, y, width, height = rect
         if width <= 0 or height <= 0:
             return
-        node: BaseRenderable | None = self
-        while node is not None and node._parent is not None:
-            node = node._parent
-        renderer = getattr(node, "_renderer", None) if node is not None else None
-        if renderer is not None:
+        if (renderer := self._get_renderer()) is not None:
             renderer.queue_structural_clear_rect((x, y, width, height))
 
     def _invalidate_renderer_structure_caches(self) -> None:
-        node: BaseRenderable | None = self
-        while node is not None and node._parent is not None:
-            node = node._parent
-        renderer = getattr(node, "_renderer", None) if node is not None else None
-        if renderer is not None:
+        if (renderer := self._get_renderer()) is not None:
             renderer.invalidate_handler_cache()
 
     def _invalidate_mouse_tracking_cache(self) -> None:
-        node: BaseRenderable | None = self
-        while node is not None and node._parent is not None:
-            node = node._parent
-        renderer = getattr(node, "_renderer", None) if node is not None else None
-        if renderer is not None:
+        if (renderer := self._get_renderer()) is not None:
             renderer._mouse_tracking_dirty = True
 
     def _adjust_renderer_layout_hook_cache(self, delta: int) -> None:
-        node: BaseRenderable | None = self
-        while node is not None and node._parent is not None:
-            node = node._parent
-        renderer = getattr(node, "_renderer", None) if node is not None else None
-        if renderer is not None:
+        if (renderer := self._get_renderer()) is not None:
             renderer.adjust_layout_hook_cache_for_subtree(self, delta)
 
     def _sync_yoga_display(self) -> None:
@@ -563,12 +532,10 @@ class BaseRenderable:
 
     @property
     def num(self) -> int:
-        """Unique integer identifier for this renderable."""
         return self._num
 
     @property
     def id(self) -> str:
-        """String identifier (default ``renderable-<num>``, or custom)."""
         return self._id
 
     @id.setter
@@ -581,7 +548,10 @@ class BaseRenderable:
 
     @visible.setter
     def visible(self, value: bool) -> None:
+        old = self._visible
         self._visible = value
+        if _diag._enabled & _diag.VISIBILITY and old != value:
+            _diag.log_visibility_change(self, old, value)
         self._sync_yoga_display()
         self.mark_dirty()
 
@@ -678,12 +648,7 @@ class BaseRenderable:
 
     def remove(self, child: BaseRenderable) -> None:
         if child in self._children:
-            clear_rect = (
-                int(getattr(child, "_x", 0) or 0),
-                int(getattr(child, "_y", 0) or 0),
-                int(getattr(child, "_layout_width", 0) or 0),
-                int(getattr(child, "_layout_height", 0) or 0),
-            )
+            clear_rect = (child._x, child._y, child._layout_width, child._layout_height)
             self._children.remove(child)
             self._children_tuple = None
             self._invalidate_renderer_structure_caches()
@@ -736,7 +701,6 @@ class BaseRenderable:
         return idx
 
     def get_children(self) -> tuple[BaseRenderable, ...]:
-        """Get all children as an immutable tuple."""
         if self._children_tuple is None:
             self._children_tuple = tuple(self._children)
         return self._children_tuple
@@ -745,22 +709,16 @@ class BaseRenderable:
         return len(self._children)
 
     def contains_point(self, x: int, y: int) -> bool:
-        """Return True when *(x, y)* falls within this renderable's layout bounds."""
-        width = int(self._layout_width or 0)
-        height = int(self._layout_height or 0)
-        if width <= 0 or height <= 0:
-            return False
-        return self._x <= x < self._x + width and self._y <= y < self._y + height
+        w, h = self._layout_width, self._layout_height
+        return w > 0 and h > 0 and self._x <= x < self._x + w and self._y <= y < self._y + h
 
     def get_renderable(self, id: str) -> BaseRenderable | None:
-        """Find a child (direct only) by string ID."""
         for child in self._children:
             if child._id == id:
                 return child
         return None
 
     def find_descendant_by_id(self, id: str) -> BaseRenderable | None:
-        """Recursively find a descendant by string ID."""
         for child in self._children:
             if child._id == id:
                 return child
@@ -786,11 +744,9 @@ class BaseRenderable:
             handler(*args, **kwargs)
 
     def on_cleanup(self, fn: Callable) -> None:
-        """Register a cleanup function to run when this renderable is destroyed."""
         self._cleanups[id(fn)] = fn
 
     def destroy(self) -> None:
-        """Destroy this renderable, running cleanups first."""
         if self._destroyed:
             return
         self._destroyed = True
@@ -823,8 +779,6 @@ class BaseRenderable:
 
 
 class Renderable(BaseRenderable):
-    """Base renderable with layout and styling."""
-
     __slots__ = (
         "_min_width",
         "_min_height",
@@ -895,8 +849,6 @@ class Renderable(BaseRenderable):
         "_handle_paste",
         "_selectable",
         "_on_lifecycle_pass",
-        "_row_gap",
-        "_column_gap",
         "_prop_bindings",
         "_yoga_config_cache",
         # Fast-path flag: True while all layout/style slots are at defaults
@@ -956,6 +908,8 @@ class Renderable(BaseRenderable):
         id: str | None = None,
         width: int | str | None = None,
         height: int | str | None = None,
+        fixed_width: int | None = None,
+        fixed_height: int | None = None,
         min_width: int | str | None = None,
         min_height: int | str | None = None,
         max_width: int | str | None = None,
@@ -1012,18 +966,19 @@ class Renderable(BaseRenderable):
         translate_x: float = 0,
         translate_y: float = 0,
         live: bool = False,
-        on_mouse_down: Callable | None = None,
-        on_mouse_up: Callable | None = None,
-        on_mouse_move: Callable | None = None,
-        on_mouse_drag: Callable | None = None,
-        on_mouse_drag_end: Callable | None = None,
-        on_mouse_drop: Callable | None = None,
-        on_mouse_over: Callable | None = None,
-        on_mouse_out: Callable | None = None,
-        on_mouse_scroll: Callable | None = None,
-        on_key_down: Callable | None = None,
-        on_paste: Callable | None = None,
-        on_size_change: Callable | None = None,
+        on_mouse_down: Callable[[MouseEvent], None] | None = None,
+        on_click: Callable[[], None] | None = None,
+        on_mouse_up: Callable[[MouseEvent], None] | None = None,
+        on_mouse_move: Callable[[MouseEvent], None] | None = None,
+        on_mouse_drag: Callable[[MouseEvent], None] | None = None,
+        on_mouse_drag_end: Callable[[MouseEvent], None] | None = None,
+        on_mouse_drop: Callable[[MouseEvent], None] | None = None,
+        on_mouse_over: Callable[[MouseEvent], None] | None = None,
+        on_mouse_out: Callable[[MouseEvent], None] | None = None,
+        on_mouse_scroll: Callable[[MouseEvent], None] | None = None,
+        on_key_down: Callable[[KeyEvent], None] | None = None,
+        on_paste: Callable[[PasteEvent], None] | None = None,
+        on_size_change: Callable[[int, int], None] | None = None,
     ):
         super().__init__(key=key, id=id)
 
@@ -1032,6 +987,20 @@ class Renderable(BaseRenderable):
         self._yoga_config_cache: tuple | None = None
         # Fast-path flag for reconciler text patching
         self._is_simple: bool = True
+
+        # fixed_width / fixed_height expansion (init-time sugar, no new slot)
+        if fixed_width is not None:
+            if width is not None or min_width is not None or max_width is not None:
+                raise ValueError(
+                    "Cannot combine 'fixed_width' with 'width', 'min_width', or 'max_width'"
+                )
+            width = min_width = max_width = fixed_width
+        if fixed_height is not None:
+            if height is not None or min_height is not None or max_height is not None:
+                raise ValueError(
+                    "Cannot combine 'fixed_height' with 'height', 'min_height', or 'max_height'"
+                )
+            height = min_height = max_height = fixed_height
 
         if isinstance(width, int | float) and width < 0:
             raise ValueError(f"width must be non-negative, got {width}")
@@ -1167,6 +1136,20 @@ class Renderable(BaseRenderable):
         self._render_after: Callable | None = None
         self._on_size_change: Callable | None = on_size_change
 
+        # on_click convenience: wraps as on_mouse_down with button==0 + auto stop
+        if on_click is not None:
+            if on_mouse_down is not None:
+                raise ValueError("Cannot pass both 'on_click' and 'on_mouse_down'")
+            _click_cb = on_click
+
+            def _on_click_wrapper(event: Any) -> None:
+                if getattr(event, "button", -1) != 0:
+                    return
+                event.stop_propagation()
+                _click_cb()
+
+            on_mouse_down = _on_click_wrapper
+
         self._on_mouse_down: Callable | None = on_mouse_down
         self._on_mouse_up: Callable | None = on_mouse_up
         self._on_mouse_move: Callable | None = on_mouse_move
@@ -1271,6 +1254,19 @@ class Renderable(BaseRenderable):
 
     padding_left = _Prop("_padding_left")
 
+    @property
+    def layout_rect(self) -> LayoutRect:
+        return LayoutRect(
+            self._x,
+            self._y,
+            self._layout_width,
+            self._layout_height,
+            self._padding_left,
+            self._padding_right,
+            self._padding_top,
+            self._padding_bottom,
+        )
+
     overflow = _Prop("_overflow")
 
     position = _Prop("_position")
@@ -1372,15 +1368,10 @@ class Renderable(BaseRenderable):
             self._parent._propagate_live_count(delta)
 
     def _set_or_bind(self, attr: str, value: object, *, transform: Callable | None = None) -> None:
-        """Set an attribute statically or bind it to a reactive source.
-
-        If value is a Signal, ComputedSignal, or callable (not str/type):
+        """If value is a Signal, ComputedSignal, or callable (not str/type):
         wraps with optional transform and creates a reactive binding.
         Otherwise: applies transform (if any) and sets directly.
         """
-        if getattr(value, "__opentui_template_binding__", False):
-            setattr(self, attr, value)
-            return
         if isinstance(value, Signal | _ComputedSignal):
             source = value.map(transform) if transform else value
             self._bind_reactive_prop(attr, source)
@@ -1406,9 +1397,7 @@ class Renderable(BaseRenderable):
                 self._is_simple = False
 
     def _make_on_change(self, attr: str, yogadirty: bool) -> Callable[[object], None]:
-        """Create a reactive prop change callback for the given attribute.
-
-        Auto-selects dirty level: layout props use mark_dirty() (triggers yoga),
+        """Auto-selects dirty level: layout props use mark_dirty() (triggers yoga),
         visual-only props use mark_paint_dirty() (skips yoga). _visible is
         special-cased because it needs _propagate_live_count side effects.
         """
@@ -1444,43 +1433,19 @@ class Renderable(BaseRenderable):
     def _make_on_change_callable(
         self, attr: str, yogadirty: bool, fn: Callable[[], object]
     ) -> Callable[[object], None]:
-        """Create a reactive prop callback that re-evaluates a callable on change.
-
-        Used for single-dep callable fast path — subscribes directly to the dep
-        signal, skipping the ComputedSignal intermediary.
+        """Single-dep callable fast path: subscribes directly to the dep
+        signal, skipping the ComputedSignal intermediary.  Wraps _make_on_change
+        with fn() re-evaluation and tracking suppression.
         """
-        if yogadirty:
+        updater = self._make_on_change(attr, yogadirty)
 
-            def on_change(_: object) -> None:
-                token = _tracking_context.set(None)
-                try:
-                    new_value = fn()
-                finally:
-                    _tracking_context.reset(token)
-                old = getattr(self, attr, _SENTINEL)
-                if old is new_value or old == new_value:
-                    return
-                setattr(self, attr, new_value)
-                self.mark_dirty()
-                if self._yoga_node is not None:
-                    try:
-                        self._yoga_node.mark_dirty()
-                    except RuntimeError as e:
-                        if "leaf" not in str(e) and "measure" not in str(e):
-                            raise
-        else:
-
-            def on_change(_: object) -> None:
-                token = _tracking_context.set(None)
-                try:
-                    new_value = fn()
-                finally:
-                    _tracking_context.reset(token)
-                old = getattr(self, attr, _SENTINEL)
-                if old is new_value or old == new_value:
-                    return
-                setattr(self, attr, new_value)
-                self.mark_paint_dirty()
+        def on_change(_: object) -> None:
+            token = _tracking_context.set(None)
+            try:
+                new_value = fn()
+            finally:
+                _tracking_context.reset(token)
+            updater(new_value)
 
         return on_change
 
@@ -1861,7 +1826,6 @@ class Renderable(BaseRenderable):
 
 __all__ = [
     "BaseRenderable",
+    "LayoutRect",
     "Renderable",
-    "LayoutOptions",
-    "StyleOptions",
 ]

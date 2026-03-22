@@ -7,18 +7,19 @@ from typing import TYPE_CHECKING
 from .. import structs as s
 from ..enums import RenderStrategy
 from ..events import KeyEvent
-from ..keymapping import (
+from ..input.keymapping import (
     DEFAULT_KEY_ALIASES,
     KeyAliasMap,
     KeyBinding,
     build_key_bindings_map,
-    lookup_action,
+    init_key_bindings,
+    lookup_action_for_event,
     merge_key_aliases,
     merge_key_bindings,
 )
-from ..native import _nb
-from .base import Renderable
+from .base import Renderable, _parse_color_static, _Prop
 from .input import SelectOption
+from .raster_cache import RasterCache
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -72,10 +73,7 @@ class SelectRenderable(Renderable):
         "_key_alias_map",
         "_key_map",
         "_is_destroyed",
-        "_raster_dirty",
-        "_raster_buffer",
-        "_raster_buffer_ptr",
-        "_raster_buffer_size",
+        "_raster",
     )
 
     def __init__(
@@ -141,19 +139,12 @@ class SelectRenderable(Renderable):
 
         self._focusable = True
 
-        self._key_bindings = list(_DEFAULT_SELECT_BINDINGS)
-        self._key_alias_map = dict(DEFAULT_KEY_ALIASES)
-        if key_bindings:
-            self._key_bindings = merge_key_bindings(self._key_bindings, key_bindings)
-        if key_alias_map:
-            self._key_alias_map = merge_key_aliases(self._key_alias_map, key_alias_map)
-        self._key_map = build_key_bindings_map(self._key_bindings, self._key_alias_map)
+        self._key_bindings, self._key_alias_map, self._key_map = init_key_bindings(
+            _DEFAULT_SELECT_BINDINGS, key_bindings, key_alias_map
+        )
 
         self._is_destroyed = False
-        self._raster_dirty = True
-        self._raster_buffer = None
-        self._raster_buffer_ptr = None
-        self._raster_buffer_size: tuple[int, int] | None = None
+        self._raster = RasterCache(f"select-{self.id}")
 
         self._setup_measure_func()
 
@@ -161,13 +152,13 @@ class SelectRenderable(Renderable):
         return RenderStrategy.HEAVY_WIDGET
 
     def mark_dirty(self) -> None:
-        if hasattr(self, "_raster_dirty"):
-            self._raster_dirty = True
+        if hasattr(self, "_raster"):
+            self._raster.invalidate()
         super().mark_dirty()
 
     def mark_paint_dirty(self) -> None:
-        if hasattr(self, "_raster_dirty"):
-            self._raster_dirty = True
+        if hasattr(self, "_raster"):
+            self._raster.invalidate()
         super().mark_paint_dirty()
 
     @property
@@ -249,77 +240,16 @@ class SelectRenderable(Renderable):
         self._font = v
         self.mark_paint_dirty()
 
-    @property
-    def text_color(self) -> s.RGBA | None:
-        return self._text_color
-
-    @text_color.setter
-    def text_color(self, v: s.RGBA | str | None) -> None:
-        self._text_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def background_color(self) -> s.RGBA | None:
-        return self._background_color
-
-    @background_color.setter
-    def background_color(self, v: s.RGBA | str | None) -> None:
-        self._background_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def focused_background_color(self) -> s.RGBA | None:
-        return self._focused_bg_color
-
-    @focused_background_color.setter
-    def focused_background_color(self, v: s.RGBA | str | None) -> None:
-        self._focused_bg_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def focused_text_color(self) -> s.RGBA | None:
-        return self._focused_text_color
-
-    @focused_text_color.setter
-    def focused_text_color(self, v: s.RGBA | str | None) -> None:
-        self._focused_text_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def selected_background_color(self) -> s.RGBA | None:
-        return self._selected_bg_color
-
-    @selected_background_color.setter
-    def selected_background_color(self, v: s.RGBA | str | None) -> None:
-        self._selected_bg_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def selected_text_color(self) -> s.RGBA | None:
-        return self._selected_text_color
-
-    @selected_text_color.setter
-    def selected_text_color(self, v: s.RGBA | str | None) -> None:
-        self._selected_text_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def description_color(self) -> s.RGBA | None:
-        return self._description_color
-
-    @description_color.setter
-    def description_color(self, v: s.RGBA | str | None) -> None:
-        self._description_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def selected_description_color(self) -> s.RGBA | None:
-        return self._selected_description_color
-
-    @selected_description_color.setter
-    def selected_description_color(self, v: s.RGBA | str | None) -> None:
-        self._selected_description_color = self._parse_color(v)
-        self.mark_paint_dirty()
+    text_color = _Prop("_text_color", _parse_color_static, paint_only=True)
+    background_color = _Prop("_background_color", _parse_color_static, paint_only=True)
+    focused_background_color = _Prop("_focused_bg_color", _parse_color_static, paint_only=True)
+    focused_text_color = _Prop("_focused_text_color", _parse_color_static, paint_only=True)
+    selected_background_color = _Prop("_selected_bg_color", _parse_color_static, paint_only=True)
+    selected_text_color = _Prop("_selected_text_color", _parse_color_static, paint_only=True)
+    description_color = _Prop("_description_color", _parse_color_static, paint_only=True)
+    selected_description_color = _Prop(
+        "_selected_description_color", _parse_color_static, paint_only=True
+    )
 
     @property
     def key_bindings(self) -> list[KeyBinding]:
@@ -407,15 +337,7 @@ class SelectRenderable(Renderable):
         return False
 
     def _lookup_action(self, event: KeyEvent) -> str | None:
-        return lookup_action(
-            event.key,
-            event.ctrl,
-            event.shift,
-            event.alt,
-            event.meta,
-            self._key_map,
-            self._key_alias_map,
-        )
+        return lookup_action_for_event(event, self._key_map, self._key_alias_map)
 
     def _dispatch_action(self, action: str) -> bool:
         if action == "move-up":
@@ -505,65 +427,18 @@ class SelectRenderable(Renderable):
         if not self._visible:
             return
 
-        raster = self._ensure_raster_buffer()
-        if raster is not None and self._layout_width and self._layout_height:
-            if self._raster_dirty:
-                raster.clear(0.0)
-                raster.push_offset(-self._x, -self._y)
-                try:
-                    self._render_select_contents(raster)
-                finally:
-                    raster.pop_offset()
-                self._raster_dirty = False
-
-            try:
-                buffer._native.draw_frame_buffer(buffer._ptr, self._x, self._y, raster._ptr)
-                return
-            except Exception:
-                pass
-
-        self._render_select_contents(buffer)
-        self._raster_dirty = False
-
-    def _ensure_raster_buffer(self) -> Buffer | None:
-        width = max(0, int(self._layout_width or 0))
-        height = max(0, int(self._layout_height or 0))
-        if width <= 0 or height <= 0:
-            return None
-
-        if self._raster_buffer_ptr is None:
-            ptr = _nb.buffer.create_optimized_buffer(width, height, True, 0, f"select-{self.id}")
-            from ..renderer import Buffer as RenderBuffer
-
-            self._raster_buffer_ptr = ptr
-            self._raster_buffer = RenderBuffer(ptr, _nb.buffer, _nb.graphics)
-            self._raster_buffer_size = (width, height)
-            self._raster_dirty = True
-            return self._raster_buffer
-
-        if self._raster_buffer_size != (width, height):
-            assert self._raster_buffer is not None
-            self._raster_buffer.resize(width, height)
-            self._raster_buffer_size = (width, height)
-            self._raster_dirty = True
-
-        return self._raster_buffer
-
-    def _release_raster_buffer(self) -> None:
-        if self._raster_buffer_ptr is None:
-            return
-        try:
-            _nb.buffer.destroy_optimized_buffer(self._raster_buffer_ptr)
-        except Exception:
-            pass
-        finally:
-            self._raster_buffer = None
-            self._raster_buffer_ptr = None
-            self._raster_buffer_size = None
+        self._raster.render_cached(
+            buffer,
+            self._x,
+            self._y,
+            self._layout_width,
+            self._layout_height,
+            self._render_select_contents,
+        )
 
     def destroy(self) -> None:
         self._is_destroyed = True
-        self._release_raster_buffer()
+        self._raster.release()
         super().destroy()
 
 

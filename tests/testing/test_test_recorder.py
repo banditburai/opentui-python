@@ -11,7 +11,7 @@ import pytest
 
 from opentui import create_test_renderer
 from opentui.components.text_renderable import TextRenderable
-from opentui.testing import TestRecorder
+from opentui.testing.capture import TestRecorder
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@
 import asyncio
 
 import opentui
-from opentui import Box, Signal, Text, reactive, template_component, use_keyboard, use_renderer
+from opentui import Box, Signal, Text, template_component, use_keyboard, use_renderer
 
 count = Signal(0, name="count")
 
@@ -15,7 +15,7 @@ def counter_app():
         Text("Counter App"),
         Text("-" * 20),
         Box(
-            Text(reactive(lambda: f"Count: {count()}")),
+            Text(lambda: f"Count: {count()}"),
             border=True,
             padding=2,
         ),

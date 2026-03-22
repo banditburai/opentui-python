@@ -6,7 +6,7 @@ Tests ported: 7/7
 
 import pytest
 
-from opentui.key_handler import InternalKeyHandler, KeyEvent
+from opentui.input.key_handler import InternalKeyHandler, KeyEvent
 
 
 def _create_handler() -> InternalKeyHandler:

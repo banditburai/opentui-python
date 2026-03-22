@@ -16,7 +16,8 @@ dynamic siblings), so all tests use scrollbox with 2+ sibling expressions.
 """
 
 from opentui import test_render as _test_render
-from opentui.components.box import Box, ScrollBox, ScrollContent
+from opentui.components.box import Box
+from opentui.components.scrollbox import ScrollBox, ScrollContent
 from opentui.components.control_flow import For, Show
 from opentui.components.text import Text
 from opentui.signals import Signal
@@ -88,14 +89,14 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda h: _make_box_with_id(f"h-{h}"),
                         each=headers,
-                        render=lambda h: _make_box_with_id(f"h-{h}"),
                         key_fn=lambda h: f"h-{h}",
                         key="for-headers",
                     ),
                     For(
+                        lambda item: _make_box_with_id(f"i-{item}"),
                         each=items,
-                        render=lambda item: _make_box_with_id(f"i-{item}"),
                         key_fn=lambda item: f"i-{item}",
                         key="for-items",
                     ),
@@ -128,14 +129,14 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda h: _make_box_with_id(f"h-{h}"),
                         each=headers,
-                        render=lambda h: _make_box_with_id(f"h-{h}"),
                         key_fn=lambda h: f"h-{h}",
                         key="for-headers",
                     ),
                     For(
+                        lambda item: _make_box_with_id(f"i-{item}"),
                         each=items,
-                        render=lambda item: _make_box_with_id(f"i-{item}"),
                         key_fn=lambda item: f"i-{item}",
                         key="for-items",
                     ),
@@ -168,14 +169,14 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda h: _make_box_with_id(f"h-{h}"),
                         each=headers,
-                        render=lambda h: _make_box_with_id(f"h-{h}"),
                         key_fn=lambda h: f"h-{h}",
                         key="for-headers",
                     ),
                     For(
+                        lambda item: _make_box_with_id(f"i-{item}"),
                         each=items,
-                        render=lambda item: _make_box_with_id(f"i-{item}"),
                         key_fn=lambda item: f"i-{item}",
                         key="for-items",
                     ),
@@ -207,14 +208,14 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda h: _make_box_with_id(f"h-{h}"),
                         each=headers,
-                        render=lambda h: _make_box_with_id(f"h-{h}"),
                         key_fn=lambda h: f"h-{h}",
                         key="for-headers",
                     ),
                     For(
+                        lambda item: _make_box_with_id(f"i-{item}"),
                         each=items,
-                        render=lambda item: _make_box_with_id(f"i-{item}"),
                         key_fn=lambda item: f"i-{item}",
                         key="for-items",
                     ),
@@ -265,20 +266,20 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda a: _make_box_with_id(f"a-{a}"),
                         each=a_list,
-                        render=lambda a: _make_box_with_id(f"a-{a}"),
                         key_fn=lambda a: f"a-{a}",
                         key="for-a",
                     ),
                     For(
+                        lambda b: _make_box_with_id(f"b-{b}"),
                         each=b_list,
-                        render=lambda b: _make_box_with_id(f"b-{b}"),
                         key_fn=lambda b: f"b-{b}",
                         key="for-b",
                     ),
                     For(
+                        lambda c: _make_box_with_id(f"c-{c}"),
                         each=c_list,
-                        render=lambda c: _make_box_with_id(f"c-{c}"),
                         key_fn=lambda c: f"c-{c}",
                         key="for-c",
                     ),
@@ -317,14 +318,14 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda h: _make_box_with_id(f"h-{h['id']}"),
                         each=headers,
-                        render=lambda h: _make_box_with_id(f"h-{h['id']}"),
                         key_fn=lambda h: f"h-{h['id']}",
                         key="for-headers",
                     ),
                     For(
+                        lambda item: _make_box_with_id(f"i-{item['id']}"),
                         each=items,
-                        render=lambda item: _make_box_with_id(f"i-{item['id']}"),
                         key_fn=lambda item: f"i-{item['id']}",
                         key="for-items",
                     ),
@@ -358,14 +359,14 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda h: _make_box_with_id(f"h-{h['id']}"),
                         each=headers,
-                        render=lambda h: _make_box_with_id(f"h-{h['id']}"),
                         key_fn=lambda h: f"h-{h['id']}",
                         key="for-headers",
                     ),
                     For(
+                        lambda item: _make_box_with_id(f"i-{item['id']}"),
                         each=items,
-                        render=lambda item: _make_box_with_id(f"i-{item['id']}"),
                         key_fn=lambda item: f"i-{item['id']}",
                         key="for-items",
                     ),
@@ -410,14 +411,14 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda h: _make_box_with_id(f"h-{h}"),
                         each=headers,
-                        render=lambda h: _make_box_with_id(f"h-{h}"),
                         key_fn=lambda h: f"h-{h}",
                         key="for-headers",
                     ),
                     For(
+                        lambda item: _make_box_with_id(f"i-{item}"),
                         each=items,
-                        render=lambda item: _make_box_with_id(f"i-{item}"),
                         key_fn=lambda item: f"i-{item}",
                         key="for-items",
                     ),
@@ -460,14 +461,14 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda tag: _make_box_with_id(f"tag-{tag['id']}"),
                         each=tags,
-                        render=lambda tag: _make_box_with_id(f"tag-{tag['id']}"),
                         key_fn=lambda tag: f"tag-{tag['id']}",
                         key="for-tags",
                     ),
                     For(
+                        lambda row: _make_box_with_id(f"row-{row['id']}"),
                         each=rows,
-                        render=lambda row: _make_box_with_id(f"row-{row['id']}"),
                         key_fn=lambda row: f"row-{row['id']}",
                         key="for-rows",
                     ),
@@ -509,14 +510,14 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda s: _make_box_with_id(f"sys-{s['id']}"),
                         each=sys_items,
-                        render=lambda s: _make_box_with_id(f"sys-{s['id']}"),
                         key_fn=lambda s: f"sys-{s['id']}",
                         key="for-sys",
                     ),
                     For(
+                        lambda d: _make_box_with_id(f"data-{d['id']}"),
                         each=data_items,
-                        render=lambda d: _make_box_with_id(f"data-{d['id']}"),
                         key_fn=lambda d: f"data-{d['id']}",
                         key="for-data",
                     ),
@@ -562,19 +563,19 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda h: _make_box_with_id(f"h-{h}"),
                         each=headers,
-                        render=lambda h: _make_box_with_id(f"h-{h}"),
                         key_fn=lambda h: f"h-{h}",
                         key="for-headers",
                     ),
                     Show(
-                        when=lambda: show_items(),
-                        render=lambda: For(
+                        For(
+                            lambda item: _make_box_with_id(f"i-{item}"),
                             each=items,
-                            render=lambda item: _make_box_with_id(f"i-{item}"),
                             key_fn=lambda item: f"i-{item}",
                             key="for-items",
                         ),
+                        when=lambda: show_items(),
                         key="show-items",
                     ),
                     flex_grow=1,
@@ -617,23 +618,23 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     Show(
-                        when=lambda: mode() == "a",
-                        render=lambda: For(
+                        For(
+                            lambda item: _make_box_with_id(f"a-{item}"),
                             each=list_a,
-                            render=lambda item: _make_box_with_id(f"a-{item}"),
                             key_fn=lambda item: f"a-{item}",
                             key="for-a",
                         ),
+                        when=lambda: mode() == "a",
                         key="show-a",
                     ),
                     Show(
-                        when=lambda: mode() == "b",
-                        render=lambda: For(
+                        For(
+                            lambda item: _make_box_with_id(f"b-{item}"),
                             each=list_b,
-                            render=lambda item: _make_box_with_id(f"b-{item}"),
                             key_fn=lambda item: f"b-{item}",
                             key="for-b",
                         ),
+                        when=lambda: mode() == "b",
                         key="show-b",
                     ),
                     flex_grow=1,
@@ -678,8 +679,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     "scroll",
                     header,
                     For(
+                        lambda item: _make_box_with_id(f"item-{item}"),
                         each=items,
-                        render=lambda item: _make_box_with_id(f"item-{item}"),
                         key_fn=lambda item: f"item-{item}",
                         key="for-items",
                     ),
@@ -722,15 +723,15 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda item: _make_box_with_id(f"top-{item}"),
                         each=top_items,
-                        render=lambda item: _make_box_with_id(f"top-{item}"),
                         key_fn=lambda item: f"top-{item}",
                         key="for-top",
                     ),
                     divider,
                     For(
+                        lambda item: _make_box_with_id(f"bot-{item}"),
                         each=bottom_items,
-                        render=lambda item: _make_box_with_id(f"bot-{item}"),
                         key_fn=lambda item: f"bot-{item}",
                         key="for-bottom",
                     ),
@@ -771,8 +772,8 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                 return _make_scrollbox_with_id(
                     "scroll",
                     For(
+                        lambda item: _make_box_with_id(f"item-{item}"),
                         each=items,
-                        render=lambda item: _make_box_with_id(f"item-{item}"),
                         key_fn=lambda item: f"item-{item}",
                         key="for-items",
                     ),
@@ -814,14 +815,14 @@ class TestScrollboxCleanChildrenMultiSiblingCleanup:
                     "scroll",
                     # Simulates <Index>: uses enumerate to key by index
                     For(
+                        lambda pair: _make_box_with_id(f"idx-{pair[0]}"),
                         each=lambda: list(enumerate(index_items())),
-                        render=lambda pair: _make_box_with_id(f"idx-{pair[0]}"),
                         key_fn=lambda pair: f"idx-{pair[0]}",
                         key="for-index",
                     ),
                     For(
+                        lambda item: _make_box_with_id(f"for-{item}"),
                         each=for_items,
-                        render=lambda item: _make_box_with_id(f"for-{item}"),
                         key_fn=lambda item: f"for-{item}",
                         key="for-items",
                     ),

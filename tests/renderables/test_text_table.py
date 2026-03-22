@@ -170,6 +170,7 @@ class TestTextTableRenderable:
     async def test_reuses_raster_cache_when_table_is_clean(self):
         setup = await create_test_renderer(60, 16)
         try:
+
             class _CountingTable(TextTableRenderable):
                 __slots__ = ("border_calls", "cell_calls")
 

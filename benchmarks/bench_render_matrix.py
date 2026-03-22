@@ -426,7 +426,9 @@ async def _overlay_direct_paint():
         row.add(Text("page content beneath modal overlay", flex_grow=1, wrap_mode="none"))
         page.add(row)
 
-    modal_content = Box(width=48, height=16, left=36, top=8, border=True, background_color="#112233")
+    modal_content = Box(
+        width=48, height=16, left=36, top=8, border=True, background_color="#112233"
+    )
     lines: list[Text] = []
     for i in range(10):
         line = Text(f"Modal line {i}", width=40, left=2)
@@ -507,7 +509,9 @@ async def _portal_overlay_paint():
         row.add(Text("page content beneath modal overlay", flex_grow=1, wrap_mode="none"))
         page.add(row)
 
-    modal_content = Box(width=48, height=16, left=36, top=8, border=True, background_color="#112233")
+    modal_content = Box(
+        width=48, height=16, left=36, top=8, border=True, background_color="#112233"
+    )
     lines: list[Text] = []
     for i in range(10):
         line = Text(f"Modal line {i}", width=40, left=2)
@@ -580,10 +584,17 @@ async def _portal_overlay_mount_toggle():
 _SCENARIOS = (
     Scenario("plain_box_text_clean", "common_nodes", 120, _plain_box_text_tree_clean),
     Scenario("plain_box_text_paint", "common_nodes", 120, _plain_box_text_tree_paint),
-    Scenario("plain_box_text_background_clean", "common_nodes", 120, _plain_box_text_background_clean),
+    Scenario(
+        "plain_box_text_background_clean", "common_nodes", 120, _plain_box_text_background_clean
+    ),
     Scenario("plain_box_text_border_clean", "common_nodes", 120, _plain_box_text_border_clean),
     Scenario("plain_box_text_layout", "common_nodes", 80, _plain_box_text_tree_layout),
-    Scenario("plain_box_text_shared_parent_layout", "common_nodes", 80, _plain_box_text_shared_parent_layout),
+    Scenario(
+        "plain_box_text_shared_parent_layout",
+        "common_nodes",
+        80,
+        _plain_box_text_shared_parent_layout,
+    ),
     Scenario("wrapped_text_clean", "wrapped_text", 120, _wrapped_text_clean),
     Scenario("wrapped_text_paint", "wrapped_text", 120, _wrapped_text_paint),
     Scenario("retained_framebuffer_clean", "retained_layers", 120, _retained_framebuffer_clean),
@@ -623,7 +634,9 @@ async def _run_scenario(scenario: Scenario) -> tuple[str, str, dict[str, int]]:
         mutate = built[1]
     try:
         medians = collect_frame_medians(
-            setup, mutate, scenario.iterations,
+            setup,
+            mutate,
+            scenario.iterations,
             buckets=FRAME_BUCKETS,
             label_prefix=scenario.name,
         )
@@ -635,7 +648,9 @@ async def _run_scenario(scenario: Scenario) -> tuple[str, str, dict[str, int]]:
 async def _run() -> None:
     print("Render matrix benchmark")
     print(f"captured at {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print("note: reactivity/control-flow workloads are covered separately in benchmarks/bench_reactivity.py")
+    print(
+        "note: reactivity/control-flow workloads are covered separately in benchmarks/bench_reactivity.py"
+    )
     for scenario in _SCENARIOS:
         name, category, result = await _run_scenario(scenario)
         print(f"\n{name} [{category}]")

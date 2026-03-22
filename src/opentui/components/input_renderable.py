@@ -4,17 +4,19 @@ from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..colors import MUTED_GRAY
 from ..events import KeyEvent
-from ..keymapping import (
+from ..input.keymapping import (
     DEFAULT_KEY_ALIASES,
     KeyAliasMap,
     KeyBinding,
     build_key_bindings_map,
-    lookup_action,
+    init_key_bindings,
+    lookup_action_for_event,
     merge_key_aliases,
     merge_key_bindings,
 )
-from .base import Renderable
+from .base import Renderable, _parse_color_static, _Prop
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -28,8 +30,8 @@ _DEFAULT_INPUT_BINDINGS: list[KeyBinding] = [
     KeyBinding(name="backspace", action="delete-backward"),
     KeyBinding(name="delete", action="delete"),
     KeyBinding(name="w", action="delete-word-backward", ctrl=True),
-    KeyBinding(name="backspace", action="delete-word-backward", meta=True),
-    KeyBinding(name="d", action="delete-word-forward", meta=True),
+    KeyBinding(name="backspace", action="delete-word-backward", alt=True),
+    KeyBinding(name="d", action="delete-word-forward", alt=True),
     KeyBinding(name="u", action="delete-to-line-start", ctrl=True),
     KeyBinding(name="k", action="delete-to-line-end", ctrl=True),
     KeyBinding(name="d", action="delete-line", ctrl=True, shift=True),
@@ -41,10 +43,10 @@ _DEFAULT_INPUT_BINDINGS: list[KeyBinding] = [
     KeyBinding(name="e", action="line-end", ctrl=True),
     KeyBinding(name="home", action="buffer-home"),
     KeyBinding(name="end", action="buffer-end"),
-    KeyBinding(name="b", action="move-word-backward", meta=True),
-    KeyBinding(name="f", action="move-word-forward", meta=True),
-    KeyBinding(name="left", action="move-word-backward", meta=True),
-    KeyBinding(name="right", action="move-word-forward", meta=True),
+    KeyBinding(name="b", action="move-word-backward", alt=True),
+    KeyBinding(name="f", action="move-word-forward", alt=True),
+    KeyBinding(name="left", action="move-word-backward", alt=True),
+    KeyBinding(name="right", action="move-word-forward", alt=True),
     KeyBinding(name="d", action="delete", ctrl=True),
     KeyBinding(name="z", action="undo", ctrl=True),
     KeyBinding(name=".", action="redo", ctrl=True, shift=True),
@@ -120,7 +122,7 @@ class InputRenderable(Renderable):
         self._set_or_bind("_text_color", text_color, transform=self._parse_color)
         self._set_or_bind(
             "_placeholder_color",
-            placeholder_color if placeholder_color is not None else s.RGBA(0.5, 0.5, 0.5, 1.0),
+            placeholder_color if placeholder_color is not None else MUTED_GRAY,
             transform=self._parse_color,
         )
         self._set_or_bind(
@@ -138,13 +140,9 @@ class InputRenderable(Renderable):
         self._undo_stack: deque[tuple[str, int]] = deque(maxlen=self._MAX_UNDO_HISTORY)
         self._redo_stack: deque[tuple[str, int]] = deque(maxlen=self._MAX_UNDO_HISTORY)
 
-        self._key_bindings = list(_DEFAULT_INPUT_BINDINGS)
-        self._key_alias_map = dict(DEFAULT_KEY_ALIASES)
-        if key_bindings:
-            self._key_bindings = merge_key_bindings(self._key_bindings, key_bindings)
-        if key_alias_map:
-            self._key_alias_map = merge_key_aliases(self._key_alias_map, key_alias_map)
-        self._key_map = build_key_bindings_map(self._key_bindings, self._key_alias_map)
+        self._key_bindings, self._key_alias_map, self._key_map = init_key_bindings(
+            _DEFAULT_INPUT_BINDINGS, key_bindings, key_alias_map
+        )
 
         self._is_destroyed = False
 
@@ -205,59 +203,12 @@ class InputRenderable(Renderable):
         else:
             self.mark_paint_dirty()
 
-    @property
-    def text_color(self) -> s.RGBA | None:
-        return self._text_color
-
-    @text_color.setter
-    def text_color(self, v: s.RGBA | str | None) -> None:
-        self._text_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def background_color(self) -> s.RGBA | None:
-        return self._background_color
-
-    @background_color.setter
-    def background_color(self, v: s.RGBA | str | None) -> None:
-        self._background_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def focused_background_color(self) -> s.RGBA | None:
-        return self._focused_bg_color
-
-    @focused_background_color.setter
-    def focused_background_color(self, v: s.RGBA | str | None) -> None:
-        self._focused_bg_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def focused_text_color(self) -> s.RGBA | None:
-        return self._focused_text_color
-
-    @focused_text_color.setter
-    def focused_text_color(self, v: s.RGBA | str | None) -> None:
-        self._focused_text_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def placeholder_color(self) -> s.RGBA | None:
-        return self._placeholder_color
-
-    @placeholder_color.setter
-    def placeholder_color(self, v: s.RGBA | str | None) -> None:
-        self._placeholder_color = self._parse_color(v)
-        self.mark_paint_dirty()
-
-    @property
-    def cursor_color(self) -> s.RGBA | None:
-        return self._cursor_color
-
-    @cursor_color.setter
-    def cursor_color(self, v: s.RGBA | str | None) -> None:
-        self._cursor_color = self._parse_color(v)
-        self.mark_paint_dirty()
+    text_color = _Prop("_text_color", _parse_color_static, paint_only=True)
+    background_color = _Prop("_background_color", _parse_color_static, paint_only=True)
+    focused_background_color = _Prop("_focused_bg_color", _parse_color_static, paint_only=True)
+    focused_text_color = _Prop("_focused_text_color", _parse_color_static, paint_only=True)
+    placeholder_color = _Prop("_placeholder_color", _parse_color_static, paint_only=True)
+    cursor_color = _Prop("_cursor_color", _parse_color_static, paint_only=True)
 
     @property
     def key_bindings(self) -> list[KeyBinding]:
@@ -522,15 +473,7 @@ class InputRenderable(Renderable):
         return False
 
     def _lookup_action(self, event: KeyEvent) -> str | None:
-        return lookup_action(
-            event.key,
-            event.ctrl,
-            event.shift,
-            event.alt,
-            event.meta,
-            self._key_map,
-            self._key_alias_map,
-        )
+        return lookup_action_for_event(event, self._key_map, self._key_alias_map)
 
     def _dispatch_action(self, action: str) -> bool:
         handler = self._ACTION_TABLE.get(action)

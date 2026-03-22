@@ -10,7 +10,7 @@ import pytest
 
 from opentui import Box, create_test_renderer
 from opentui.events import MouseEvent
-from opentui.testing import SGRMouseButtons
+from opentui.testing.sgr import SGRMouseButtons
 
 
 # ---------------------------------------------------------------------------
@@ -847,11 +847,10 @@ class TestRendererHandleMouseData:
     async def test_move_events_include_modifier_flags(self):
         """Maps to test('move events include modifier flags').
 
-        In the Python input pipeline, SGR motion sequences with bit 32 set are
-        decoded as type='drag'.  We verify that modifier flags (shift, alt, ctrl)
-        are correctly propagated through the stdin -> input handler -> renderer
-        pipeline.  The handler used is _on_mouse_drag since that is what the
-        Python renderer delivers for motion events.
+        SGR motion sequences with no button held (button_code 32|3) are decoded
+        as type='move'.  We verify that modifier flags (shift, alt, ctrl) are
+        correctly propagated through the stdin -> input handler -> renderer
+        pipeline via the _on_mouse_move handler.
         """
         setup = await create_test_renderer(40, 20)
         try:
@@ -860,8 +859,7 @@ class TestRendererHandleMouseData:
             setup.render_frame()
 
             received: list[MouseEvent] = []
-            # Move events come through as "drag" type in the Python pipeline
-            target._on_mouse_drag = lambda e: received.append(e)
+            target._on_mouse_move = lambda e: received.append(e)
 
             setup.stdin_mouse.move_to(target.x + 1, target.y + 1, shift=True, alt=True)
 

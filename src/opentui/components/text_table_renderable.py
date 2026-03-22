@@ -6,9 +6,23 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
+from ..editor.text_buffer_native import NativeTextBuffer
+from ..editor.text_view_native import NativeTextBufferView
 from ..enums import RenderStrategy
-from ..native import NativeTextBuffer, NativeTextBufferView, _nb
+from ..native import _nb
 from .base import Renderable
+from .raster_cache import RasterCache
+from .table_borders import (
+    _BorderLayout,
+    draw_borders,
+    get_horizontal_border_count,
+    get_vertical_border_count,
+    resolve_border_layout,
+)
+from .table_layout_fitting import (
+    expand_column_widths,
+    fit_column_widths,
+)
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -16,54 +30,10 @@ if TYPE_CHECKING:
 # Large sentinel height for text measurement.
 MEASURE_HEIGHT = 10_000
 
-# Type aliases for table layout
 TextTableCellContent = list[dict] | None
 TextTableContent = list[list[TextTableCellContent]]
 TextTableColumnWidthMode = str  # "content" | "full"
 TextTableColumnFitter = str  # "proportional" | "balanced"
-
-# Border characters for grid drawing (single style)
-_BORDER_CHARS = {
-    "single": {
-        "h": "\u2500",  # ─
-        "v": "\u2502",  # │
-        "tl": "\u250c",  # ┌
-        "tr": "\u2510",  # ┐
-        "bl": "\u2514",  # └
-        "br": "\u2518",  # ┘
-        "t_down": "\u252c",  # ┬
-        "t_up": "\u2534",  # ┴
-        "t_right": "\u251c",  # ├
-        "t_left": "\u2524",  # ┤
-        "cross": "\u253c",  # ┼
-    },
-    "double": {
-        "h": "\u2550",  # ═
-        "v": "\u2551",  # ║
-        "tl": "\u2554",  # ╔
-        "tr": "\u2557",  # ╗
-        "bl": "\u255a",  # ╚
-        "br": "\u255d",  # ╝
-        "t_down": "\u2566",  # ╦
-        "t_up": "\u2569",  # ╩
-        "t_right": "\u2560",  # ╠
-        "t_left": "\u2563",  # ╣
-        "cross": "\u256c",  # ╬
-    },
-    "round": {
-        "h": "\u2500",  # ─
-        "v": "\u2502",  # │
-        "tl": "\u256d",  # ╭
-        "tr": "\u256e",  # ╮
-        "bl": "\u2570",  # ╰
-        "br": "\u256f",  # ╯
-        "t_down": "\u252c",  # ┬
-        "t_up": "\u2534",  # ┴
-        "t_right": "\u251c",  # ├
-        "t_left": "\u2524",  # ┤
-        "cross": "\u253c",  # ┼
-    },
-}
 
 
 class _CellState:
@@ -91,26 +61,6 @@ class _TableLayout:
         self.row_offsets: list[int] = [0]
         self.table_width: int = 0
         self.table_height: int = 0
-
-
-class _BorderLayout:
-    __slots__ = ("left", "right", "top", "bottom", "inner_vertical", "inner_horizontal")
-
-    def __init__(
-        self,
-        left: bool,
-        right: bool,
-        top: bool,
-        bottom: bool,
-        inner_vertical: bool,
-        inner_horizontal: bool,
-    ):
-        self.left = left
-        self.right = right
-        self.top = top
-        self.bottom = bottom
-        self.inner_vertical = inner_vertical
-        self.inner_horizontal = inner_horizontal
 
 
 class TextTableRenderable(Renderable):
@@ -157,12 +107,9 @@ class TextTableRenderable(Renderable):
         "_column_count",
         "_table_layout",
         "_layout_dirty",
-        "_raster_dirty",
+        "_raster",
         "_cached_measure_layout",
         "_cached_measure_width",
-        "_raster_buffer",
-        "_raster_buffer_ptr",
-        "_raster_buffer_size",
         "_last_local_selection",
         "_last_selection_mode",
         "_is_selecting",
@@ -237,12 +184,9 @@ class TextTableRenderable(Renderable):
 
         self._table_layout: _TableLayout = _TableLayout()
         self._layout_dirty: bool = True
-        self._raster_dirty: bool = True
+        self._raster = RasterCache(f"text-table-{self.id}")
         self._cached_measure_layout: _TableLayout | None = None
         self._cached_measure_width: int | None = None
-        self._raster_buffer: Buffer | None = None
-        self._raster_buffer_ptr: Any = None
-        self._raster_buffer_size: tuple[int, int] | None = None
 
         self._last_local_selection: dict | None = None
         self._last_selection_mode: str | None = None
@@ -465,7 +409,6 @@ class TextTableRenderable(Renderable):
             focus_y = selection.get("focusY", selection.get("focus_y", 0))
             is_active = selection.get("isActive", selection.get("is_active", False))
         else:
-            # Selection object
             anchor = selection.anchor
             focus = selection.focus
             anchor_x = anchor["x"]
@@ -972,7 +915,9 @@ class TextTableRenderable(Renderable):
         if max_table_width is None or max_table_width <= 0:
             return intrinsic_widths
 
-        max_content_width = max(1, max_table_width - self._get_vertical_border_count(border_layout))
+        max_content_width = max(
+            1, max_table_width - get_vertical_border_count(border_layout, self._column_count)
+        )
         current_width = sum(intrinsic_widths)
 
         if current_width == max_content_width:
@@ -980,196 +925,18 @@ class TextTableRenderable(Renderable):
 
         if current_width < max_content_width:
             if self._is_full_width_mode():
-                return self._expand_column_widths(intrinsic_widths, max_content_width)
+                return expand_column_widths(intrinsic_widths, max_content_width)
             return intrinsic_widths
 
         if self._wrap_mode_str == "none":
             return intrinsic_widths
 
-        return self._fit_column_widths(intrinsic_widths, max_content_width)
-
-    def _expand_column_widths(self, widths: list[int], target_content_width: int) -> list[int]:
-        base_widths = [max(1, int(w)) for w in widths]
-        total_base = sum(base_widths)
-
-        if total_base >= target_content_width:
-            return base_widths
-
-        expanded = list(base_widths)
-        columns = len(expanded)
-        extra_width = target_content_width - total_base
-        shared_width = extra_width // columns
-        remainder = extra_width % columns
-
-        for idx in range(columns):
-            expanded[idx] += shared_width
-            if idx < remainder:
-                expanded[idx] += 1
-
-        return expanded
-
-    def _fit_column_widths(self, widths: list[int], target_content_width: int) -> list[int]:
-        if self._column_fitter == "balanced":
-            return self._fit_column_widths_balanced(widths, target_content_width)
-        return self._fit_column_widths_proportional(widths, target_content_width)
-
-    def _fit_column_widths_proportional(
-        self, widths: list[int], target_content_width: int
-    ) -> list[int]:
-        min_width = 1 + self._get_horizontal_cell_padding()
-        hard_min_widths = [min_width] * len(widths)
-        base_widths = [max(1, int(w)) for w in widths]
-
-        preferred_min_widths = [min(w, min_width + 1) for w in base_widths]
-        preferred_min_total = sum(preferred_min_widths)
-
-        floor_widths = (
-            preferred_min_widths if preferred_min_total <= target_content_width else hard_min_widths
+        return fit_column_widths(
+            intrinsic_widths,
+            max_content_width,
+            self._column_fitter,
+            self._get_horizontal_cell_padding(),
         )
-        floor_total = sum(floor_widths)
-        clamped_target = max(floor_total, target_content_width)
-
-        total_base_width = sum(base_widths)
-
-        if total_base_width <= clamped_target:
-            return base_widths
-
-        shrinkable = [base_widths[i] - floor_widths[i] for i in range(len(base_widths))]
-        total_shrinkable = sum(shrinkable)
-        if total_shrinkable <= 0:
-            return list(floor_widths)
-
-        target_shrink = total_base_width - clamped_target
-        integer_shrink = [0] * len(base_widths)
-        fractions = [0.0] * len(base_widths)
-        used_shrink = 0
-
-        for idx in range(len(base_widths)):
-            if shrinkable[idx] <= 0:
-                continue
-            exact = (shrinkable[idx] / total_shrinkable) * target_shrink
-            whole = min(shrinkable[idx], int(exact))
-            integer_shrink[idx] = whole
-            fractions[idx] = exact - whole
-            used_shrink += whole
-
-        remaining_shrink = target_shrink - used_shrink
-
-        while remaining_shrink > 0:
-            best_idx = -1
-            best_fraction = -1.0
-
-            for idx in range(len(base_widths)):
-                if shrinkable[idx] - integer_shrink[idx] <= 0:
-                    continue
-                if fractions[idx] > best_fraction:
-                    best_fraction = fractions[idx]
-                    best_idx = idx
-
-            if best_idx == -1:
-                break
-
-            integer_shrink[best_idx] += 1
-            fractions[best_idx] = 0
-            remaining_shrink -= 1
-
-        return [
-            max(floor_widths[i], base_widths[i] - integer_shrink[i])
-            for i in range(len(base_widths))
-        ]
-
-    def _fit_column_widths_balanced(
-        self, widths: list[int], target_content_width: int
-    ) -> list[int]:
-        min_width = 1 + self._get_horizontal_cell_padding()
-        hard_min_widths = [min_width] * len(widths)
-        base_widths = [max(1, int(w)) for w in widths]
-        total_base_width = sum(base_widths)
-        columns = len(base_widths)
-
-        if columns == 0 or total_base_width <= target_content_width:
-            return base_widths
-
-        even_share = max(min_width, target_content_width // columns)
-        preferred_min_widths = [min(w, even_share) for w in base_widths]
-        preferred_min_total = sum(preferred_min_widths)
-        floor_widths = (
-            preferred_min_widths if preferred_min_total <= target_content_width else hard_min_widths
-        )
-        floor_total = sum(floor_widths)
-        clamped_target = max(floor_total, target_content_width)
-
-        if total_base_width <= clamped_target:
-            return base_widths
-
-        shrinkable = [base_widths[i] - floor_widths[i] for i in range(len(base_widths))]
-        total_shrinkable = sum(shrinkable)
-        if total_shrinkable <= 0:
-            return list(floor_widths)
-
-        target_shrink = total_base_width - clamped_target
-        shrink = self._allocate_shrink_by_weight(shrinkable, target_shrink, "sqrt")
-
-        return [max(floor_widths[i], base_widths[i] - shrink[i]) for i in range(len(base_widths))]
-
-    def _allocate_shrink_by_weight(
-        self, shrinkable: list[int], target_shrink: int, mode: str
-    ) -> list[int]:
-        shrink = [0] * len(shrinkable)
-
-        if target_shrink <= 0:
-            return shrink
-
-        weights = []
-        for value in shrinkable:
-            if value <= 0:
-                weights.append(0.0)
-            elif mode == "sqrt":
-                weights.append(math.sqrt(value))
-            else:
-                weights.append(float(value))
-
-        total_weight = sum(weights)
-        if total_weight <= 0:
-            return shrink
-
-        fractions = [0.0] * len(shrinkable)
-        used_shrink = 0
-
-        for idx in range(len(shrinkable)):
-            if shrinkable[idx] <= 0 or weights[idx] <= 0:
-                continue
-            exact = (weights[idx] / total_weight) * target_shrink
-            whole = min(shrinkable[idx], int(exact))
-            shrink[idx] = whole
-            fractions[idx] = exact - whole
-            used_shrink += whole
-
-        remaining_shrink = target_shrink - used_shrink
-
-        while remaining_shrink > 0:
-            best_idx = -1
-            best_fraction = -1.0
-
-            for idx in range(len(shrinkable)):
-                if shrinkable[idx] - shrink[idx] <= 0:
-                    continue
-                if (
-                    best_idx == -1
-                    or fractions[idx] > best_fraction
-                    or (fractions[idx] == best_fraction and shrinkable[idx] > shrinkable[best_idx])
-                ):
-                    best_idx = idx
-                    best_fraction = fractions[idx]
-
-            if best_idx == -1:
-                break
-
-            shrink[best_idx] += 1
-            fractions[best_idx] = 0
-            remaining_shrink -= 1
-
-        return shrink
 
     def _compute_row_heights(self, column_widths: list[int]) -> list[int]:
         horizontal_padding = self._get_horizontal_cell_padding()
@@ -1225,34 +992,9 @@ class TextTableRenderable(Renderable):
                 cell.text_buffer_view.set_viewport(0, 0, content_width, content_height)
 
     def _resolve_border_layout(self) -> _BorderLayout:
-        return _BorderLayout(
-            left=self._outer_border,
-            right=self._outer_border,
-            top=self._outer_border,
-            bottom=self._outer_border,
-            inner_vertical=self._table_border and self._column_count > 1,
-            inner_horizontal=self._table_border and self._row_count > 1,
+        return resolve_border_layout(
+            self._outer_border, self._table_border, self._column_count, self._row_count
         )
-
-    def _get_vertical_border_count(self, border_layout: _BorderLayout) -> int:
-        count = 0
-        if border_layout.left:
-            count += 1
-        if border_layout.right:
-            count += 1
-        if border_layout.inner_vertical:
-            count += max(0, self._column_count - 1)
-        return count
-
-    def _get_horizontal_border_count(self, border_layout: _BorderLayout) -> int:
-        count = 0
-        if border_layout.top:
-            count += 1
-        if border_layout.bottom:
-            count += 1
-        if border_layout.inner_horizontal:
-            count += max(0, self._row_count - 1)
-        return count
 
     def _get_horizontal_cell_padding(self) -> int:
         return self._cell_padding * 2
@@ -1279,7 +1021,7 @@ class TextTableRenderable(Renderable):
 
     def _invalidate_layout_and_raster(self, mark_yoga_dirty: bool = True) -> None:
         self._layout_dirty = True
-        self._raster_dirty = True
+        self._raster.invalidate()
         self._cached_measure_layout = None
         self._cached_measure_width = None
         if mark_yoga_dirty and self._yoga_node is not None:
@@ -1287,7 +1029,7 @@ class TextTableRenderable(Renderable):
         self.mark_dirty()
 
     def _invalidate_raster_only(self) -> None:
-        self._raster_dirty = True
+        self._raster.invalidate()
         self.mark_paint_dirty()
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
@@ -1297,25 +1039,14 @@ class TextTableRenderable(Renderable):
         if self._layout_dirty:
             self._rebuild_layout_for_current_width()
 
-        raster = self._ensure_raster_buffer()
-        if raster is not None and self._layout_width and self._layout_height:
-            if self._raster_dirty:
-                raster.clear(0.0)
-                raster.push_offset(-self._x, -self._y)
-                try:
-                    self._render_table_contents(raster)
-                finally:
-                    raster.pop_offset()
-                self._raster_dirty = False
-
-            try:
-                buffer._native.draw_frame_buffer(buffer._ptr, self._x, self._y, raster._ptr)
-                return
-            except Exception:
-                pass
-
-        self._render_table_contents(buffer)
-        self._raster_dirty = False
+        self._raster.render_cached(
+            buffer,
+            self._x,
+            self._y,
+            self._layout_width,
+            self._layout_height,
+            self._render_table_contents,
+        )
 
     def _render_table_contents(self, buffer: Buffer) -> None:
         x = self._x
@@ -1325,49 +1056,11 @@ class TextTableRenderable(Renderable):
 
         self._draw_cells(buffer, x, y)
 
-    def _ensure_raster_buffer(self) -> Buffer | None:
-        width = max(0, int(self._layout_width or 0))
-        height = max(0, int(self._layout_height or 0))
-        if width <= 0 or height <= 0:
-            return None
-
-        if self._raster_buffer_ptr is None:
-            ptr = _nb.buffer.create_optimized_buffer(
-                width, height, True, 0, f"text-table-{self.id}"
-            )
-            from ..renderer import Buffer as RenderBuffer
-
-            self._raster_buffer_ptr = ptr
-            self._raster_buffer = RenderBuffer(ptr, _nb.buffer, _nb.graphics)
-            self._raster_buffer_size = (width, height)
-            self._raster_dirty = True
-            return self._raster_buffer
-
-        if self._raster_buffer_size != (width, height):
-            assert self._raster_buffer is not None
-            self._raster_buffer.resize(width, height)
-            self._raster_buffer_size = (width, height)
-            self._raster_dirty = True
-
-        return self._raster_buffer
-
-    def _release_raster_buffer(self) -> None:
-        if self._raster_buffer_ptr is None:
-            return
-        try:
-            _nb.buffer.destroy_optimized_buffer(self._raster_buffer_ptr)
-        except Exception:
-            pass
-        finally:
-            self._raster_buffer = None
-            self._raster_buffer_ptr = None
-            self._raster_buffer_size = None
-
     def _draw_borders(self, buffer: Buffer, base_x: int, base_y: int) -> None:
         """Draw grid borders, preferring the core native grid primitive."""
         border_layout = self._resolve_border_layout()
-        vcount = self._get_vertical_border_count(border_layout)
-        hcount = self._get_horizontal_border_count(border_layout)
+        vcount = get_vertical_border_count(border_layout, self._column_count)
+        hcount = get_horizontal_border_count(border_layout, self._row_count)
 
         if vcount == 0 and hcount == 0:
             return
@@ -1398,146 +1091,20 @@ class TextTableRenderable(Renderable):
             except Exception:
                 pass
 
-        chars = _BORDER_CHARS.get(self._border_style_str, _BORDER_CHARS["single"])
         fg = self._border_color_val
         bg = self._border_bg_color if self._border_bg_color.a > 0 else None
-
-        col_offsets = self._table_layout.column_offsets
-        row_offsets = self._table_layout.row_offsets
-        col_widths = self._table_layout.column_widths
-        row_heights = self._table_layout.row_heights
-        n_cols = self._column_count
-        n_rows = self._row_count
-
-        # Draw horizontal border lines
-        for border_idx in range(n_rows + 1):
-            # Determine if this border should be drawn
-            if border_idx == 0:
-                if not border_layout.top:
-                    continue
-            elif border_idx == n_rows:
-                if not border_layout.bottom:
-                    continue
-            elif not border_layout.inner_horizontal:
-                continue
-
-            # Y position of this horizontal border
-            if border_idx < len(row_offsets):
-                by = row_offsets[border_idx]
-            elif (
-                border_idx > 0
-                and border_idx - 1 < len(row_offsets)
-                and border_idx - 1 < len(row_heights)
-            ):
-                by = row_offsets[border_idx - 1] + 1 + row_heights[border_idx - 1]
-            else:
-                continue
-
-            if by < 0:
-                continue
-
-            abs_by = base_y + by
-
-            # Draw horizontal segments and intersections
-            for col_border_idx in range(n_cols + 1):
-                if col_border_idx == 0:
-                    draw_vertical = border_layout.left
-                elif col_border_idx == n_cols:
-                    draw_vertical = border_layout.right
-                else:
-                    draw_vertical = border_layout.inner_vertical
-
-                if draw_vertical:
-                    if col_border_idx < len(col_offsets):
-                        bx = col_offsets[col_border_idx]
-                    elif (
-                        col_border_idx > 0
-                        and col_border_idx - 1 < len(col_offsets)
-                        and col_border_idx - 1 < len(col_widths)
-                    ):
-                        bx = col_offsets[col_border_idx - 1] + 1 + col_widths[col_border_idx - 1]
-                    else:
-                        continue
-
-                    if bx < 0:
-                        continue
-
-                    abs_bx = base_x + bx
-
-                    is_top = border_idx == 0
-                    is_bottom = border_idx == n_rows
-                    is_left = col_border_idx == 0
-                    is_right = col_border_idx == n_cols
-
-                    ch = self._get_intersection_char(chars, is_top, is_bottom, is_left, is_right)
-                    buffer.draw_text(ch, abs_bx, abs_by, fg, bg)
-
-                if col_border_idx < n_cols:
-                    if col_border_idx < len(col_offsets):
-                        seg_start = col_offsets[col_border_idx] + 1
-                    else:
-                        continue
-                    seg_width = (
-                        col_widths[col_border_idx] if col_border_idx < len(col_widths) else 1
-                    )
-                    for sx in range(seg_width):
-                        buffer.draw_text(chars["h"], base_x + seg_start + sx, abs_by, fg, bg)
-
-        for row_idx in range(n_rows):
-            if row_idx >= len(row_offsets) or row_idx >= len(row_heights):
-                continue
-            cell_y_start = row_offsets[row_idx] + 1
-            cell_height = row_heights[row_idx]
-
-            for vy in range(cell_height):
-                abs_vy = base_y + cell_y_start + vy
-
-                for col_border_idx in range(n_cols + 1):
-                    if col_border_idx == 0:
-                        if not border_layout.left:
-                            continue
-                    elif col_border_idx == n_cols:
-                        if not border_layout.right:
-                            continue
-                    elif not border_layout.inner_vertical:
-                        continue
-
-                    if col_border_idx < len(col_offsets):
-                        vx = col_offsets[col_border_idx]
-                    elif (
-                        col_border_idx > 0
-                        and col_border_idx - 1 < len(col_offsets)
-                        and col_border_idx - 1 < len(col_widths)
-                    ):
-                        vx = col_offsets[col_border_idx - 1] + 1 + col_widths[col_border_idx - 1]
-                    else:
-                        continue
-
-                    if vx < 0:
-                        continue
-
-                    buffer.draw_text(chars["v"], base_x + vx, abs_vy, fg, bg)
-
-    def _get_intersection_char(
-        self, chars: dict, is_top: bool, is_bottom: bool, is_left: bool, is_right: bool
-    ) -> str:
-        if is_top and is_left:
-            return chars["tl"]
-        if is_top and is_right:
-            return chars["tr"]
-        if is_bottom and is_left:
-            return chars["bl"]
-        if is_bottom and is_right:
-            return chars["br"]
-        if is_top:
-            return chars["t_down"]
-        if is_bottom:
-            return chars["t_up"]
-        if is_left:
-            return chars["t_right"]
-        if is_right:
-            return chars["t_left"]
-        return chars["cross"]
+        draw_borders(
+            buffer,
+            base_x,
+            base_y,
+            self._border_style_str,
+            fg,
+            bg,
+            border_layout,
+            self._table_layout,
+            self._column_count,
+            self._row_count,
+        )
 
     def _draw_cells(self, buffer: Buffer, base_x: int, base_y: int) -> None:
         col_offsets = self._table_layout.column_offsets
@@ -1567,7 +1134,7 @@ class TextTableRenderable(Renderable):
                         )
 
     def destroy(self) -> None:
-        self._release_raster_buffer()
+        self._raster.release()
         self._cells.clear()
         self._prev_cell_content.clear()
         self._row_count = 0

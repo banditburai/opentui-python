@@ -1531,7 +1531,7 @@ async def test_regular_parsing_always_defaults_to_press_event_type_via_key_input
 
 def test_non_alphanumeric_keys_export_validation():
     """Maps to test('nonAlphanumericKeys export validation')."""
-    from opentui.input import NON_ALPHANUMERIC_KEYS
+    from opentui.input.key_maps import NON_ALPHANUMERIC_KEYS
 
     assert isinstance(NON_ALPHANUMERIC_KEYS, list)
     assert len(NON_ALPHANUMERIC_KEYS) > 0

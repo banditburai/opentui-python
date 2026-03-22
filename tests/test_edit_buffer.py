@@ -5,7 +5,8 @@ Tests ported: 142/142 (140 implemented, 2 skipped)
 """
 
 import pytest
-from opentui.native import NativeEditBuffer, is_available
+from opentui.editor.edit_buffer_native import NativeEditBuffer
+from opentui.native import is_available
 
 pytestmark = pytest.mark.skipif(not is_available(), reason="Native bindings not available")
 

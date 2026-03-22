@@ -9,7 +9,7 @@ import pytest
 from opentui import create_test_renderer
 from opentui.components.input_renderable import InputRenderable
 from opentui.events import KeyEvent
-from opentui.keymapping import KeyBinding
+from opentui.input.keymapping import KeyBinding
 from opentui.structs import RGBA
 
 

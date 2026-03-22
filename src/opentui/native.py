@@ -3,52 +3,16 @@
 from __future__ import annotations
 
 import ctypes
-import importlib.util
-import os
-import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-_nb: Any = None
-_NANOBIND_AVAILABLE = False
+if TYPE_CHECKING:
+    from .editor.editor_view_native import NativeEditorView
+    from .editor.text_view_native import NativeTextBufferView
 
-# Reuse FFI search/preload logic from ffi.py (single source of truth).
-from .ffi import (
-    _binding_filename_matches_runtime,
-    _iter_binding_search_dirs,
-    _preload_opentui_library,
-)
+from .ffi import get_native, is_native_available
 
-_preload_opentui_library()
-_search_dirs = _iter_binding_search_dirs()
-
-_so_file = None
-if "opentui_bindings" in sys.modules:
-    _nb = sys.modules["opentui_bindings"]
-    _NANOBIND_AVAILABLE = True
-
-if _nb is None:
-    for _dir in _search_dirs:
-        if os.path.isdir(_dir):
-            for f in os.listdir(_dir):
-                if f.startswith("opentui_bindings") and _binding_filename_matches_runtime(f):
-                    _so_file = os.path.join(_dir, f)
-                    break
-        if _so_file:
-            break
-
-if _so_file and _nb is None:
-    try:
-        spec = importlib.util.spec_from_file_location("opentui_bindings", _so_file)
-        if spec and spec.loader:
-            _nb = importlib.util.module_from_spec(spec)
-            sys.modules["opentui_bindings"] = _nb
-            spec.loader.exec_module(_nb)
-            _NANOBIND_AVAILABLE = True
-    except Exception as e:
-        import warnings
-
-        warnings.warn(f"Failed to load nanobind bindings: {e}", stacklevel=1)
-        _nb = None
+_nb: Any = get_native()
+_NANOBIND_AVAILABLE: bool = is_native_available()
 
 
 def _decode(value: Any) -> str:
@@ -333,27 +297,10 @@ def is_available() -> bool:
     return _NANOBIND_AVAILABLE
 
 
-# ---------------------------------------------------------------------------
-# Submodule re-exports (extracted for modularity, re-exported for compatibility)
-# ---------------------------------------------------------------------------
-
-from .text_buffer_native import NativeTextBuffer, NativeSyntaxStyle
-from .text_view_native import NativeTextBufferView
-from .edit_buffer_native import NativeEditBuffer
-from .editor_view_native import NativeEditorView, VisualCursor
-from .image_cache import ImageCache
-
-
 __all__ = [
     "NativeRenderer",
     "NativeBuffer",
     "NativeOptimizedBuffer",
-    "NativeTextBuffer",
-    "NativeTextBufferView",
-    "NativeEditBuffer",
-    "NativeEditorView",
-    "NativeSyntaxStyle",
-    "VisualCursor",
-    "ImageCache",
     "is_available",
+    "encode_unicode",
 ]

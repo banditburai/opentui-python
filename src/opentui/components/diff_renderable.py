@@ -2,163 +2,23 @@
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
 from ..enums import RenderStrategy
-from ..native import _nb
+from ..text_utils import wrap_text as _tu_wrap_text
 from .base import Renderable
+from .diff_parser import (
+    LineColorConfig,
+    LineSign,
+    LogicalLine,
+    StructuredPatch,
+    parse_patch,
+)
+from .raster_cache import RasterCache
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
-
-
-@dataclass
-class Hunk:
-    old_start: int = 0
-    old_lines: int = 0
-    new_start: int = 0
-    new_lines: int = 0
-    lines: list[str] = field(default_factory=list)
-
-
-@dataclass
-class StructuredPatch:
-    old_file_name: str = ""
-    new_file_name: str = ""
-    old_header: str = ""
-    new_header: str = ""
-    hunks: list[Hunk] = field(default_factory=list)
-
-
-_HUNK_HEADER_RE = re.compile(r"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@")
-
-
-def parse_patch(text: str) -> list[StructuredPatch]:
-    """Parse a unified diff string into StructuredPatch objects.
-
-    Raises ValueError on malformed hunk headers.
-    """
-    if not text:
-        return []
-
-    patches: list[StructuredPatch] = []
-    lines = text.split("\n")
-    i = 0
-
-    while i < len(lines):
-        line = lines[i]
-
-        # Look for --- header
-        if line.startswith("---"):
-            patch = StructuredPatch()
-            # Parse old filename
-            parts = line.split("\t", 1)
-            patch.old_file_name = parts[0][4:].strip()  # skip "--- "
-            patch.old_header = parts[1] if len(parts) > 1 else ""
-            i += 1
-
-            # Parse new filename (+++)
-            if i < len(lines) and lines[i].startswith("+++"):
-                parts = lines[i].split("\t", 1)
-                patch.new_file_name = parts[0][4:].strip()
-                patch.new_header = parts[1] if len(parts) > 1 else ""
-                i += 1
-
-            # Parse hunks
-            while i < len(lines):
-                line = lines[i]
-                if line.startswith("---"):
-                    break  # next patch
-
-                if line.startswith("@@"):
-                    m = _HUNK_HEADER_RE.match(line)
-                    if not m:
-                        raise ValueError(f"Unknown line {i + 1} {line!r}")
-                    hunk = Hunk(
-                        old_start=int(m.group(1)),
-                        old_lines=int(m.group(2)) if m.group(2) else 1,
-                        new_start=int(m.group(3)),
-                        new_lines=int(m.group(4)) if m.group(4) else 1,
-                    )
-                    i += 1
-
-                    # Collect hunk lines — track expected line count to
-                    # know when the hunk is complete.
-                    expected_old = hunk.old_lines
-                    expected_new = hunk.new_lines
-                    seen_old = 0
-                    seen_new = 0
-                    while i < len(lines):
-                        hline = lines[i]
-                        if hline.startswith("@@") or hline.startswith("---"):
-                            break
-                        if hline.startswith("+"):
-                            hunk.lines.append(hline)
-                            seen_new += 1
-                            i += 1
-                        elif hline.startswith("-"):
-                            hunk.lines.append(hline)
-                            seen_old += 1
-                            i += 1
-                        elif hline.startswith(" "):
-                            hunk.lines.append(hline)
-                            seen_old += 1
-                            seen_new += 1
-                            i += 1
-                        elif hline.startswith("\\"):
-                            # "\ No newline at end of file" — skip
-                            i += 1
-                        elif hline == "":
-                            # Empty line — could be an empty context line within
-                            # a hunk (common in diffs) or end of diff.
-                            # Treat as context if we haven't consumed all expected lines.
-                            if seen_old < expected_old or seen_new < expected_new:
-                                hunk.lines.append(" ")  # empty context line
-                                seen_old += 1
-                                seen_new += 1
-                                i += 1
-                            else:
-                                i += 1
-                                break
-                        else:
-                            raise ValueError(f"Unknown line {i + 1} {hline!r}")
-
-                    patch.hunks.append(hunk)
-                elif line.startswith("Index:") or line.startswith("====="):
-                    i += 1
-                else:
-                    i += 1
-
-            patches.append(patch)
-        else:
-            i += 1
-
-    return patches
-
-
-@dataclass
-class LineSign:
-    after: str = ""
-    after_color: s.RGBA | None = None
-
-
-@dataclass
-class LineColorConfig:
-    gutter: s.RGBA | None = None
-    content: s.RGBA | None = None
-
-
-@dataclass
-class LogicalLine:
-    content: str = ""
-    line_num: int | None = None
-    hide_line_number: bool = False
-    color: s.RGBA | None = None
-    sign: LineSign | None = None
-    line_type: str = "context"  # "context" | "add" | "remove" | "empty"
 
 
 class DiffRenderable(Renderable):
@@ -216,14 +76,6 @@ class DiffRenderable(Renderable):
         "_right_line_numbers",
         "_left_hide_line_numbers",
         "_right_hide_line_numbers",
-        # Listener tracking
-        "_listener_count",
-        # Line highlighting
-        "_user_line_colors",
-        "_user_highlight_ranges",
-        # Rebuild state
-        "_pending_rebuild",
-        "_last_width",
         # Cached mock renderables for event emission
         "_mock_left_code",
         "_mock_right_code",
@@ -231,10 +83,7 @@ class DiffRenderable(Renderable):
         "_mock_left_line_num",
         "_mock_right_line_num",
         # Retained raster cache
-        "_raster_dirty",
-        "_raster_buffer",
-        "_raster_buffer_ptr",
-        "_raster_buffer_size",
+        "_raster",
     )
 
     def __init__(
@@ -265,7 +114,6 @@ class DiffRenderable(Renderable):
         # Base renderable options
         **kwargs,
     ):
-        # Set flex direction based on view mode
         if "flex_direction" not in kwargs:
             kwargs["flex_direction"] = "row" if view == "split" else "column"
         super().__init__(**kwargs)
@@ -320,29 +168,14 @@ class DiffRenderable(Renderable):
         self._left_hide_line_numbers: set[int] = set()
         self._right_hide_line_numbers: set[int] = set()
 
-        # Listener tracking (for no-leak tests)
-        self._listener_count = 0
-
-        # Line highlighting API
-        self._user_line_colors: dict[int, s.RGBA | str | LineColorConfig] = {}
-        self._user_highlight_ranges: list[tuple[int, int, s.RGBA | str | LineColorConfig]] = []
-
-        # Rebuild state
-        self._pending_rebuild = False
-        self._last_width = 0
-
         # Cached mock renderables for event emission
         self._mock_left_code: _MockCodeRenderable | None = None
         self._mock_right_code: _MockCodeRenderable | None = None
         # Cached mock line number renderables
         self._mock_left_line_num: _MockLineNumberRenderable | None = None
         self._mock_right_line_num: _MockLineNumberRenderable | None = None
-        self._raster_dirty = True
-        self._raster_buffer = None
-        self._raster_buffer_ptr = None
-        self._raster_buffer_size: tuple[int, int] | None = None
+        self._raster = RasterCache(f"diff-{self.id}")
 
-        # Parse and build view
         if self._diff_text:
             self._parse_diff()
             self._build_view()
@@ -352,13 +185,13 @@ class DiffRenderable(Renderable):
         return RenderStrategy.HEAVY_WIDGET
 
     def mark_dirty(self) -> None:
-        if hasattr(self, "_raster_dirty"):
-            self._raster_dirty = True
+        if hasattr(self, "_raster"):
+            self._raster.invalidate()
         super().mark_dirty()
 
     def mark_paint_dirty(self) -> None:
-        if hasattr(self, "_raster_dirty"):
-            self._raster_dirty = True
+        if hasattr(self, "_raster"):
+            self._raster.invalidate()
         super().mark_paint_dirty()
 
     # ── Properties ──────────────────────────────────────────────────────
@@ -851,14 +684,6 @@ class DiffRenderable(Renderable):
 
     # ── Rendering ───────────────────────────────────────────────────────
 
-    def _compute_gutter_width(self, line_numbers: dict[int, int]) -> int:
-        if not line_numbers:
-            return 2  # minimum
-        max_num = max(line_numbers.values())
-        num_width = len(str(max_num))
-        # Format: " <num> <sign> " — num_width + 1 padding left + sign(2) + 1 space
-        return num_width + 1  # just the number column width (padding added at render)
-
     def _render_diff_contents(self, buffer: Buffer) -> None:
         x = self._x + self._padding_left
         y = self._y + self._padding_top
@@ -892,64 +717,17 @@ class DiffRenderable(Renderable):
         if self._render_before:
             self._render_before(buffer, delta_time, self)
 
-        raster = self._ensure_raster_buffer()
-        if raster is not None and self._layout_width and self._layout_height:
-            if self._raster_dirty:
-                raster.clear(0.0)
-                raster.push_offset(-self._x, -self._y)
-                try:
-                    self._render_diff_contents(raster)
-                finally:
-                    raster.pop_offset()
-                self._raster_dirty = False
-
-            try:
-                buffer._native.draw_frame_buffer(buffer._ptr, self._x, self._y, raster._ptr)
-            except Exception:
-                self._render_diff_contents(buffer)
-                self._raster_dirty = False
-        else:
-            self._render_diff_contents(buffer)
-            self._raster_dirty = False
+        self._raster.render_cached(
+            buffer,
+            self._x,
+            self._y,
+            self._layout_width,
+            self._layout_height,
+            self._render_diff_contents,
+        )
 
         if self._render_after:
             self._render_after(buffer, delta_time, self)
-
-    def _ensure_raster_buffer(self) -> Buffer | None:
-        width = max(0, int(self._layout_width or 0))
-        height = max(0, int(self._layout_height or 0))
-        if width <= 0 or height <= 0:
-            return None
-
-        if self._raster_buffer_ptr is None:
-            ptr = _nb.buffer.create_optimized_buffer(width, height, True, 0, f"diff-{self.id}")
-            from ..renderer import Buffer as RenderBuffer
-
-            self._raster_buffer_ptr = ptr
-            self._raster_buffer = RenderBuffer(ptr, _nb.buffer, _nb.graphics)
-            self._raster_buffer_size = (width, height)
-            self._raster_dirty = True
-            return self._raster_buffer
-
-        if self._raster_buffer_size != (width, height):
-            assert self._raster_buffer is not None
-            self._raster_buffer.resize(width, height)
-            self._raster_buffer_size = (width, height)
-            self._raster_dirty = True
-
-        return self._raster_buffer
-
-    def _release_raster_buffer(self) -> None:
-        if self._raster_buffer_ptr is None:
-            return
-        try:
-            _nb.buffer.destroy_optimized_buffer(self._raster_buffer_ptr)
-        except Exception:
-            pass
-        finally:
-            self._raster_buffer = None
-            self._raster_buffer_ptr = None
-            self._raster_buffer_size = None
 
     def _render_error_view(self, buffer: Buffer, x: int, y: int, width: int, height: int) -> None:
         for i, line in enumerate(self._unified_lines):
@@ -964,36 +742,11 @@ class DiffRenderable(Renderable):
     def _wrap_text(text: str, width: int, mode: str | None) -> list[str]:
         """Split *text* into visual rows that fit in *width* columns.
 
-        When *mode* is ``"word"``, breaks on word boundaries; ``"char"``
-        breaks at any character.  Returns ``[text]`` (single row) if
-        the text already fits or mode is ``None``/``"none"``.
+        Delegates to ``text_utils.wrap_text`` which uses ``display_width()``
+        for correct CJK/emoji handling.  Maps ``mode=None`` to ``wrap="none"``
+        to preserve the original "return [text]" behavior.
         """
-        if width <= 0 or len(text) <= width:
-            return [text]
-
-        rows: list[str] = []
-        remaining = text
-
-        if mode == "word":
-            while len(remaining) > width:
-                # Find last space within width
-                break_at = remaining.rfind(" ", 0, width + 1)
-                if break_at <= 0:
-                    break_at = width  # hard break
-                rows.append(remaining[:break_at])
-                remaining = (
-                    remaining[break_at:].lstrip(" ") if mode == "word" else remaining[break_at:]
-                )
-            if remaining:
-                rows.append(remaining)
-        else:  # char
-            while len(remaining) > width:
-                rows.append(remaining[:width])
-                remaining = remaining[width:]
-            if remaining:
-                rows.append(remaining)
-
-        return rows or [text]
+        return _tu_wrap_text(text, width, mode or "none")
 
     def _render_side(
         self,
@@ -1031,7 +784,6 @@ class DiffRenderable(Renderable):
             if visual_row >= height:
                 break
 
-            # Line color config
             color_config = line_colors.get(i)
 
             if do_wrap and content_width > 0 and len(line) > content_width:
@@ -1201,6 +953,47 @@ class DiffRenderable(Renderable):
         l_hide = self._left_hide_line_numbers
         r_hide = self._right_hide_line_numbers
 
+        def _draw_side(
+            buf: Buffer,
+            vr: int,
+            i: int,
+            ly: int,
+            rows: list[str],
+            sx: int,
+            cx: int,
+            cw: int,
+            gw: int,
+            sw: int,
+            cc: Any,
+            line_nums: dict[int, int],
+            signs: dict[int, Any],
+            hide: set[int],
+        ) -> None:
+            if vr >= len(rows):
+                return
+            if cc and cc.gutter and self._show_line_numbers:
+                buf.fill_rect(sx, ly, gw + sw + 1, 1, cc.gutter)
+            if cc and cc.content:
+                buf.fill_rect(cx, ly, cw, 1, cc.content)
+            if vr == 0 and self._show_line_numbers and i not in hide:
+                ln = line_nums.get(i)
+                if ln is not None:
+                    buf.draw_text(
+                        str(ln).rjust(gw),
+                        sx,
+                        ly,
+                        self._line_number_fg_color,
+                        cc.gutter if cc else None,
+                    )
+            if vr == 0 and self._show_line_numbers:
+                s = signs.get(i)
+                if s and s.after:
+                    buf.draw_text(s.after, sx + gw, ly, s.after_color, cc.gutter if cc else None)
+            if cw > 0:
+                buf.draw_text(
+                    rows[vr], cx, ly, self._diff_fg, cc.content if cc else self._background_color
+                )
+
         for i in range(num_logical):
             if visual_row >= height:
                 break
@@ -1208,7 +1001,6 @@ class DiffRenderable(Renderable):
             lw = left_wrapped[i]
             rw = right_wrapped[i]
             max_rows = max(len(lw), len(rw))
-
             l_cc = self._left_line_colors.get(i)
             r_cc = self._right_line_colors.get(i)
 
@@ -1216,114 +1008,46 @@ class DiffRenderable(Renderable):
                 if visual_row >= height:
                     break
                 ly = y + visual_row
-
-                # -- Left side --
-                if vr < len(lw):
-                    if l_cc and l_cc.gutter and self._show_line_numbers:
-                        buffer.fill_rect(x, ly, l_gw + l_sw + 1, 1, l_cc.gutter)
-                    if l_cc and l_cc.content:
-                        buffer.fill_rect(l_cx, ly, left_cw, 1, l_cc.content)
-                    if vr == 0 and self._show_line_numbers and i not in l_hide:
-                        ln = self._left_line_numbers.get(i)
-                        if ln is not None:
-                            ns = str(ln).rjust(l_gw)
-                            buffer.draw_text(
-                                ns, x, ly, self._line_number_fg_color, l_cc.gutter if l_cc else None
-                            )
-                    if vr == 0 and self._show_line_numbers:
-                        ls = self._left_line_signs.get(i)
-                        if ls and ls.after:
-                            buffer.draw_text(
-                                ls.after,
-                                x + l_gw,
-                                ly,
-                                ls.after_color,
-                                l_cc.gutter if l_cc else None,
-                            )
-                    if left_cw > 0:
-                        buffer.draw_text(
-                            lw[vr],
-                            l_cx,
-                            ly,
-                            self._diff_fg,
-                            l_cc.content if l_cc else self._background_color,
-                        )
-
-                # -- Right side --
-                if vr < len(rw):
-                    rx = x + half_width
-                    if r_cc and r_cc.gutter and self._show_line_numbers:
-                        buffer.fill_rect(rx, ly, r_gw + r_sw + 1, 1, r_cc.gutter)
-                    if r_cc and r_cc.content:
-                        buffer.fill_rect(r_cx, ly, right_cw, 1, r_cc.content)
-                    if vr == 0 and self._show_line_numbers and i not in r_hide:
-                        rn = self._right_line_numbers.get(i)
-                        if rn is not None:
-                            ns = str(rn).rjust(r_gw)
-                            buffer.draw_text(
-                                ns,
-                                rx,
-                                ly,
-                                self._line_number_fg_color,
-                                r_cc.gutter if r_cc else None,
-                            )
-                    if vr == 0 and self._show_line_numbers:
-                        rs = self._right_line_signs.get(i)
-                        if rs and rs.after:
-                            buffer.draw_text(
-                                rs.after,
-                                rx + r_gw,
-                                ly,
-                                rs.after_color,
-                                r_cc.gutter if r_cc else None,
-                            )
-                    if right_cw > 0:
-                        buffer.draw_text(
-                            rw[vr],
-                            r_cx,
-                            ly,
-                            self._diff_fg,
-                            r_cc.content if r_cc else self._background_color,
-                        )
-
+                _draw_side(
+                    buffer,
+                    vr,
+                    i,
+                    ly,
+                    lw,
+                    x,
+                    l_cx,
+                    left_cw,
+                    l_gw,
+                    l_sw,
+                    l_cc,
+                    self._left_line_numbers,
+                    self._left_line_signs,
+                    l_hide,
+                )
+                _draw_side(
+                    buffer,
+                    vr,
+                    i,
+                    ly,
+                    rw,
+                    x + half_width,
+                    r_cx,
+                    right_cw,
+                    r_gw,
+                    r_sw,
+                    r_cc,
+                    self._right_line_numbers,
+                    self._right_line_signs,
+                    r_hide,
+                )
                 visual_row += 1
-
-    # ── Line highlighting API ───────────────────────────────────────────
-
-    def set_line_color(self, line: int, color: s.RGBA | str | LineColorConfig) -> None:
-        self._user_line_colors[line] = color
-
-    def clear_line_color(self, line: int) -> None:
-        self._user_line_colors.pop(line, None)
-
-    def set_line_colors(self, line_colors: dict[int, s.RGBA | str | LineColorConfig]) -> None:
-        self._user_line_colors.update(line_colors)
-
-    def clear_all_line_colors(self) -> None:
-        self._user_line_colors.clear()
-
-    def highlight_lines(
-        self, start_line: int, end_line: int, color: s.RGBA | str | LineColorConfig
-    ) -> None:
-        self._user_highlight_ranges.append((start_line, end_line, color))
-
-    def clear_highlight_lines(self, start_line: int, end_line: int) -> None:
-        self._user_highlight_ranges = [
-            (s, e, c)
-            for s, e, c in self._user_highlight_ranges
-            if not (s == start_line and e == end_line)
-        ]
 
     # ── Destroy ─────────────────────────────────────────────────────────
 
     def destroy(self) -> None:
         """Release retained raster resources before normal teardown."""
-        self._release_raster_buffer()
+        self._raster.release()
         super().destroy()
-
-    def destroy_recursively(self) -> None:
-        self._pending_rebuild = False
-        super().destroy_recursively()
 
 
 class _MockCodeRenderable:
@@ -1407,7 +1131,6 @@ class _MockLineNumberRenderable:
     def __init__(self, owner: DiffRenderable, side: str):
         self._owner = owner
         self._side = side
-        self._destroyed = False
 
     @property
     def isDestroyed(self) -> bool:

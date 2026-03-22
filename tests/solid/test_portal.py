@@ -332,17 +332,25 @@ class TestPortalMounting:
         root.add(show)
         show._configure_yoga_properties()
 
-        assert any(getattr(child, "key", None) == "portal-container-portal" for child in root._children)
+        assert any(
+            getattr(child, "key", None) == "portal-container-portal" for child in root._children
+        )
 
         visible.set(False)
 
         assert show._children == []
-        assert not any(getattr(child, "key", None) == "portal-container-portal" for child in root._children)
+        assert not any(
+            getattr(child, "key", None) == "portal-container-portal" for child in root._children
+        )
 
         visible.set(True)
         show._configure_yoga_properties()
 
-        containers = [child for child in root._children if getattr(child, "key", None) == "portal-container-portal"]
+        containers = [
+            child
+            for child in root._children
+            if getattr(child, "key", None) == "portal-container-portal"
+        ]
         assert len(containers) == 1
         assert containers[0]._children[0].key == "modal-text"
 
@@ -366,13 +374,17 @@ class TestPortalMounting:
         root.add(switch)
         switch._configure_yoga_properties()
 
-        assert any(getattr(child, "key", None) == "portal-container-portal" for child in root._children)
+        assert any(
+            getattr(child, "key", None) == "portal-container-portal" for child in root._children
+        )
 
         mode.set("inline")
 
         assert len(switch._children) == 1
         assert switch._children[0].key == "inline"
-        assert not any(getattr(child, "key", None) == "portal-container-portal" for child in root._children)
+        assert not any(
+            getattr(child, "key", None) == "portal-container-portal" for child in root._children
+        )
 
     def test_multiple_portals(self):
         """Two Portals coexist at the same mount point.
@@ -417,9 +429,9 @@ class TestPortalMounting:
         def make_portal():
             return Portal(
                 Show(
+                    Text("Active", key="active"),
                     when=lambda: condition(),
-                    render=lambda: Text("Active", key="active"),
-                    fallback=lambda: Text("Inactive", key="inactive"),
+                    fallback=Text("Inactive", key="inactive"),
                     key="show",
                 ),
                 mount=root,

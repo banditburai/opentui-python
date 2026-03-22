@@ -12,8 +12,8 @@ from collections import defaultdict, deque
 from typing import TYPE_CHECKING
 
 from .components.base import _SIMPLE_DEFAULTS
-from .components.box import ScrollBox
 from .components.control_flow import For, Portal
+from .components.scrollbox import ScrollBox
 
 if TYPE_CHECKING:
     from .components.base import BaseRenderable
@@ -31,9 +31,9 @@ def _load_native_patch() -> None:
     global _native_patch_fn
     _native_patch_fn = None
     try:
-        import sys
+        from . import ffi
 
-        mod = getattr(sys.modules.get("opentui_bindings"), "reconciler_patch", None)
+        mod = getattr(ffi.get_native(), "reconciler_patch", None)
         if mod is None:
             return
         init_fn = getattr(mod, "init_skip_attrs", None)
@@ -204,7 +204,7 @@ def _can_patch_positionally(
         return False
     return all(
         type(old_child) is type(new_child) and old_child.key == new_child.key
-        for old_child, new_child in zip(old_children, new_children)
+        for old_child, new_child in zip(old_children, new_children, strict=True)
     )
 
 
@@ -295,7 +295,7 @@ def reconcile(
     if _can_patch_positionally(old_children, new_children):
         result = [
             _reconcile_matched_child(parent, matched, new_child)
-            for matched, new_child in zip(old_children, new_children)
+            for matched, new_child in zip(old_children, new_children, strict=True)
         ]
         parent._children = result
         parent._children_tuple = None
@@ -351,7 +351,7 @@ def reconcile(
     # from the parent (via remove_all_children) while they're still alive,
     # making the subsequent destroy safe.
     yoga_structure_changed = len(result) != len(old_children) or any(
-        child is not old_child for child, old_child in zip(result, old_children)
+        child is not old_child for child, old_child in zip(result, old_children, strict=True)
     )
 
     if parent._yoga_node is not None and yoga_structure_changed:
@@ -385,7 +385,6 @@ def _patch_node(old: BaseRenderable, new: BaseRenderable) -> None:
     if _patch_text_fast_path(old, new):
         return
 
-    global _native_patch_fn
     if _native_patch_fn is _NOT_LOADED:
         _load_native_patch()
 

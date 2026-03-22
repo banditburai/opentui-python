@@ -4,10 +4,16 @@ import contextlib
 import math
 from typing import TYPE_CHECKING, Any
 
+import yoga
+
 from .. import structs as s
-from ..native import NativeTextBuffer, NativeTextBufferView
+from ..editor.text_buffer_native import NativeTextBuffer
+from ..editor.text_view_native import NativeTextBufferView
 from .base import Renderable
 from .textnode import StyledText, TextNode
+
+_MEASURE_UNDEFINED = yoga.MeasureMode.Undefined
+_MEASURE_AT_MOST = yoga.MeasureMode.AtMost
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -571,10 +577,8 @@ class TextRenderable(Renderable):
         def measure(
             yoga_node: Any, width: float, width_mode: Any, height: float, height_mode: Any
         ) -> tuple[float, float]:
-            import yoga
-
             # Undefined = max-content (no wrapping constraint)
-            if width_mode == yoga.MeasureMode.Undefined:
+            if width_mode == _MEASURE_UNDEFINED:
                 effective_width = 0
             else:
                 effective_width = 0 if math.isnan(width) else int(width)
@@ -597,7 +601,7 @@ class TextRenderable(Renderable):
                 measured_w = 1
                 measured_h = 1
 
-            if width_mode == yoga.MeasureMode.AtMost:
+            if width_mode == _MEASURE_AT_MOST:
                 measured_w = min(int(width), measured_w)
 
             return (measured_w, measured_h)

@@ -47,9 +47,7 @@ class Context:
     def Provider(
         self, *, value: Any, children: list | None = None, **kwargs: Any
     ) -> BaseRenderable:
-        """Create a context provider that wraps children.
-
-        If ``value`` is a Signal, ComputedSignal, or callable, it is
+        """If ``value`` is a Signal, ComputedSignal, or callable, it is
         stored as-is so consumers can read it reactively.
         """
         return _make_context_provider(context=self, value=value, children=children, **kwargs)
@@ -75,7 +73,6 @@ def _make_context_provider(
 
 
 def create_context(default: Any = None, name: str = "") -> Context:
-    """Create a new context with an optional default value."""
     return Context(default, name)
 
 

@@ -11,6 +11,7 @@ from opentui.expr import (
     Conditional,
     Expr,
     Literal,
+    MappedExpr,
     MethodCall,
     PropertyAccess,
     UnaryOp,
@@ -25,6 +26,10 @@ class TestLiteral:
     def test_evaluate(self):
         lit = Literal(42)
         assert lit.evaluate() == 42
+
+    def test_call(self):
+        lit = Literal(42)
+        assert lit() == 42
 
     def test_to_js_none(self):
         assert Literal(None).to_js() == "null"
@@ -48,6 +53,10 @@ class TestBinaryOp:
         op = BinaryOp(Literal(2), "+", Literal(3))
         assert op.evaluate() == 5
 
+    def test_call(self):
+        op = BinaryOp(Literal(2), "+", Literal(3))
+        assert op() == 5
+
     def test_sub(self):
         op = BinaryOp(Literal(10), "-", Literal(3))
         assert op.evaluate() == 7
@@ -60,9 +69,17 @@ class TestBinaryOp:
         op = BinaryOp(Literal(10), "/", Literal(2))
         assert op.evaluate() == 5.0
 
+    def test_floordiv(self):
+        op = BinaryOp(Literal(10), "//", Literal(3))
+        assert op() == 3
+
     def test_mod(self):
         op = BinaryOp(Literal(10), "%", Literal(3))
         assert op.evaluate() == 1
+
+    def test_pow(self):
+        op = BinaryOp(Literal(2), "**", Literal(3))
+        assert op() == 8
 
     def test_eq(self):
         op = BinaryOp(Literal(5), "==", Literal(5))
@@ -97,9 +114,8 @@ class TestBinaryOp:
         assert op.evaluate() is True
 
     def test_unknown_op_raises(self):
-        op = BinaryOp(Literal(1), "??", Literal(2))
         with pytest.raises(ValueError, match="Unknown operator"):
-            op.evaluate()
+            BinaryOp(Literal(1), "??", Literal(2))
 
     def test_to_js_and(self):
         op = BinaryOp(Literal(True), "and", Literal(False))
@@ -115,10 +131,25 @@ class TestUnaryOp:
         op = UnaryOp("not", Literal(True))
         assert op.evaluate() is False
 
+    def test_call(self):
+        op = UnaryOp("not", Literal(True))
+        assert op() is False
+
+    def test_neg(self):
+        op = UnaryOp("-", Literal(5))
+        assert op() == -5
+
+    def test_pos(self):
+        op = UnaryOp("+", Literal(5))
+        assert op() == 5
+
+    def test_abs(self):
+        op = UnaryOp("abs", Literal(-7))
+        assert op() == 7
+
     def test_unknown_op_raises(self):
-        op = UnaryOp("~", Literal(1))
         with pytest.raises(ValueError, match="Unknown unary operator"):
-            op.evaluate()
+            UnaryOp("??", Literal(1))
 
     def test_to_js_not(self):
         op = UnaryOp("not", Literal(True))
@@ -129,6 +160,10 @@ class TestConditional:
     def test_true_branch(self):
         cond = Conditional(Literal(True), Literal("yes"), Literal("no"))
         assert cond.evaluate() == "yes"
+
+    def test_call(self):
+        cond = Conditional(Literal(True), Literal("yes"), Literal("no"))
+        assert cond() == "yes"
 
     def test_false_branch(self):
         cond = Conditional(Literal(False), Literal("yes"), Literal("no"))
@@ -141,18 +176,32 @@ class TestConditional:
         assert ":" in js
 
 
+class TestMappedExpr:
+    def test_basic(self):
+        expr = MappedExpr(Literal(5), lambda v: v * 2)
+        assert expr() == 10
+
+    def test_evaluate(self):
+        expr = MappedExpr(Literal("hello"), str.upper)
+        assert expr.evaluate() == "HELLO"
+
+    def test_is_expr(self):
+        expr = MappedExpr(Literal(5), lambda v: v)
+        assert isinstance(expr, Expr)
+
+
 class TestAssignment:
     def test_evaluate_with_set_target(self):
         """Assignment calls set() on duck-typed target."""
 
-        class FakeTarget:
+        class FakeTarget(Expr):
             def __init__(self):
                 self.value = None
 
             def set(self, v):
                 self.value = v
 
-            def evaluate(self):
+            def __call__(self):
                 return self.value
 
             def to_js(self):
@@ -179,18 +228,11 @@ class TestEnsureExpr:
         assert isinstance(result, Literal)
         assert result.evaluate() == 42
 
-    def test_duck_typed_passthrough(self):
-        """Objects with evaluate/to_js pass through without wrapping."""
-
-        class DuckExpr:
-            def evaluate(self):
-                return 99
-
-            def to_js(self):
-                return "99"
-
-        duck = DuckExpr()
-        assert _ensure_expr(duck) is duck
+    def test_non_expr_wraps_in_literal(self):
+        """Non-Expr values are wrapped in Literal."""
+        result = _ensure_expr("hello")
+        assert isinstance(result, Literal)
+        assert result() == "hello"
 
 
 class TestExprOperators:
@@ -215,6 +257,31 @@ class TestExprOperators:
         result = Literal(4) * Literal(5)
         assert result.evaluate() == 20
 
+    def test_floordiv(self):
+        result = Literal(10) // Literal(3)
+        assert isinstance(result, BinaryOp)
+        assert result() == 3
+
+    def test_pow(self):
+        result = Literal(2) ** Literal(3)
+        assert isinstance(result, BinaryOp)
+        assert result() == 8
+
+    def test_neg(self):
+        result = -Literal(5)
+        assert isinstance(result, UnaryOp)
+        assert result() == -5
+
+    def test_pos(self):
+        result = +Literal(5)
+        assert isinstance(result, UnaryOp)
+        assert result() == 5
+
+    def test_abs(self):
+        result = abs(Literal(-7))
+        assert isinstance(result, UnaryOp)
+        assert result() == 7
+
     def test_bool(self):
         assert bool(Literal(True)) is True
         assert bool(Literal(0)) is False
@@ -224,12 +291,31 @@ class TestExprOperators:
         assert isinstance(result, UnaryOp)
         assert result.evaluate() is False
 
+    def test_format(self):
+        lit = Literal(3.14159)
+        assert f"{lit:.2f}" == "3.14"
+
+    def test_is_same_as(self):
+        a = Literal(5)
+        b = Literal(5)
+        assert a.is_same_as(a) is True
+        assert a.is_same_as(b) is False
+
+    def test_map(self):
+        result = Literal(5).map(lambda v: v * 2)
+        assert isinstance(result, MappedExpr)
+        assert result() == 10
+
 
 class TestExprMethods:
     def test_upper(self):
         result = Literal("hello").upper()
         assert isinstance(result, MethodCall)
         assert result.evaluate() == "HELLO"
+
+    def test_call_on_method_call(self):
+        result = Literal("hello").upper()
+        assert result() == "HELLO"
 
     def test_lower(self):
         result = Literal("HELLO").lower()
@@ -243,6 +329,10 @@ class TestExprMethods:
         result = Literal("hello").length()
         assert isinstance(result, PropertyAccess)
         assert result.evaluate() == 5
+
+    def test_call_on_property_access(self):
+        result = Literal("hello").length()
+        assert result() == 5
 
 
 class TestHelpers:

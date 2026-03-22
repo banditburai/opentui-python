@@ -6,7 +6,7 @@ Tests: 29 (29 real, 0 skipped)
 
 from opentui.components.textarea_renderable import TextareaRenderable
 from opentui.events import KeyEvent, PasteEvent
-from opentui.keymapping import KeyBinding
+from opentui.input.keymapping import KeyBinding
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────

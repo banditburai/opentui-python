@@ -39,6 +39,7 @@ extern "C" {
     void setBackgroundColor(void* renderer, float* color);
     void setRenderOffset(void* renderer, uint32_t offset);
     void setUseThread(void* renderer, bool useThread);
+    void setHyperlinksCapability(void* renderer, bool enabled);
 }
 
 void bind_renderer(nb::module_& m) {
@@ -107,6 +108,9 @@ void bind_renderer(nb::module_& m) {
     }, nb::arg("renderer"));
     m.def("set_render_offset", &setRenderOffset, nb::arg("renderer"), nb::arg("offset"));
     m.def("set_use_thread", &setUseThread, nb::arg("renderer"), nb::arg("use_thread"));
+
+    m.def("set_hyperlinks_capability", &setHyperlinksCapability,
+          nb::arg("renderer"), nb::arg("enabled"));
 
     // Get terminal capabilities - use the ExternalCapabilities struct from types
     m.def("get_terminal_capabilities", [](void* renderer) {

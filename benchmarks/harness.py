@@ -151,9 +151,7 @@ def bench_frame_buckets(
         gc.enable()
 
     return {
-        name: registry.record(
-            samples[name], label=f"{label_prefix}: {name.removesuffix('_ns')}"
-        )
+        name: registry.record(samples[name], label=f"{label_prefix}: {name.removesuffix('_ns')}")
         for name in buckets
     }
 
@@ -194,10 +192,7 @@ def collect_frame_medians(
 
 def format_result(result: BenchResult | dict[str, Any]) -> str:
     """Format a benchmark result as a human-readable one-liner."""
-    if isinstance(result, BenchResult):
-        r = result.to_dict()
-    else:
-        r = result
+    r = result.to_dict() if isinstance(result, BenchResult) else result
     return (
         f"  {r['label']:<55s}  "
         f"median={r['median_ns']:>10,}ns  "
@@ -252,13 +247,15 @@ def compare_results(
             status = "improvement"
         else:
             status = "unchanged"
-        comparisons.append({
-            "label": label,
-            "current": cur_val,
-            "baseline": base_val,
-            "change_pct": change_pct,
-            "status": status,
-        })
+        comparisons.append(
+            {
+                "label": label,
+                "current": cur_val,
+                "baseline": base_val,
+                "change_pct": change_pct,
+                "status": status,
+            }
+        )
     # Regressions first, then improvements, then unchanged
     order = {"regression": 0, "improvement": 1, "unchanged": 2}
     comparisons.sort(key=lambda c: (order[c["status"]], -abs(c["change_pct"])))

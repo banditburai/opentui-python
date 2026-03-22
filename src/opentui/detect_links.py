@@ -6,45 +6,35 @@ and back-tracks to find associated labels (markup.link.label).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-
-@dataclass
-class TextChunk:
-    text: str
-    fg: Any = None
-    attributes: int = 0
-    link: dict[str, str] | None = None
-
-
-# SimpleHighlight is [start, end, scope_name]
-SimpleHighlight = tuple[int, int, str]
+if TYPE_CHECKING:
+    from .components.code_renderable import TextChunk
 
 URL_SCOPES = ("markup.link.url", "string.special.url")
 
 
 def detect_links(
     chunks: list[TextChunk],
-    context: dict[str, Any],
+    context: Any,
 ) -> list[TextChunk]:
-    content: str = context["content"]
-    highlights: list[SimpleHighlight] = context["highlights"]
+    content: str = context["content"] if isinstance(context, dict) else context.content
+    highlights: list = context["highlights"] if isinstance(context, dict) else context.highlights
 
     ranges: list[dict[str, Any]] = []
 
     for i, hl in enumerate(highlights):
-        start, end, group = hl
+        start, end, group = hl[0], hl[1], hl[2]
         if group not in URL_SCOPES:
             continue
         url = content[start:end]
         ranges.append({"start": start, "end": end, "url": url})
         for j in range(i - 1, -1, -1):
-            label_start, label_end, prev = highlights[j]
-            if prev == "markup.link.label":
-                ranges.append({"start": label_start, "end": label_end, "url": url})
+            prev_start, prev_end, prev_group = highlights[j][0], highlights[j][1], highlights[j][2]
+            if prev_group == "markup.link.label":
+                ranges.append({"start": prev_start, "end": prev_end, "url": url})
                 break
-            if not prev.startswith("markup.link"):
+            if not prev_group.startswith("markup.link"):
                 break
 
     if not ranges:
@@ -52,7 +42,7 @@ def detect_links(
 
     content_pos = 0
     for chunk in chunks:
-        if len(chunk.text) <= 1:
+        if not chunk.text:
             continue
         idx = content.find(chunk.text, content_pos)
         if idx < 0:

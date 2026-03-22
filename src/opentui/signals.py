@@ -1,5 +1,3 @@
-"""Reactive signal system for OpenTUI."""
-
 from __future__ import annotations
 
 import contextlib
@@ -9,20 +7,7 @@ from collections.abc import Callable
 from operator import attrgetter
 from typing import Any, Protocol, runtime_checkable
 
-from .expr import (
-    Assignment,
-    BinaryOp,
-    Conditional,
-    Expr,
-    Literal,
-    MethodCall,
-    PropertyAccess,
-    UnaryOp,
-    _ensure_expr,
-    all_,
-    any_,
-    match,
-)
+from .expr import Conditional, Expr, _ensure_expr
 
 _counter = itertools.count()
 
@@ -38,16 +23,12 @@ _NativeSignal: Any = None
 
 def _try_load_native_signal() -> None:
     global _HAS_NATIVE, _NativeSignal
-    import sys
+    try:
+        from . import ffi
 
-    nb = sys.modules.get("opentui_bindings")
-    if nb is None:
-        try:
-            from . import ffi as _ffi  # noqa: F401, F811
-
-            nb = sys.modules.get("opentui_bindings")
-        except ImportError:
-            pass
+        nb = ffi.get_native()
+    except ImportError:
+        nb = None
     if nb is not None:
         try:
             _NativeSignal = nb.native_signals.NativeSignal
@@ -77,8 +58,6 @@ class ReadableSignal(Protocol):
 
 
 class _SignalState:
-    """Global signal state for tracking changes between renders."""
-
     _instance = None
 
     def __init__(self):
@@ -101,7 +80,12 @@ _signal_state: _SignalState = _SignalState.get_instance()
 _signal_state_notified: set[Signal] = _signal_state._notified
 
 
-class Signal:
+def _unwrap_val(x):
+    """Unwrap reactive values (Expr subclasses, callables) to plain values."""
+    return x() if isinstance(x, Expr) else x
+
+
+class Signal(Expr):
     __slots__ = ("_name", "_value", "_subscribers", "_notifying", "_native")
 
     def __init__(self, value: Any = None, *, name: str | None = None) -> None:
@@ -119,44 +103,49 @@ class Signal:
     def name(self) -> str:
         return self._name
 
+    def __set_name__(self, owner: type, name: str) -> None:
+        if self._name.startswith("signal_"):
+            self._name = name
+
     def __call__(self) -> Any:
         tracking = _tracking_context.get()
         if tracking is not None:
             tracking.add(self)
         return self._value
 
+    def evaluate(self) -> Any:
+        return self()
+
+    def to_js(self) -> str:
+        return self._name
+
     def peek(self) -> Any:
         return self._value
 
-    get = peek  # backward compat alias
-
     def set(self, value: Any) -> None:
         global _flushing
-        if self._native is not None:
-            if value is None:
-                pass  # nanobind rejects NoneType — fall through to Python path
-            elif _batch_depth > 0:
+        if self._native is not None and value is not None:
+            if _batch_depth > 0:
                 if self._native.set_batched(value):
                     self._value = self._native.get()
                     _signal_state_notified.add(self)
                     _batch_pending.add(self)
                 return
-            else:
-                # Micro-flush: native set() fires callbacks synchronously,
-                # so we enable flushing to defer diamond-dep computeds.
-                is_root = not _flushing
+            # Micro-flush: native set() fires callbacks synchronously,
+            # so we enable flushing to defer diamond-dep computeds.
+            is_root = not _flushing
+            if is_root:
+                _flushing = True
+            try:
+                if self._native.set(value):
+                    self._value = self._native.get()
+                    _signal_state_notified.add(self)
                 if is_root:
-                    _flushing = True
-                try:
-                    if self._native.set(value):
-                        self._value = self._native.get()
-                        _signal_state_notified.add(self)
-                    if is_root:
-                        _drain_stale_computeds()
-                finally:
-                    if is_root:
-                        _flushing = False
-                return
+                    _drain_stale_computeds()
+            finally:
+                if is_root:
+                    _flushing = False
+            return
         if self._value is value or self._value == value:
             return
         self._value = value
@@ -194,7 +183,15 @@ class Signal:
         self._value = new_value
         self._notify()
 
-    def toggle(self) -> None:
+    def toggle(self, *values: Any) -> None:
+        if values:
+            current = self._value
+            for i, v in enumerate(values):
+                if current == v:
+                    self.set(values[(i + 1) % len(values)])
+                    return
+            self.set(values[0])
+            return
         global _flushing
         if self._native is not None:
             if _batch_depth > 0:
@@ -218,6 +215,47 @@ class Signal:
             return
         self._value = not self._value
         self._notify()
+
+    def update(self, fn: Callable[[Any], Any]) -> None:
+        """Apply transform: signal.set(fn(signal.peek()))."""
+        self.set(fn(self._value))
+
+    def append(self, item: Any) -> None:
+        """Append item to list signal. Raises TypeError if value is not a list."""
+        v = self._value
+        if not isinstance(v, list):
+            raise TypeError(f"append() requires a list-valued signal, got {type(v).__name__}")
+        self.set([*v, item])
+
+    def prepend(self, item: Any) -> None:
+        """Prepend item to list signal. Raises TypeError if value is not a list."""
+        v = self._value
+        if not isinstance(v, list):
+            raise TypeError(f"prepend() requires a list-valued signal, got {type(v).__name__}")
+        self.set([item, *v])
+
+    def remove(self, item: Any) -> bool:
+        """Remove first occurrence of item by equality. Returns True if removed."""
+        v = self._value
+        if not isinstance(v, list):
+            raise TypeError(f"remove() requires a list-valued signal, got {type(v).__name__}")
+        try:
+            idx = v.index(item)
+        except ValueError:
+            return False
+        self.set([*v[:idx], *v[idx + 1 :]])
+        return True
+
+    def remove_where(self, predicate: Callable[[Any], Any]) -> bool:
+        """Remove first item where predicate returns truthy. Returns True if removed."""
+        v = self._value
+        if not isinstance(v, list):
+            raise TypeError(f"remove_where() requires a list-valued signal, got {type(v).__name__}")
+        for i, item in enumerate(v):
+            if predicate(item):
+                self.set([*v[:i], *v[i + 1 :]])
+                return True
+        return False
 
     def subscribe(self, fn: Callable[[Any], Any]) -> Callable[[], None]:
         if self._native is not None:
@@ -244,9 +282,6 @@ class Signal:
             _batch_pending.add(self)
             return
         # Wrap in micro-flush so computed diamonds are resolved in depth order.
-        # If _flushing is already True (we're inside a parent _notify or
-        # _flush_batch), just run subscribers — the root will drain stale
-        # computeds when we unwind.
         is_root = not _flushing
         if is_root:
             _flushing = True
@@ -281,11 +316,80 @@ class Signal:
     def __repr__(self) -> str:
         return f"Signal({self._name!r}, {self._value!r})"
 
+    # --- Eager evaluation (Signal-only, NOT inherited from Expr) ---
+
+    def __int__(self) -> int:
+        return int(self())
+
+    def __float__(self) -> float:
+        return float(self())
+
+    def __len__(self) -> int:
+        return len(self())
+
+    def __contains__(self, item) -> bool:
+        return item in self()
+
+    def __iter__(self):
+        return iter(self())
+
+    def __getitem__(self, key):
+        return self()[key]
+
+    # --- In-place operators (mutate signal value) ---
+
+    def __iadd__(self, other):
+        self.add(_unwrap_val(other))
+        return self
+
+    def __isub__(self, other):
+        self.set(self._value - _unwrap_val(other))
+        return self
+
+    def __imul__(self, other):
+        self.set(self._value * _unwrap_val(other))
+        return self
+
+    def __itruediv__(self, other):
+        self.set(self._value / _unwrap_val(other))
+        return self
+
+    def __ifloordiv__(self, other):
+        self.set(self._value // _unwrap_val(other))
+        return self
+
+    def __imod__(self, other):
+        self.set(self._value % _unwrap_val(other))
+        return self
+
+    def __ipow__(self, other):
+        self.set(self._value ** _unwrap_val(other))
+        return self
+
+    # --- .if_() override: unwraps signal/expr values in branches ---
+
+    def if_(self, true_val, false_val=None):
+        s = self
+        return Conditional(s, _ensure_expr(true_val), _ensure_expr(false_val))
+
+    # --- .map() override: returns subscribable _ComputedSignal ---
+
     def map(self, fn: Callable[[Any], Any]) -> _ComputedSignal:
+        """Apply *fn* to this signal's value, returning a subscribable _ComputedSignal.
+
+        Unlike ``Expr.map()`` (which returns a non-subscribable ``MappedExpr``),
+        this returns a ``_ComputedSignal`` that tracks this signal as a dependency
+        and triggers reactive updates when the source changes.
+        """
         return _ComputedSignal(lambda: fn(self()), self)
 
+    @property
+    def _as_dep(self) -> Signal:
+        """Return the underlying Signal for use as a _ComputedSignal dependency."""
+        return self
 
-class _ComputedSignal:
+
+class _ComputedSignal(Expr):
     __slots__ = (
         "_fn",
         "_signal",
@@ -341,6 +445,12 @@ class _ComputedSignal:
             self._recompute()
         return self._signal()
 
+    def evaluate(self) -> Any:
+        return self()
+
+    def to_js(self) -> str:
+        return self._signal._name
+
     @property
     def name(self) -> str:
         return self._signal.name
@@ -365,7 +475,7 @@ class _ComputedSignal:
             return
         native = getattr(self._signal, "_native", None)
         has_listeners = (
-            native.total_binding_count > 0 if native else len(self._signal._subscribers) > 0
+            native.total_binding_count > 0 if native else bool(self._signal._subscribers)
         )
         if has_listeners:
             self._recompute()
@@ -388,6 +498,7 @@ class _ComputedSignal:
             finally:
                 _tracking_context.reset(token)
 
+            self._stale = False
             self._signal.set(new_value)
 
             if tracked != self._tracked_deps:
@@ -399,11 +510,63 @@ class _ComputedSignal:
         finally:
             self._computing = False
 
+    def __hash__(self):
+        return id(self)
+
     def __repr__(self) -> str:
         return f"Computed({self._signal._name!r}, {self._signal._value!r})"
 
+    # --- Eager evaluation (Signal-only, NOT inherited from Expr) ---
+
+    def __int__(self) -> int:
+        return int(self())
+
+    def __float__(self) -> float:
+        return float(self())
+
+    def __len__(self) -> int:
+        return len(self())
+
+    def __contains__(self, item) -> bool:
+        return item in self()
+
+    def __iter__(self):
+        return iter(self())
+
+    def __getitem__(self, key):
+        return self()[key]
+
+    # --- Mutation overrides: fail fast (computed is read-only) ---
+
+    def set(self, value: Any) -> None:
+        raise AttributeError(f"Cannot set() on computed signal {self._signal._name!r}")
+
+    def add(self, amount: Any) -> None:
+        raise AttributeError(f"Cannot add() on computed signal {self._signal._name!r}")
+
+    def toggle(self, *values: Any) -> None:
+        raise AttributeError(f"Cannot toggle() on computed signal {self._signal._name!r}")
+
+    # --- .if_() override: same as Signal ---
+
+    def if_(self, true_val, false_val=None):
+        s = self
+        return Conditional(s, _ensure_expr(true_val), _ensure_expr(false_val))
+
+    # --- .map() override: returns subscribable _ComputedSignal ---
+
     def map(self, fn: Callable[[Any], Any]) -> _ComputedSignal:
-        return _ComputedSignal(lambda: fn(self()), self)
+        """Apply *fn* to this computed signal's value, returning a subscribable _ComputedSignal.
+
+        Unlike ``Expr.map()`` (which returns a non-subscribable ``MappedExpr``),
+        this returns a ``_ComputedSignal`` that tracks the underlying signal as a
+        dependency and triggers reactive updates when the source changes.
+        """
+        return _ComputedSignal(lambda: fn(self()), self._as_dep)
+
+    @property
+    def _as_dep(self) -> Signal:
+        return self._signal
 
 
 def _sync_tracked_deps(
@@ -426,9 +589,28 @@ def _sync_tracked_deps(
 
 def is_reactive(value: object) -> bool:
     """Check if value is a Signal, ComputedSignal, or callable (excluding str/type)."""
-    return isinstance(value, Signal | _ComputedSignal) or (
+    return isinstance(value, (Signal, _ComputedSignal)) or (
         callable(value) and not isinstance(value, str | type)
     )
+
+
+def val(s: Any) -> Any:
+    """Unwrap a Signal/computed/Expr/callable to its current value.
+
+    Returns plain values unchanged. Uses peek semantics (no tracking) for Signal
+    and _ComputedSignal.
+    """
+    if isinstance(s, Signal):
+        return s._value
+    if isinstance(s, _ComputedSignal):
+        if s._stale:
+            s._recompute()
+        return s._signal._value
+    if isinstance(s, Expr):
+        return s()
+    if callable(s) and not isinstance(s, str | type):
+        return s()
+    return s
 
 
 def computed(fn: Callable[[], Any], *deps: ReadableSignal) -> _ComputedSignal:
@@ -540,12 +722,7 @@ def untrack(fn: Callable[[], Any]) -> Any:
 
 
 def _drain_stale_computeds() -> None:
-    """Process stale computeds in topological (depth) order.
-
-    Called after subscriber notification to resolve diamond dependencies:
-    computeds at shallower depths recompute first so that deeper computeds
-    see consistent values and fire only once.
-    """
+    """Process stale computeds in topological (depth) order."""
     global _stale_computeds
     while _stale_computeds:
         batch, _stale_computeds = _stale_computeds, []
@@ -593,6 +770,7 @@ __all__ = [
     "Signal",
     "ReadableSignal",
     "is_reactive",
+    "val",
     "computed",
     "create_root",
     "effect",
@@ -602,16 +780,4 @@ __all__ = [
     "_SignalState",
     "_signal_state",
     "_ComputedSignal",
-    "Expr",
-    "Literal",
-    "BinaryOp",
-    "UnaryOp",
-    "Conditional",
-    "PropertyAccess",
-    "MethodCall",
-    "Assignment",
-    "_ensure_expr",
-    "all_",
-    "any_",
-    "match",
 ]

@@ -204,15 +204,15 @@ class TestDiffRenderableWithSolidJS:
         def make_component():
             return Box(
                 Show(
-                    when=lambda: show_diff(),
-                    render=lambda: Diff(
+                    Diff(
                         old_text=OLD_TEXT,
                         new_text=NEW_TEXT,
                         mode="unified",
                         width="100%",
                         height="100%",
                     ),
-                    fallback=lambda: Box(
+                    when=lambda: show_diff(),
+                    fallback=Box(
                         width="100%",
                         height="100%",
                     ),
@@ -258,15 +258,15 @@ class TestDiffRenderableWithSolidJS:
         def make_component():
             return Box(
                 Show(
-                    when=lambda: show_diff(),
-                    render=lambda: Diff(
+                    Diff(
                         old_text=OLD_TEXT,
                         new_text=NEW_TEXT,
                         mode="split",
                         width="100%",
                         height="100%",
                     ),
-                    fallback=lambda: Box(
+                    when=lambda: show_diff(),
+                    fallback=Box(
                         width="100%",
                         height="100%",
                     ),

@@ -2428,7 +2428,7 @@ class TestCodeRenderable:
         self,
     ):
         """Maps to test("CodeRenderable - streaming with conceal and draw_unstyled_text=false should not jump when fenced code blocks are concealed")."""
-        from opentui.testing import TestRecorder
+        from opentui.testing.capture import TestRecorder
 
         # This test uses real tree-sitter for proper conceal metadata
         try:

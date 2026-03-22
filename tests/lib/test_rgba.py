@@ -6,7 +6,7 @@ Tests ported: 131/131 (4 Float32Array buffer tests adapted to Python equivalents
 
 import pytest
 
-from opentui.structs import RGBA, CSS_COLOR_NAMES, hsv_to_rgb, parse_color
+from opentui.structs import RGBA, CSS_COLOR_NAMES, parse_color
 
 
 class TestRGBAConstructor:
@@ -126,53 +126,6 @@ class TestRGBAFromValues:
         assert rgba.g == pytest.approx(-0.2, abs=1e-5)
         assert rgba.b == pytest.approx(-0.1, abs=1e-5)
         assert rgba.a == pytest.approx(-0.3, abs=1e-5)
-
-
-class TestRGBAFromInts:
-    """Maps to describe("RGBA class") > describe("fromInts")."""
-
-    def test_creates_rgba_from_integer_values(self):
-        """Maps to test("creates RGBA from integer values (0-255)")."""
-        rgba = RGBA.from_ints(255, 128, 64, 255)
-        assert rgba.r == pytest.approx(1.0, abs=0.01)
-        assert rgba.g == pytest.approx(0.502, abs=0.01)
-        assert rgba.b == pytest.approx(0.251, abs=0.01)
-        assert rgba.a == pytest.approx(1.0, abs=0.01)
-
-    def test_defaults_alpha_to_255_when_not_provided(self):
-        """Maps to test("defaults alpha to 255 when not provided")."""
-        rgba = RGBA.from_ints(128, 128, 128)
-        assert rgba.a == pytest.approx(1.0, abs=0.01)
-
-    def test_handles_zero_values(self):
-        """Maps to test("handles zero values")."""
-        rgba = RGBA.from_ints(0, 0, 0, 0)
-        assert rgba.r == 0
-        assert rgba.g == 0
-        assert rgba.b == 0
-        assert rgba.a == 0
-
-    def test_handles_max_values(self):
-        """Maps to test("handles max values (255)")."""
-        rgba = RGBA.from_ints(255, 255, 255, 255)
-        assert rgba.r == pytest.approx(1.0, abs=0.01)
-        assert rgba.g == pytest.approx(1.0, abs=0.01)
-        assert rgba.b == pytest.approx(1.0, abs=0.01)
-        assert rgba.a == pytest.approx(1.0, abs=0.01)
-
-    def test_converts_mid_range_values_correctly(self):
-        """Maps to test("converts mid-range values correctly")."""
-        rgba = RGBA.from_ints(127, 127, 127, 127)
-        assert rgba.r == pytest.approx(127 / 255, abs=0.01)
-        assert rgba.g == pytest.approx(127 / 255, abs=0.01)
-        assert rgba.b == pytest.approx(127 / 255, abs=0.01)
-        assert rgba.a == pytest.approx(127 / 255, abs=0.01)
-
-    def test_handles_values_greater_than_255(self):
-        """Maps to test("handles values greater than 255")."""
-        rgba = RGBA.from_ints(300, 300, 300, 300)
-        assert rgba.r == pytest.approx(300 / 255, abs=0.01)
-        assert rgba.g == pytest.approx(300 / 255, abs=0.01)
 
 
 class TestRGBAFromHex:
@@ -311,34 +264,6 @@ class TestRGBASetters:
         assert rgba.g == pytest.approx(0.6, abs=1e-5)
         assert rgba.b == pytest.approx(0.7, abs=1e-5)
         assert rgba.a == pytest.approx(0.8, abs=1e-5)
-
-
-class TestRGBAMap:
-    """Maps to describe("RGBA class") > describe("map")."""
-
-    def test_applies_function_to_all_components(self):
-        """Maps to test("applies function to all components")."""
-        rgba = RGBA(0.1, 0.2, 0.3, 0.4)
-        result = rgba.map(lambda x: x * 2)
-        assert result == pytest.approx([0.2, 0.4, 0.6, 0.8], abs=1e-5)
-
-    def test_can_return_different_types(self):
-        """Maps to test("can return different types")."""
-        rgba = RGBA(0.1, 0.2, 0.3, 0.4)
-        result = rgba.map(lambda x: str(x))
-        assert all(isinstance(v, str) for v in result)
-
-    def test_works_with_identity_function(self):
-        """Maps to test("works with identity function")."""
-        rgba = RGBA(0.1, 0.2, 0.3, 0.4)
-        result = rgba.map(lambda x: x)
-        assert result == pytest.approx([0.1, 0.2, 0.3, 0.4], abs=1e-5)
-
-    def test_returns_array_in_correct_order(self):
-        """Maps to test("returns array in correct order (r, g, b, a)")."""
-        rgba = RGBA(0.1, 0.2, 0.3, 0.4)
-        result = rgba.map(lambda x: round(x * 10))
-        assert result == [1, 2, 3, 4]
 
 
 class TestRGBAToString:
@@ -665,105 +590,6 @@ class TestRgbToHex:
         """Maps to test("excludes alpha for fully opaque black")."""
         rgba = RGBA(0, 0, 0, 1)
         assert rgba.to_hex() == "#000000"
-
-
-class TestHsvToRgb:
-    """Maps to describe("hsvToRgb")."""
-
-    def test_converts_hsv_to_rgb_red(self):
-        """Maps to test("converts HSV to RGB (red)")."""
-        rgba = hsv_to_rgb(0, 1, 1)
-        assert rgba.r == pytest.approx(1.0, abs=0.01)
-        assert rgba.g == pytest.approx(0.0, abs=0.01)
-        assert rgba.b == pytest.approx(0.0, abs=0.01)
-
-    def test_converts_hsv_to_rgb_green(self):
-        """Maps to test("converts HSV to RGB (green)")."""
-        rgba = hsv_to_rgb(120, 1, 1)
-        assert rgba.r == pytest.approx(0.0, abs=0.01)
-        assert rgba.g == pytest.approx(1.0, abs=0.01)
-        assert rgba.b == pytest.approx(0.0, abs=0.01)
-
-    def test_converts_hsv_to_rgb_blue(self):
-        """Maps to test("converts HSV to RGB (blue)")."""
-        rgba = hsv_to_rgb(240, 1, 1)
-        assert rgba.r == pytest.approx(0.0, abs=0.01)
-        assert rgba.g == pytest.approx(0.0, abs=0.01)
-        assert rgba.b == pytest.approx(1.0, abs=0.01)
-
-    def test_converts_hsv_to_rgb_yellow(self):
-        """Maps to test("converts HSV to RGB (yellow)")."""
-        rgba = hsv_to_rgb(60, 1, 1)
-        assert rgba.r == pytest.approx(1.0, abs=0.01)
-        assert rgba.g == pytest.approx(1.0, abs=0.01)
-        assert rgba.b == pytest.approx(0.0, abs=0.01)
-
-    def test_converts_hsv_to_rgb_cyan(self):
-        """Maps to test("converts HSV to RGB (cyan)")."""
-        rgba = hsv_to_rgb(180, 1, 1)
-        assert rgba.r == pytest.approx(0.0, abs=0.01)
-        assert rgba.g == pytest.approx(1.0, abs=0.01)
-        assert rgba.b == pytest.approx(1.0, abs=0.01)
-
-    def test_converts_hsv_to_rgb_magenta(self):
-        """Maps to test("converts HSV to RGB (magenta)")."""
-        rgba = hsv_to_rgb(300, 1, 1)
-        assert rgba.r == pytest.approx(1.0, abs=0.01)
-        assert rgba.g == pytest.approx(0.0, abs=0.01)
-        assert rgba.b == pytest.approx(1.0, abs=0.01)
-
-    def test_converts_hsv_with_zero_saturation_to_gray(self):
-        """Maps to test("converts HSV with zero saturation to gray")."""
-        rgba = hsv_to_rgb(0, 0, 0.5)
-        assert rgba.r == pytest.approx(0.5, abs=0.01)
-        assert rgba.g == pytest.approx(0.5, abs=0.01)
-        assert rgba.b == pytest.approx(0.5, abs=0.01)
-
-    def test_converts_hsv_with_zero_value_to_black(self):
-        """Maps to test("converts HSV with zero value to black")."""
-        rgba = hsv_to_rgb(0, 1, 0)
-        assert rgba.r == pytest.approx(0.0, abs=0.01)
-        assert rgba.g == pytest.approx(0.0, abs=0.01)
-        assert rgba.b == pytest.approx(0.0, abs=0.01)
-
-    def test_converts_hsv_to_rgb_orange(self):
-        """Maps to test("converts HSV to RGB (orange)")."""
-        rgba = hsv_to_rgb(30, 1, 1)
-        assert rgba.r == pytest.approx(1.0, abs=0.01)
-        assert rgba.g == pytest.approx(0.5, abs=0.01)
-        assert rgba.b == pytest.approx(0.0, abs=0.01)
-
-    def test_converts_hsv_with_partial_saturation(self):
-        """Maps to test("converts HSV with partial saturation")."""
-        rgba = hsv_to_rgb(0, 0.5, 1)
-        assert rgba.r == pytest.approx(1.0, abs=0.01)
-        assert rgba.g == pytest.approx(0.5, abs=0.01)
-        assert rgba.b == pytest.approx(0.5, abs=0.01)
-
-    def test_converts_hsv_with_partial_value(self):
-        """Maps to test("converts HSV with partial value")."""
-        rgba = hsv_to_rgb(0, 1, 0.5)
-        assert rgba.r == pytest.approx(0.5, abs=0.01)
-        assert rgba.g == pytest.approx(0.0, abs=0.01)
-        assert rgba.b == pytest.approx(0.0, abs=0.01)
-
-    def test_handles_hue_gt_360_wraps_around(self):
-        """Maps to test("handles hue > 360 (wraps around)")."""
-        rgba = hsv_to_rgb(360, 1, 1)
-        assert rgba.r == pytest.approx(1.0, abs=0.01)
-        assert rgba.g == pytest.approx(0.0, abs=0.01)
-        assert rgba.b == pytest.approx(0.0, abs=0.01)
-
-    def test_handles_hue_359(self):
-        """Maps to test("handles hue = 359")."""
-        rgba = hsv_to_rgb(359, 1, 1)
-        assert rgba.r == pytest.approx(1.0, abs=0.01)
-        assert rgba.b > 0  # close to red, slightly purple
-
-    def test_always_sets_alpha_to_1(self):
-        """Maps to test("always sets alpha to 1")."""
-        rgba = hsv_to_rgb(0, 1, 1)
-        assert rgba.a == 1.0
 
 
 class TestParseColor:

@@ -16,19 +16,34 @@ from collections.abc import Callable
 from opentui import test_render as _test_render
 from opentui.components.advanced import Code, Markdown
 from opentui.components.base import BaseRenderable, Renderable
-from opentui.components.box import Box, ScrollBox, ScrollContent
-from opentui.components.control_flow import Dynamic, For, MemoBlock, MountedTemplate, Show, Switch, Template, reactive, template, template_component
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.box import Box
+from opentui.components.control_flow import (
+    Dynamic,
+    For,
+    MemoBlock,
+    Mount,
+    Show,
+    Switch,
+    component,
+)
+from opentui.components.scrollbox import ScrollBox, ScrollContent
 from opentui.components.text import Text
+from opentui.components.textarea_renderable import TextareaRenderable
 from opentui.reconciler import reconcile
 from opentui.signals import Signal, _SignalState, _tracking_context, computed
 
 # ── Benchmark harness (delegates to benchmarks.harness) ──────────────
 
 try:
-    from benchmarks.harness import bench as _bench_core, bench_frame_buckets as _bench_frame_buckets_core, format_result as _format_result_core, registry as _registry
+    from benchmarks.harness import bench as _bench_core
+    from benchmarks.harness import bench_frame_buckets as _bench_frame_buckets_core
+    from benchmarks.harness import format_result as _format_result_core
+    from benchmarks.harness import registry as _registry
 except ImportError:
-    from harness import bench as _bench_core, bench_frame_buckets as _bench_frame_buckets_core, format_result as _format_result_core, registry as _registry
+    from harness import bench as _bench_core
+    from harness import bench_frame_buckets as _bench_frame_buckets_core
+    from harness import format_result as _format_result_core
+    from harness import registry as _registry
 
 # Backward-compat: _results dict keyed by label, used by standalone runner
 _results = _registry._results
@@ -74,8 +89,10 @@ def _bench_frame_buckets(
     """Benchmark frame timing buckets. Calls setup.destroy() on completion."""
     try:
         results = _bench_frame_buckets_core(
-            setup, mutate,
-            warmup=warmup, iterations=iterations,
+            setup,
+            mutate,
+            warmup=warmup,
+            iterations=iterations,
             label_prefix=label_prefix,
             buckets=_REACTIVITY_FRAME_BUCKETS,
         )
@@ -91,7 +108,7 @@ def _rebuild(root: BaseRenderable, component_fn: Callable, count_sig: Signal | N
     """Simulate a full rebuild: re-run component_fn + reconcile."""
     old_children = list(root._children)
     if count_sig is not None:
-        count_sig.set(count_sig.get() + 1)
+        count_sig.set(count_sig.peek() + 1)
     tracked: set[Signal] = set()
     token = _tracking_context.set(tracked)
     try:
@@ -321,7 +338,7 @@ class TestFullRebuildCost:
 
         def rebuild():
             counter[0] += 1
-            old = entries.get()
+            old = entries.peek()
             new = list(old)
             new[-1] = {"id": new[-1]["id"], "text": f"Item {counter[0]}"}
             entries.set(new)
@@ -377,9 +394,9 @@ class TestControlFlowReactiveUpdate:
     def test_show_toggle_reactive(self):
         visible = Signal(True, name="vis")
         Show(
-            when=lambda: visible(),  # noqa: PLW0108
-            render=lambda: Box(Text("Content"), padding=1),
-            fallback=lambda: Text("Hidden"),
+            Box(Text("Content"), padding=1),
+            when=visible,
+            fallback=Text("Hidden"),
         )
 
         result = _bench(visible.toggle, label="Show reactive toggle")
@@ -388,7 +405,7 @@ class TestControlFlowReactiveUpdate:
     def test_switch_branch_change_reactive(self):
         tab = Signal(0, name="tab")
         Switch(
-            on=lambda: tab(),  # noqa: PLW0108
+            on=tab,
             cases={
                 0: lambda: Box(Text("Panel A"), padding=1),
                 1: lambda: Box(Text("Panel B"), padding=1),
@@ -424,14 +441,14 @@ class TestControlFlowReactiveUpdate:
         items = [{"id": i, "text": f"Item {i}"} for i in range(20)]
         entries = Signal(items, name="entries")
         f = For(
+            lambda item: Box(Text(item["text"]), key=f"e-{item['id']}"),
             each=entries,
-            render=lambda item: Box(Text(item["text"]), key=f"e-{item['id']}"),
             key_fn=lambda item: f"e-{item['id']}",
         )
         f._reconcile_children()
 
         def reorder():
-            current = list(entries.get())
+            current = list(entries.peek())
             current.reverse()
             entries.set(current)
 
@@ -593,7 +610,7 @@ class TestHeadToHead:
             mounted._border = bool(count() % 2)
             mounted.mark_dirty()
 
-        root.add(Box(MountedTemplate(build=build, update=update), padding=1, border=True))
+        root.add(Box(Mount(build, update=update), padding=1, border=True))
         counter = [0]
 
         def update_count():
@@ -608,45 +625,13 @@ class TestHeadToHead:
         root = BaseRenderable()
         root.add(
             Box(
-                Template(
-                    build=lambda: Box(
-                        Text("", id="count_text"),
-                        Text("", id="double_text"),
-                        id="panel",
-                        padding=1,
-                        border=False,
-                    ),
-                    bindings={
-                        "count_text.content": lambda: f"Count: {count()}",
-                        "double_text.content": lambda: f"Double: {count() * 2}",
-                        "panel.border": lambda: bool(count() % 2),
-                    },
-                ),
-                padding=1,
-                border=True,
-            )
-        )
-        counter = [0]
-
-        def update_count():
-            counter[0] += 1
-            count.set(counter[0])
-
-        return _bench(update_count, label="H2H mid: counter (template bindings)")
-
-    @staticmethod
-    def _counter_template_lowering():
-        count = Signal(0, name="count")
-        root = BaseRenderable()
-        root.add(
-            Box(
-                template(
+                Mount(
                     lambda: Box(
-                        Text(reactive(lambda: f"Count: {count()}"), id="count_text"),
-                        Text(reactive(lambda: f"Double: {count() * 2}"), id="double_text"),
+                        Text(lambda: f"Count: {count()}", id="count_text"),
+                        Text(lambda: f"Double: {count() * 2}", id="double_text"),
                         id="panel",
                         padding=1,
-                        border=reactive(lambda: bool(count() % 2)),
+                        border=lambda: bool(count() % 2),
                     )
                 ),
                 padding=1,
@@ -659,20 +644,47 @@ class TestHeadToHead:
             counter[0] += 1
             count.set(counter[0])
 
-        return _bench(update_count, label="H2H mid: counter (template lowering)")
+        return _bench(update_count, label="H2H mid: counter (mount reactive)")
 
     @staticmethod
-    def _counter_template_component():
+    def _counter_mount_lowering():
+        count = Signal(0, name="count")
+        root = BaseRenderable()
+        root.add(
+            Box(
+                Mount(
+                    lambda: Box(
+                        Text(lambda: f"Count: {count()}", id="count_text"),
+                        Text(lambda: f"Double: {count() * 2}", id="double_text"),
+                        id="panel",
+                        padding=1,
+                        border=lambda: bool(count() % 2),
+                    )
+                ),
+                padding=1,
+                border=True,
+            )
+        )
+        counter = [0]
+
+        def update_count():
+            counter[0] += 1
+            count.set(counter[0])
+
+        return _bench(update_count, label="H2H mid: counter (mount lowering)")
+
+    @staticmethod
+    def _counter_component():
         count = Signal(0, name="count")
 
-        @template_component
+        @component
         def CounterPanel():
             return Box(
-                Text(reactive(lambda: f"Count: {count()}"), id="count_text"),
-                Text(reactive(lambda: f"Double: {count() * 2}"), id="double_text"),
+                Text(lambda: f"Count: {count()}", id="count_text"),
+                Text(lambda: f"Double: {count() * 2}", id="double_text"),
                 id="panel",
                 padding=1,
-                border=reactive(lambda: bool(count() % 2)),
+                border=lambda: bool(count() % 2),
             )
 
         root = BaseRenderable()
@@ -747,7 +759,7 @@ class TestHeadToHead:
     def _tab_switch_new_style():
         active_tab = Signal(0, name="tab")
         switch = Switch(
-            on=lambda: active_tab(),  # noqa: PLW0108
+            on=active_tab,
             cases={
                 0: lambda: Box(Text("Panel 0"), padding=1),
                 1: lambda: Box(Text("Panel 1"), padding=1),
@@ -755,10 +767,7 @@ class TestHeadToHead:
             },
         )
         tab_bar = Box(
-            *[
-                Text(f"Tab {i}", bold=active_tab.map(lambda v, _i=i: v == _i))
-                for i in range(3)
-            ],
+            *[Text(f"Tab {i}", bold=active_tab.map(lambda v, _i=i: v == _i)) for i in range(3)],
             flex_direction="row",
         )
         root = BaseRenderable()
@@ -803,12 +812,12 @@ class TestHeadToHead:
         r = self._counter_template_bindings()
         assert r["median_ns"] > 0
 
-    def test_counter_update_template_lowering(self):
-        r = self._counter_template_lowering()
+    def test_counter_update_mount_lowering(self):
+        r = self._counter_mount_lowering()
         assert r["median_ns"] > 0
 
-    def test_counter_update_template_component(self):
-        r = self._counter_template_component()
+    def test_counter_update_component(self):
+        r = self._counter_component()
         assert r["median_ns"] > 0
 
     def test_counter_update_memoblock(self):
@@ -917,12 +926,12 @@ class TestFramePipeline:
     """Measure full-frame costs using renderer timing buckets."""
 
     @staticmethod
-    def _template_component_frame():
+    def _component_frame():
         count = Signal(0, name="count")
 
-        @template_component
+        @component
         def app():
-            return Box(Text(reactive(lambda: f"Count: {count()}"), id="count_text"))
+            return Box(Text(lambda: f"Count: {count()}", id="count_text"))
 
         setup = asyncio.run(_test_render(app, {"width": 40, "height": 10}))
         counter = [0]
@@ -944,9 +953,9 @@ class TestFramePipeline:
         def app():
             return Box(
                 Show(
-                    when=lambda: visible(),
-                    render=lambda: Text("Shown"),
-                    fallback=lambda: Text("Hidden"),
+                    Text("Shown"),
+                    when=visible,
+                    fallback=Text("Hidden"),
                 )
             )
 
@@ -961,8 +970,8 @@ class TestFramePipeline:
             label_prefix="frame reactive: show toggle",
         )
 
-    def test_template_component_frame_buckets(self):
-        results = self._template_component_frame()
+    def test_component_frame_buckets(self):
+        results = self._component_frame()
         assert results["total_ns"]["median_ns"] > 0
 
     def test_control_flow_frame_buckets(self):
@@ -984,14 +993,14 @@ class TestWorkloadFrames:
             name="entries",
         )
 
-        @template_component
+        @component
         def app():
             return Box(
-                Text(reactive(lambda: f"Total: {len(entries())}"), id="count_text"),
+                Text(lambda: f"Total: {len(entries())}", id="count_text"),
                 Box(
                     For(
+                        lambda item: Text(item["text"], key=f"msg-{item['id']}"),
                         each=entries,
-                        render=lambda item: Text(item["text"], key=f"msg-{item['id']}"),
                         key_fn=lambda item: f"msg-{item['id']}",
                     ),
                     border=True,
@@ -1006,7 +1015,7 @@ class TestWorkloadFrames:
 
         def mutate():
             counter[0] += 1
-            current = list(entries.get())
+            current = list(entries.peek())
             current[-1] = {"id": current[-1]["id"], "text": f"Message {counter[0]}"}
             entries.set(current)
 
@@ -1030,20 +1039,20 @@ class TestWorkloadFrames:
             name="entries",
         )
 
-        @template_component
+        @component
         def app():
             return Box(
-                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=entries,
-                            render=lambda item: Box(
+                            lambda item: Box(
                                 Text(item["text"]),
                                 margin_top=1,
                                 margin_bottom=1,
                                 key=f"msg-{item['id']}",
                             ),
+                            each=entries,
                             key_fn=lambda item: f"msg-{item['id']}",
                         )
                     ),
@@ -1051,18 +1060,16 @@ class TestWorkloadFrames:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = asyncio.run(
-            _test_render(app, {"width": 60, "height": 20})
-        )
-        counter = [len(entries.get())]
+        setup = asyncio.run(_test_render(app, {"width": 60, "height": 20}))
+        counter = [len(entries.peek())]
 
         def mutate():
-            current = list(entries.get())
+            current = list(entries.peek())
             current.append({"id": counter[0], "text": f"Message {counter[0]}"})
             counter[0] += 1
             entries.set(current)
@@ -1081,20 +1088,20 @@ class TestWorkloadFrames:
             name="entries",
         )
 
-        @template_component
+        @component
         def app():
             return Box(
-                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=entries,
-                            render=lambda item: Box(
+                            lambda item: Box(
                                 Text(item["text"]),
                                 margin_top=1,
                                 margin_bottom=1,
                                 key=f"msg-{item['id']}",
                             ),
+                            each=entries,
                             key_fn=lambda item: f"msg-{item['id']}",
                         )
                     ),
@@ -1102,17 +1109,15 @@ class TestWorkloadFrames:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = asyncio.run(
-            _test_render(app, {"width": 60, "height": 20})
-        )
+        setup = asyncio.run(_test_render(app, {"width": 60, "height": 20}))
 
         def mutate():
-            current = list(entries.get())
+            current = list(entries.peek())
             current.pop()
             entries.set(current)
 
@@ -1130,20 +1135,20 @@ class TestWorkloadFrames:
             name="entries",
         )
 
-        @template_component
+        @component
         def app():
             return Box(
-                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=entries,
-                            render=lambda item: Box(
+                            lambda item: Box(
                                 Text(item["text"]),
                                 margin_top=1,
                                 margin_bottom=1,
                                 key=f"msg-{item['id']}",
                             ),
+                            each=entries,
                             key_fn=lambda item: f"msg-{item['id']}",
                         )
                     ),
@@ -1151,18 +1156,16 @@ class TestWorkloadFrames:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = asyncio.run(
-            _test_render(app, {"width": 60, "height": 20})
-        )
-        counter = [len(entries.get())]
+        setup = asyncio.run(_test_render(app, {"width": 60, "height": 20}))
+        counter = [len(entries.peek())]
 
         def mutate():
-            current = list(entries.get())
+            current = list(entries.peek())
             current.insert(0, {"id": counter[0], "text": f"Message {counter[0]}"})
             counter[0] += 1
             entries.set(current)
@@ -1190,15 +1193,14 @@ class TestWorkloadFrames:
             name="entries",
         )
 
-        @template_component
+        @component
         def app():
             return Box(
-                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=entries,
-                            render=lambda item: Box(
+                            lambda item: Box(
                                 Code(
                                     item["content"],
                                     filetype="python",
@@ -1208,6 +1210,7 @@ class TestWorkloadFrames:
                                 margin_bottom=1,
                                 key=f"code-{item['id']}",
                             ),
+                            each=entries,
                             key_fn=lambda item: f"code-{item['id']}",
                         )
                     ),
@@ -1215,18 +1218,16 @@ class TestWorkloadFrames:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = asyncio.run(
-            _test_render(app, {"width": 80, "height": 30})
-        )
-        counter = [len(entries.get())]
+        setup = asyncio.run(_test_render(app, {"width": 80, "height": 30}))
+        counter = [len(entries.peek())]
 
         def mutate():
-            current = list(entries.get())
+            current = list(entries.peek())
             current.append({"id": counter[0], "content": code_block})
             counter[0] += 1
             entries.set(current)
@@ -1254,15 +1255,14 @@ class TestWorkloadFrames:
             name="entries",
         )
 
-        @template_component
+        @component
         def app():
             return Box(
-                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=entries,
-                            render=lambda item: Box(
+                            lambda item: Box(
                                 Code(
                                     item["content"],
                                     filetype="python",
@@ -1272,6 +1272,7 @@ class TestWorkloadFrames:
                                 margin_bottom=1,
                                 key=f"code-{item['id']}",
                             ),
+                            each=entries,
                             key_fn=lambda item: f"code-{item['id']}",
                         )
                     ),
@@ -1279,14 +1280,12 @@ class TestWorkloadFrames:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = asyncio.run(
-            _test_render(app, {"width": 100, "height": 24})
-        )
+        setup = asyncio.run(_test_render(app, {"width": 100, "height": 24}))
         widths = [100, 84, 96, 80, 92, 88]
         index = [0]
 
@@ -1318,20 +1317,20 @@ class TestWorkloadFrames:
             name="entries",
         )
 
-        @template_component
+        @component
         def app():
             return Box(
-                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=entries,
-                            render=lambda item: Box(
+                            lambda item: Box(
                                 Markdown(item["content"]),
                                 margin_top=1,
                                 margin_bottom=1,
                                 key=f"md-{item['id']}",
                             ),
+                            each=entries,
                             key_fn=lambda item: f"md-{item['id']}",
                         )
                     ),
@@ -1339,18 +1338,16 @@ class TestWorkloadFrames:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = asyncio.run(
-            _test_render(app, {"width": 90, "height": 24})
-        )
-        counter = [len(entries.get())]
+        setup = asyncio.run(_test_render(app, {"width": 90, "height": 24}))
+        counter = [len(entries.peek())]
 
         def mutate():
-            current = list(entries.get())
+            current = list(entries.peek())
             current.append({"id": counter[0], "content": markdown_block})
             counter[0] += 1
             entries.set(current)
@@ -1378,20 +1375,20 @@ class TestWorkloadFrames:
             name="entries",
         )
 
-        @template_component
+        @component
         def app():
             return Box(
-                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=entries,
-                            render=lambda item: Box(
+                            lambda item: Box(
                                 Markdown(item["content"]),
                                 margin_top=1,
                                 margin_bottom=1,
                                 key=f"md-{item['id']}",
                             ),
+                            each=entries,
                             key_fn=lambda item: f"md-{item['id']}",
                         )
                     ),
@@ -1399,14 +1396,12 @@ class TestWorkloadFrames:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = asyncio.run(
-            _test_render(app, {"width": 96, "height": 24})
-        )
+        setup = asyncio.run(_test_render(app, {"width": 96, "height": 24}))
         widths = [96, 80, 92, 76, 88, 84]
         index = [0]
 
@@ -1434,15 +1429,14 @@ class TestWorkloadFrames:
             name="entries",
         )
 
-        @template_component
+        @component
         def app():
             return Box(
-                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=entries,
-                            render=lambda item: Box(
+                            lambda item: Box(
                                 TextareaRenderable(
                                     initial_value=item["content"],
                                     wrap_mode="word",
@@ -1452,6 +1446,7 @@ class TestWorkloadFrames:
                                 margin_bottom=1,
                                 key=f"ta-{item['id']}",
                             ),
+                            each=entries,
                             key_fn=lambda item: f"ta-{item['id']}",
                         )
                     ),
@@ -1459,14 +1454,12 @@ class TestWorkloadFrames:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = asyncio.run(
-            _test_render(app, {"width": 100, "height": 24})
-        )
+        setup = asyncio.run(_test_render(app, {"width": 100, "height": 24}))
         widths = [100, 84, 96, 80, 92, 88]
         index = [0]
 
@@ -1491,7 +1484,7 @@ class TestWorkloadFrames:
 
         textarea_ref: list[TextareaRenderable | None] = [None]
 
-        @template_component
+        @component
         def app():
             textarea = TextareaRenderable(
                 initial_value=text_block,
@@ -1500,7 +1493,7 @@ class TestWorkloadFrames:
             )
             textarea_ref[0] = textarea
             return Box(
-                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         Box(
@@ -1514,14 +1507,12 @@ class TestWorkloadFrames:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
 
-        setup = asyncio.run(
-            _test_render(app, {"width": 100, "height": 24})
-        )
+        setup = asyncio.run(_test_render(app, {"width": 100, "height": 24}))
         textarea = textarea_ref[0]
         assert textarea is not None
         textarea.focus()
@@ -1631,8 +1622,8 @@ class TestAllocationOverhead:
         items = Signal([{"id": i} for i in range(10)], name="items")
         r = _bench(
             lambda: For(
+                lambda item: Text(f"Item {item['id']}"),
                 each=items,
-                render=lambda item: Text(f"Item {item['id']}"),
                 key_fn=lambda item: str(item["id"]),
             ),
             iterations=200,

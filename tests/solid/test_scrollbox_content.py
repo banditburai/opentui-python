@@ -6,10 +6,11 @@ Tests ported: 5/5 (0 skipped)
 
 import re
 
-from opentui import reactive, template_component
+from opentui import component
 from opentui import test_render as _test_render
 from opentui.components.advanced import Code
-from opentui.components.box import Box, ScrollBox, ScrollContent
+from opentui.components.box import Box
+from opentui.components.scrollbox import ScrollBox, ScrollContent
 from opentui.components.control_flow import For
 from opentui.components.text import Text
 from opentui.signals import Signal
@@ -39,20 +40,20 @@ class TestScrollBoxContentVisibility:
 
         count = Signal(0, name="count")
 
-        @template_component
+        @component
         def build():
             return Box(
-                Box(Text(reactive(lambda: "Header Content"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header Content", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=lambda: [f"Message {i + 1}" for i in range(count())],
-                            render=lambda msg: Box(
+                            lambda msg: Box(
                                 Text(msg),
                                 margin_top=1,
                                 margin_bottom=1,
                                 key=f"message-{msg}",
                             ),
+                            each=lambda: [f"Message {i + 1}" for i in range(count())],
                             key_fn=lambda msg: f"message-{msg}",
                             key="messages",
                         )
@@ -62,7 +63,7 @@ class TestScrollBoxContentVisibility:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer Content"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer Content", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
@@ -118,15 +119,14 @@ class TestScrollBoxContentVisibility:
 
         count = Signal(0, name="count")
 
-        @template_component
+        @component
         def build():
             return Box(
-                Box(Text(reactive(lambda: "Some visual content"), id="visual-top"), flex_shrink=0),
+                Box(Text(lambda: "Some visual content", id="visual-top"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=lambda: list(range(count())),
-                            render=lambda idx: Box(
+                            lambda idx: Box(
                                 Code(
                                     code_block,
                                     filetype="markdown",
@@ -136,6 +136,7 @@ class TestScrollBoxContentVisibility:
                                 margin_bottom=2,
                                 key=f"code-block-{idx}",
                             ),
+                            each=lambda: list(range(count())),
                             key_fn=lambda idx: f"code-block-{idx}",
                             key="code-blocks",
                         ),
@@ -145,7 +146,7 @@ class TestScrollBoxContentVisibility:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Some visual content"), id="visual-bottom"), flex_shrink=0),
+                Box(Text(lambda: "Some visual content", id="visual-bottom"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
@@ -193,15 +194,14 @@ class TestScrollBoxContentVisibility:
 
         count = Signal(0, name="count")
 
-        @template_component
+        @component
         def build():
             return Box(
-                Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                 ScrollBox(
                     content=ScrollContent(
                         For(
-                            each=lambda: list(range(count())),
-                            render=lambda i: Box(
+                            lambda i: Box(
                                 Code(
                                     f"Item {i}",
                                     filetype="markdown",
@@ -211,6 +211,7 @@ class TestScrollBoxContentVisibility:
                                 margin_bottom=1,
                                 key=f"code-item-{i}",
                             ),
+                            each=lambda: list(range(count())),
                             key_fn=lambda i: f"code-item-{i}",
                             key="code-items",
                         ),
@@ -220,7 +221,7 @@ class TestScrollBoxContentVisibility:
                     sticky_start="bottom",
                     flex_grow=1,
                 ),
-                Box(Text(reactive(lambda: "Footer"), id="footer"), flex_shrink=0),
+                Box(Text(lambda: "Footer", id="footer"), flex_shrink=0),
                 flex_direction="column",
                 gap=1,
             )
@@ -265,8 +266,8 @@ class TestScrollBoxContentVisibility:
                 ScrollBox(
                     content=ScrollContent(
                         For(
+                            lambda item: Box(Text(item), key=f"item-{item}"),
                             each=items,
-                            render=lambda item: Box(Text(item), key=f"item-{item}"),
                             key_fn=lambda item: f"item-{item}",
                             key="items",
                         ),
@@ -328,16 +329,15 @@ class TestScrollBoxContentVisibility:
 
         items = Signal([], name="items")
 
-        @template_component
+        @component
         def build():
             return Box(
                 Box(
-                    Box(Text(reactive(lambda: "Header"), id="header"), flex_shrink=0),
+                    Box(Text(lambda: "Header", id="header"), flex_shrink=0),
                     ScrollBox(
                         content=ScrollContent(
                             For(
-                                each=items,
-                                render=lambda item: Box(
+                                lambda item: Box(
                                     Code(
                                         item.strip(),
                                         filetype="markdown",
@@ -348,6 +348,7 @@ class TestScrollBoxContentVisibility:
                                     padding_left=3,
                                     key=f"message-{hash(item)}",
                                 ),
+                                each=items,
                                 key_fn=lambda item: f"message-{hash(item)}",
                                 key="messages",
                             )
@@ -356,7 +357,7 @@ class TestScrollBoxContentVisibility:
                         sticky_start="bottom",
                         flex_grow=1,
                     ),
-                    Box(Text(reactive(lambda: "Prompt"), id="prompt"), flex_shrink=0),
+                    Box(Text(lambda: "Prompt", id="prompt"), flex_shrink=0),
                     flex_grow=1,
                     padding_bottom=1,
                     padding_top=1,

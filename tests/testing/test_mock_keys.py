@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from opentui.testing import KeyCodes, MockKeys, MockRenderer, create_mock_keys
+from opentui.testing.input import KeyCodes, MockKeys, MockRenderer, create_mock_keys
 
 
 # ===========================================================================

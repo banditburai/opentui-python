@@ -10,6 +10,7 @@ from opentui.components.select_renderable import SelectRenderable
 from opentui.components.text_table_renderable import TextTableRenderable
 from opentui.components.textarea_renderable import TextareaRenderable
 from opentui.enums import RenderStrategy
+from opentui.renderer.layout import supports_common_tree_strategy
 
 
 def test_box_uses_common_tree_strategy_when_simple() -> None:
@@ -48,10 +49,17 @@ def test_framebuffer_uses_retained_layer_strategy() -> None:
 
 
 def test_heavy_widgets_are_classified_explicitly() -> None:
-    assert TextTableRenderable(content=[[None]]).get_render_strategy() is RenderStrategy.HEAVY_WIDGET
+    assert (
+        TextTableRenderable(content=[[None]]).get_render_strategy() is RenderStrategy.HEAVY_WIDGET
+    )
     assert MarkdownRenderable(content="hello").get_render_strategy() is RenderStrategy.HEAVY_WIDGET
-    assert CodeRenderable(content="x", filetype="python").get_render_strategy() is RenderStrategy.HEAVY_WIDGET
-    assert TextareaRenderable(initial_value="x").get_render_strategy() is RenderStrategy.HEAVY_WIDGET
+    assert (
+        CodeRenderable(content="x", filetype="python").get_render_strategy()
+        is RenderStrategy.HEAVY_WIDGET
+    )
+    assert (
+        TextareaRenderable(initial_value="x").get_render_strategy() is RenderStrategy.HEAVY_WIDGET
+    )
     assert DiffRenderable(diff="").get_render_strategy() is RenderStrategy.HEAVY_WIDGET
     assert SelectRenderable().get_render_strategy() is RenderStrategy.HEAVY_WIDGET
 
@@ -65,12 +73,12 @@ async def test_renderer_common_tree_strategy_rejects_retained_layers_and_heavy_w
         retained = FrameBuffer(width=10, height=3)
         retained.add(Text("cached", wrap_mode="none"))
         root.add(retained)
-        assert setup.renderer._supports_common_tree_strategy(root) is False
+        assert supports_common_tree_strategy(root) is False
 
         root.remove(retained)
         table = TextTableRenderable(content=[[None]], width=10, height=3)
         root.add(table)
-        assert setup.renderer._supports_common_tree_strategy(root) is False
+        assert supports_common_tree_strategy(root) is False
     finally:
         setup.destroy()
 
@@ -83,7 +91,7 @@ async def test_renderer_common_tree_strategy_accepts_simple_common_subtrees() ->
         box = Box(width=10, height=3, border=True, title="ok")
         box.add(Text("plain", wrap_mode="none"))
         root.add(box)
-        assert setup.renderer._supports_common_tree_strategy(root) is True
+        assert supports_common_tree_strategy(root) is True
     finally:
         setup.destroy()
 

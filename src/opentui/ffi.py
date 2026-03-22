@@ -136,27 +136,7 @@ class NanobindLibrary:
         self._native = _native_module
 
     def __getattr__(self, name: str) -> Any:
-        if self._native is None:
-            raise RuntimeError("Native bindings not available")
         return getattr(self._native, name)
-
-    def get_buffer_width(self, buffer: Any) -> int:
-        return self._native.buffer.get_buffer_width(buffer)
-
-    def get_buffer_height(self, buffer: Any) -> int:
-        return self._native.buffer.get_buffer_height(buffer)
-
-    def buffer_get_char_ptr(self, buffer: Any) -> int:
-        return self._native.buffer.buffer_get_char_ptr(buffer)
-
-    def buffer_get_fg_ptr(self, buffer: Any) -> int:
-        return self._native.buffer.buffer_get_fg_ptr(buffer)
-
-    def buffer_get_bg_ptr(self, buffer: Any) -> int:
-        return self._native.buffer.buffer_get_bg_ptr(buffer)
-
-    def buffer_get_attributes_ptr(self, buffer: Any) -> int:
-        return self._native.buffer.buffer_get_attributes_ptr(buffer)
 
 
 _cached_library: NanobindLibrary | None = None
@@ -184,7 +164,6 @@ def get_native() -> Any:
 
 __all__ = [
     "NanobindLibrary",
-    "_binding_filename_matches_runtime",
     "get_library",
     "is_native_available",
     "get_native",

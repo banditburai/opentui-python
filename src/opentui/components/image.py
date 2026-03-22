@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import math
 import os
 from typing import TYPE_CHECKING
 
-from ..filters import ImageRenderer
-from ..image import ImageFit, ImageProtocol, ImageSource, resize_rgba_nearest
-from ..image_loader import load_image
-from ..native import ImageCache
+from ..image.encoding import ImageRenderer
+from ..image.loader import load_image
+from ..image.types import DecodedImage, ImageFit, ImageProtocol, ImageSource, resize_rgba_nearest
 from ..renderer import TerminalCapabilities
 from .base import Renderable
 
@@ -54,6 +54,54 @@ def _protocol_capabilities(protocol: ImageProtocol) -> TerminalCapabilities:
     return TerminalCapabilities()
 
 
+def _source_key(source: ImageSource) -> str:
+    if source.path is not None:
+        return f"path:{source.path}|mime:{source.mime_type or ''}"
+    if source.data is not None:
+        digest = hashlib.sha1(source.data).hexdigest()
+        return f"bytes:{digest}|mime:{source.mime_type or ''}"
+    return "empty"
+
+
+class ImageCache:
+    """Caches decoded images and resized variants."""
+
+    def __init__(self):
+        self._decoded: dict[str, DecodedImage] = {}
+        self._variants: dict[tuple[str, int, int], bytes] = {}
+
+    @property
+    def decoded_count(self) -> int:
+        return len(self._decoded)
+
+    @property
+    def variant_count(self) -> int:
+        return len(self._variants)
+
+    def get_decoded(self, source: ImageSource, loader) -> DecodedImage:
+        key = _source_key(source)
+        cached = self._decoded.get(key)
+        if cached is not None:
+            return cached
+        decoded = loader()
+        self._decoded[key] = decoded
+        return decoded
+
+    def get_variant(self, decoded: DecodedImage, width: int, height: int, scaler) -> bytes:
+        source = decoded.source or ImageSource(data=decoded.data, mime_type=decoded.mime_type)
+        key = (_source_key(source), width, height)
+        cached = self._variants.get(key)
+        if cached is not None:
+            return cached
+        variant = scaler()
+        self._variants[key] = variant
+        return variant
+
+    def clear(self) -> None:
+        self._decoded.clear()
+        self._variants.clear()
+
+
 class Image(Renderable):
     """Renderable image component with text fallback."""
 
@@ -86,7 +134,6 @@ class Image(Renderable):
         self.on_cleanup(self._clear_graphics_on_destroy)
 
     def _register_active_graphics(self) -> None:
-        """Register this image's graphics ID with the renderer for stale tracking."""
         if self._graphics_id is not None:
             from ..hooks import get_renderer
 
@@ -99,7 +146,7 @@ class Image(Renderable):
             import sys
 
             try:
-                from ..filters import _clear_kitty_graphics
+                from ..image.encoding import _clear_kitty_graphics
 
                 sys.stdout.buffer.write(_clear_kitty_graphics(self._graphics_id))
                 sys.stdout.buffer.flush()
@@ -166,7 +213,6 @@ class Image(Renderable):
         return min(box_width, width_cells), min(box_height, height_cells)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        """Render the image or fallback alt text."""
         if not self._visible:
             if self._graphics_id is not None and self._last_draw_signature is not None:
                 self._clear_graphics_on_destroy()

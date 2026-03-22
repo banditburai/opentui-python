@@ -7,7 +7,7 @@ Tests ported: 30/30 (4 skipped - require TestRenderer)
 import pytest
 
 from opentui.events import KeyEvent, PasteEvent
-from opentui.key_handler import InternalKeyHandler
+from opentui.input.key_handler import InternalKeyHandler
 
 
 def create_key_handler(use_kitty_keyboard: bool = False) -> InternalKeyHandler:

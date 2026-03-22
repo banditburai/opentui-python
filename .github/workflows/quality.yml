@@ -30,8 +30,8 @@ jobs:
         uv run ruff check
         uv run ruff format --check
 
-    - name: Type check with pyright
-      run: uv run pyright
+    - name: Type check with ty
+      run: uv run ty check
 
     - name: Run tests
       run: uv run pytest tests/ -v --tb=short

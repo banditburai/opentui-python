@@ -153,6 +153,7 @@ class TestDiffRenderable:
     async def test_reuses_raster_cache_when_diff_is_clean(self):
         setup = await create_test_renderer(80, 20)
         try:
+
             class _CountingDiff(DiffRenderable):
                 __slots__ = ("unified_calls",)
 
@@ -1784,44 +1785,3 @@ Index: packages/core/src/examples/index.ts
             assert buggy_frame == correct_frame
         finally:
             setup.destroy()
-
-    async def test_setlinecolor_applies_color_to_line(self):
-        """Maps to test("DiffRenderable - set_line_color applies color to line")."""
-        setup, dr = await _make(diff=SIMPLE_DIFF, view="unified")
-
-        dr.set_line_color(0, "#ff0000")
-        dr.set_line_color(1, {"gutter": "#00ff00", "content": "#0000ff"})
-        dr.clear_line_color(0)
-        dr.clear_line_color(1)
-        # Should not crash
-        setup.destroy()
-
-    async def test_highlightlines_applies_color_to_range(self):
-        """Maps to test("DiffRenderable - highlight_lines applies color to range")."""
-        setup, dr = await _make(diff=MULTI_LINE_DIFF, view="unified")
-
-        dr.highlight_lines(0, 3, "#ff0000")
-        dr.clear_highlight_lines(0, 3)
-        # Should not crash
-        setup.destroy()
-
-    async def test_setlinecolors_and_clearalllinecolors(self):
-        """Maps to test("DiffRenderable - set_line_colors and clear_all_line_colors")."""
-        setup, dr = await _make(diff=SIMPLE_DIFF, view="unified")
-
-        line_colors = {0: "#ff0000", 1: "#00ff00", 2: "#0000ff"}
-        dr.set_line_colors(line_colors)
-        dr.clear_all_line_colors()
-        # Should not crash
-        setup.destroy()
-
-    async def test_line_highlighting_works_in_split_view(self):
-        """Maps to test("DiffRenderable - line highlighting works in split view")."""
-        setup, dr = await _make(diff=SIMPLE_DIFF, view="split")
-
-        dr.set_line_color(0, "#ff0000")
-        dr.highlight_lines(0, 2, "#00ff00")
-        dr.clear_highlight_lines(0, 2)
-        dr.clear_all_line_colors()
-        # Should not crash
-        setup.destroy()

@@ -10,7 +10,7 @@ from typing import Callable
 
 import pytest
 
-from opentui.terminal_palette import TerminalPalette
+from opentui.palette.terminal import TerminalPalette
 
 
 # ---------------------------------------------------------------------------

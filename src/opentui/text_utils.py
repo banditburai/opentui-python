@@ -1,9 +1,12 @@
 """Text measurement utilities for OpenTUI Python.
 
 Provides text measurement functions for yoga layout integration.
+Uses display_width() for correct CJK/emoji double-width handling.
 """
 
 from __future__ import annotations
+
+from .structs import display_width as _dw
 
 
 def measure_text(text: str, max_width: int, wrap: str = "word") -> tuple[int, int]:
@@ -15,13 +18,13 @@ def measure_text(text: str, max_width: int, wrap: str = "word") -> tuple[int, in
         wrap: Wrap mode - "none", "char", or "word"
 
     Returns:
-        Tuple of (width, height) in character cells
+        Tuple of (width, height) in display columns
     """
     if not text:
         return (0, 1)
 
     if wrap == "none":
-        return (len(text), 1)
+        return (_dw(text), 1)
 
     lines = text.split("\n")
     total_height = len(lines)
@@ -37,7 +40,7 @@ def measure_text(text: str, max_width: int, wrap: str = "word") -> tuple[int, in
             total_height += additional_lines
             max_width_found = max(max_width_found, width)
         else:
-            max_width_found = max(max_width_found, len(line))
+            max_width_found = max(max_width_found, _dw(line))
 
     return (max_width_found, total_height)
 
@@ -45,15 +48,11 @@ def measure_text(text: str, max_width: int, wrap: str = "word") -> tuple[int, in
 def _measure_word_wrap(line: str, max_width: int) -> tuple[int, int]:
     """Measure text with word wrapping.
 
-    Args:
-        line: A single line of text
-        max_width: Maximum width before wrapping
-
     Returns:
-        Tuple of (max_line_width, additional_lines)
+        Tuple of (max_line_width, additional_lines) in display columns
     """
     if max_width <= 0:
-        return (len(line), 0)
+        return (_dw(line), 0)
 
     words = line.split(" ")
     current_width = 0
@@ -61,7 +60,7 @@ def _measure_word_wrap(line: str, max_width: int) -> tuple[int, int]:
     additional_lines = 0
 
     for word in words:
-        word_width = len(word)
+        word_width = _dw(word)
         if current_width == 0:
             current_width = word_width
         elif current_width + 1 + word_width > max_width:
@@ -78,28 +77,24 @@ def _measure_word_wrap(line: str, max_width: int) -> tuple[int, int]:
 def _measure_char_wrap(line: str, max_width: int) -> tuple[int, int]:
     """Measure text with character wrapping.
 
-    Args:
-        line: A single line of text
-        max_width: Maximum width before wrapping
-
     Returns:
-        Tuple of (max_line_width, additional_lines)
+        Tuple of (max_line_width, additional_lines) in display columns
     """
     if max_width <= 0:
-        return (len(line), 0)
+        return (_dw(line), 0)
 
-    line_len = len(line)
-    if line_len <= max_width:
-        return (line_len, 0)
+    line_width = _dw(line)
+    if line_width <= max_width:
+        return (line_width, 0)
 
-    additional_lines = (line_len - 1) // max_width
+    additional_lines = (line_width - 1) // max_width
     return (max_width, additional_lines)
 
 
 def wrap_text(text: str, max_width: int, wrap: str = "word") -> list[str]:
     """Wrap text into lines that fit within max_width.
 
-    Uses the same logic as measure_text but returns the actual lines.
+    Uses display_width() for correct CJK/emoji handling.
 
     Args:
         text: The text content to wrap
@@ -133,7 +128,7 @@ def wrap_text(text: str, max_width: int, wrap: str = "word") -> list[str]:
 
 def _wrap_line_word(line: str, max_width: int) -> list[str]:
     """Word-wrap a single line. Returns list of wrapped lines."""
-    if len(line) <= max_width:
+    if _dw(line) <= max_width:
         return [line]
 
     words = line.split(" ")
@@ -142,7 +137,7 @@ def _wrap_line_word(line: str, max_width: int) -> list[str]:
     current_width = 0
 
     for word in words:
-        word_width = len(word)
+        word_width = _dw(word)
         if current_width == 0:
             current.append(word)
             current_width = word_width
@@ -161,12 +156,25 @@ def _wrap_line_word(line: str, max_width: int) -> list[str]:
 
 
 def _wrap_line_char(line: str, max_width: int) -> list[str]:
-    """Character-wrap a single line. Returns list of wrapped lines."""
-    if len(line) <= max_width:
+    """Character-wrap a single line with display-width-aware boundaries."""
+    if _dw(line) <= max_width:
         return [line]
 
     lines: list[str] = []
-    for i in range(0, len(line), max_width):
-        lines.append(line[i : i + max_width])
+    current: list[str] = []
+    current_width = 0
+
+    for ch in line:
+        ch_width = _dw(ch)
+        if current_width + ch_width > max_width and current:
+            lines.append("".join(current))
+            current = [ch]
+            current_width = ch_width
+        else:
+            current.append(ch)
+            current_width += ch_width
+
+    if current:
+        lines.append("".join(current))
 
     return lines or [""]
