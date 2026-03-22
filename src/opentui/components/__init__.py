@@ -1,6 +1,6 @@
 """Components package."""
 
-from .advanced import (
+from .simple import (
     AsciiFont,
     Code,
     Diff,
@@ -10,7 +10,7 @@ from .advanced import (
     TabSelect,
     TextTable,
 )
-from .base import BaseRenderable, LayoutRect, Renderable
+from .base import BaseRenderable, LayoutRect, Renderable, VRenderable
 from .box import Box, Column, FlexFill, Row, Spacer
 from .code_renderable import (
     CodeRenderable,
@@ -18,7 +18,6 @@ from .code_renderable import (
     SyntaxStyle,
     TreeSitterClient,
 )
-from .composition import VRenderable
 from .control_flow import (
     Dynamic,
     ErrorBoundary,

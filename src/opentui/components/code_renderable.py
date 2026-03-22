@@ -6,12 +6,56 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
-from ..detect_links import detect_links
 from ..enums import RenderStrategy
 from .text_renderable import TextRenderable
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
+
+_URL_SCOPES = ("markup.link.url", "string.special.url")
+
+
+def _detect_links(
+    chunks: list[TextChunk],
+    context: Any,
+) -> list[TextChunk]:
+    """Scan highlight scopes for URL patterns and back-track for labels."""
+    content: str = context["content"] if isinstance(context, dict) else context.content
+    highlights: list = context["highlights"] if isinstance(context, dict) else context.highlights
+
+    ranges: list[dict[str, Any]] = []
+
+    for i, hl in enumerate(highlights):
+        start, end, group = hl[0], hl[1], hl[2]
+        if group not in _URL_SCOPES:
+            continue
+        url = content[start:end]
+        ranges.append({"start": start, "end": end, "url": url})
+        for j in range(i - 1, -1, -1):
+            prev_start, prev_end, prev_group = highlights[j][0], highlights[j][1], highlights[j][2]
+            if prev_group == "markup.link.label":
+                ranges.append({"start": prev_start, "end": prev_end, "url": url})
+                break
+            if not prev_group.startswith("markup.link"):
+                break
+
+    if not ranges:
+        return chunks
+
+    content_pos = 0
+    for chunk in chunks:
+        if not chunk.text:
+            continue
+        idx = content.find(chunk.text, content_pos)
+        if idx < 0:
+            continue
+        for r in ranges:
+            if idx < r["end"] and idx + len(chunk.text) > r["start"]:
+                chunk.link = {"url": r["url"]}
+                break
+        content_pos = idx + len(chunk.text)
+
+    return chunks
 
 
 SimpleHighlight = list  # [int, int, str] or [int, int, str, dict]
@@ -677,7 +721,7 @@ class CodeRenderable(TextRenderable):
 
             self._build_line_highlights(content, highlights)
 
-            detect_links(chunks, {"content": content, "highlights": highlights})
+            _detect_links(chunks, {"content": content, "highlights": highlights})
 
             self._text_buffer.set_styled_text(
                 [

@@ -8,10 +8,10 @@ import pytest
 
 from opentui import create_test_renderer
 from opentui.components.markdown_renderable import (
-    CodeRenderable,
+    _MarkdownCodeBlock,
     MarkdownRenderable,
     MarkdownTableOptions,
-    TextTableRenderable,
+    _MarkdownTableBlock,
 )
 
 
@@ -79,7 +79,7 @@ class TestMarkdownRenderable:
         setup.render_frame()
 
         table = md._blockStates[0].renderable
-        assert isinstance(table, TextTableRenderable)
+        assert isinstance(table, _MarkdownTableBlock)
         assert table.column_width_mode == "full"
         assert table.column_fitter == "balanced"
 
@@ -94,7 +94,7 @@ class TestMarkdownRenderable:
         setup.render_frame()
 
         table = md._blockStates[0].renderable
-        assert isinstance(table, TextTableRenderable)
+        assert isinstance(table, _MarkdownTableBlock)
         assert table.column_width_mode == "full"
 
         md.table_options = {
@@ -363,7 +363,7 @@ class TestMarkdownRenderable:
     async def test_selection_across_markdown_table_includes_table_data(self, setup):
         """Maps to test("selection across markdown table includes table data").
 
-        Selection requires mouse infrastructure and full TextTableRenderable
+        Selection requires mouse infrastructure and full _MarkdownTableBlock
         selection support which is not yet available.
         """
         md = MarkdownRenderable(
@@ -641,7 +641,7 @@ class TestMarkdownRenderable:
             if token.type == "heading":
                 text = token.text
                 lines = [f"[CUSTOM] {text}"]
-                return CodeRenderable(
+                return _MarkdownCodeBlock(
                     id="custom",
                     block_type="text",
                     lines=lines,
@@ -668,7 +668,7 @@ class TestMarkdownRenderable:
         def custom_render(token, ctx):
             if token.type == "code":
                 lines = [f"CODE: {token.text.rstrip()}"]
-                return CodeRenderable(
+                return _MarkdownCodeBlock(
                     id="code-text",
                     block_type="text",
                     lines=lines,
@@ -1194,7 +1194,7 @@ class TestMarkdownRenderable:
         setup.render_frame()
 
         table = md._blockStates[0].renderable
-        assert isinstance(table, TextTableRenderable)
+        assert isinstance(table, _MarkdownTableBlock)
 
         header_before = table.content[0][0]
         first_row_before = table.content[1][0]

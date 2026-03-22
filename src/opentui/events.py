@@ -273,49 +273,14 @@ def handler(
         handler(select_item, item_id, stop=True)
         handler(handle_click, item_id, stop=True, pass_event=True)
     """
-    # Pre-select the right body at creation time to avoid per-dispatch branching.
-    if stop and prevent:
+    def _handler(event: Any) -> None:
+        if stop:
+            event.stop_propagation()
+        if prevent:
+            event.prevent_default()
         if pass_event:
-
-            def _handler(event: Any) -> None:
-                event.stop_propagation()
-                event.prevent_default()
-                callback(event, *args)
-        else:
-
-            def _handler(event: Any) -> None:
-                event.stop_propagation()
-                event.prevent_default()
-                callback(*args)
-    elif stop:
-        if pass_event:
-
-            def _handler(event: Any) -> None:
-                event.stop_propagation()
-                callback(event, *args)
-        else:
-
-            def _handler(event: Any) -> None:
-                event.stop_propagation()
-                callback(*args)
-    elif prevent:
-        if pass_event:
-
-            def _handler(event: Any) -> None:
-                event.prevent_default()
-                callback(event, *args)
-        else:
-
-            def _handler(event: Any) -> None:
-                event.prevent_default()
-                callback(*args)
-    elif pass_event:
-
-        def _handler(event: Any) -> None:
             callback(event, *args)
-    else:
-
-        def _handler(event: Any) -> None:
+        else:
             callback(*args)
 
     return _handler

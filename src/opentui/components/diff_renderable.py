@@ -76,12 +76,11 @@ class DiffRenderable(Renderable):
         "_right_line_numbers",
         "_left_hide_line_numbers",
         "_right_hide_line_numbers",
-        # Cached mock renderables for event emission
-        "_mock_left_code",
-        "_mock_right_code",
-        # Cached mock line number renderables
-        "_mock_left_line_num",
-        "_mock_right_line_num",
+        # Adapter objects for CodeRenderable/LineNumberRenderable-like API
+        "_left_code_adapter",
+        "_right_code_adapter",
+        "_left_line_num_adapter",
+        "_right_line_num_adapter",
         # Retained raster cache
         "_raster",
     )
@@ -168,12 +167,12 @@ class DiffRenderable(Renderable):
         self._left_hide_line_numbers: set[int] = set()
         self._right_hide_line_numbers: set[int] = set()
 
-        # Cached mock renderables for event emission
-        self._mock_left_code: _MockCodeRenderable | None = None
-        self._mock_right_code: _MockCodeRenderable | None = None
-        # Cached mock line number renderables
-        self._mock_left_line_num: _MockLineNumberRenderable | None = None
-        self._mock_right_line_num: _MockLineNumberRenderable | None = None
+        # Cached adapter renderables for event emission
+        self._left_code_adapter: _DiffCodeAdapter | None = None
+        self._right_code_adapter: _DiffCodeAdapter | None = None
+        # Cached line number adapter renderables
+        self._left_line_num_adapter: _DiffLineNumberAdapter | None = None
+        self._right_line_num_adapter: _DiffLineNumberAdapter | None = None
         self._raster = RasterCache(f"diff-{self.id}")
 
         if self._diff_text:
@@ -216,8 +215,8 @@ class DiffRenderable(Renderable):
         if self._view_mode != value:
             self._view_mode = value
             self._flex_direction = "row" if value == "split" else "column"
-            self._mock_left_line_num = None
-            self._mock_right_line_num = None
+            self._left_line_num_adapter = None
+            self._right_line_num_adapter = None
             self._build_view()  # _build_view() already calls mark_dirty()
 
     @property
@@ -353,37 +352,37 @@ class DiffRenderable(Renderable):
 
     @property
     def left_code_renderable(self) -> Any:
-        if self._mock_left_code is None:
-            self._mock_left_code = _MockCodeRenderable(self, "left")
-        return self._mock_left_code
+        if self._left_code_adapter is None:
+            self._left_code_adapter = _DiffCodeAdapter(self, "left")
+        return self._left_code_adapter
 
     @property
     def right_code_renderable(self) -> Any:
-        if self._mock_right_code is None:
-            self._mock_right_code = _MockCodeRenderable(self, "right")
-        return self._mock_right_code
+        if self._right_code_adapter is None:
+            self._right_code_adapter = _DiffCodeAdapter(self, "right")
+        return self._right_code_adapter
 
     @property
     def left_side(self) -> Any:
         if self._parsed_diff and self._parsed_diff.hunks:
-            if self._mock_left_line_num is None:
-                self._mock_left_line_num = _MockLineNumberRenderable(self, "left")
-            return self._mock_left_line_num
+            if self._left_line_num_adapter is None:
+                self._left_line_num_adapter = _DiffLineNumberAdapter(self, "left")
+            return self._left_line_num_adapter
         return None
 
     @property
     def right_side(self) -> Any:
         if self._view_mode == "split" and self._parsed_diff and self._parsed_diff.hunks:
-            if self._mock_right_line_num is None:
-                self._mock_right_line_num = _MockLineNumberRenderable(self, "right")
-            return self._mock_right_line_num
+            if self._right_line_num_adapter is None:
+                self._right_line_num_adapter = _DiffLineNumberAdapter(self, "right")
+            return self._right_line_num_adapter
         return None
 
     # ── Diff parsing ────────────────────────────────────────────────────
 
     def _parse_diff(self) -> None:
-        self._mock_left_line_num = None
-        self._mock_right_line_num = None
+        self._left_line_num_adapter = None
+        self._right_line_num_adapter = None
 
         if not self._diff_text:
             self._parsed_diff = None
@@ -431,10 +430,10 @@ class DiffRenderable(Renderable):
         self._emit_line_info_change()
 
     def _emit_line_info_change(self) -> None:
-        if self._mock_left_code is not None:
-            self._mock_left_code.emit("line-info-change")
-        if self._mock_right_code is not None:
-            self._mock_right_code.emit("line-info-change")
+        if self._left_code_adapter is not None:
+            self._left_code_adapter.emit("line-info-change")
+        if self._right_code_adapter is not None:
+            self._right_code_adapter.emit("line-info-change")
 
     def _build_error_view(self) -> None:
         self._unified_lines = []
@@ -1050,11 +1049,8 @@ class DiffRenderable(Renderable):
         super().destroy()
 
 
-class _MockCodeRenderable:
-    """Mock CodeRenderable for tests that access DiffRenderable internals.
-
-    Provides enough API surface for the listener-tracking tests.
-    """
+class _DiffCodeAdapter:
+    """Adapter providing CodeRenderable-like API for DiffRenderable's left/right panes."""
 
     def __init__(self, owner: DiffRenderable, side: str):
         self._owner = owner
@@ -1125,8 +1121,8 @@ class _MockCodeRenderable:
         return len(self._event_handlers.get(event, []))
 
 
-class _MockLineNumberRenderable:
-    """Mock LineNumberRenderable for tests accessing DiffRenderable internals."""
+class _DiffLineNumberAdapter:
+    """Adapter providing LineNumberRenderable-like API for DiffRenderable's left/right panes."""
 
     def __init__(self, owner: DiffRenderable, side: str):
         self._owner = owner

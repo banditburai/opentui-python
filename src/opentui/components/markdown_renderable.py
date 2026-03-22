@@ -8,14 +8,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..enums import RenderStrategy
-from ..markdown_parser import MarkedToken, ParseState, parse_markdown_incremental
+from .markdown_parser import MarkedToken, ParseState, parse_markdown_incremental
 from .base import Renderable
 from .markdown_blocks import (
     BlockState,
-    CodeRenderable,
-    TextTableRenderable,
     _ExternalBlockRenderable,
     _MarkdownBlockRenderable,
+    _MarkdownCodeBlock,
+    _MarkdownTableBlock,
     _render_table,
     _strip_inline_formatting,
     _strip_table_cell,
@@ -58,8 +58,8 @@ class MarkdownRenderable(Renderable):
     """Renders markdown content as terminal output.
 
     Parses markdown incrementally, creating child renderables for each
-    block: tables become TextTableRenderable, code blocks become
-    CodeRenderable, and text blocks become CodeRenderable with filetype="markdown".
+    block: tables become _MarkdownTableBlock, code blocks become
+    _MarkdownCodeBlock, and text blocks become _MarkdownCodeBlock with filetype="markdown".
 
     Supports concealment of inline formatting markers, streaming mode
     for incremental content updates, and custom render node callbacks.
@@ -321,7 +321,7 @@ class MarkdownRenderable(Renderable):
         token: MarkedToken,
         block_id: str,
         margin_bottom: int = 0,
-    ) -> TextTableRenderable:
+    ) -> _MarkdownTableBlock:
         table_lines = _render_table(token.header, token.rows, self._conceal)
 
         num_cols = len(token.header)
@@ -343,7 +343,7 @@ class MarkdownRenderable(Renderable):
                     data_row.append([{"text": ""}])
             table_content.append(data_row)
 
-        renderable = TextTableRenderable(
+        renderable = _MarkdownTableBlock(
             id=block_id,
             block_type="table",
             lines=table_lines,
@@ -370,13 +370,13 @@ class MarkdownRenderable(Renderable):
         token: MarkedToken,
         block_id: str,
         margin_bottom: int = 0,
-    ) -> CodeRenderable:
+    ) -> _MarkdownCodeBlock:
         code_text = token.text
         if code_text.endswith("\n"):
             code_text = code_text[:-1]
         lines = code_text.split("\n") if code_text else []
 
-        return CodeRenderable(
+        return _MarkdownCodeBlock(
             id=block_id,
             block_type="code",
             lines=lines,
@@ -389,10 +389,10 @@ class MarkdownRenderable(Renderable):
         raw: str,
         block_id: str,
         margin_bottom: int = 0,
-    ) -> CodeRenderable:
+    ) -> _MarkdownCodeBlock:
         raw_stripped = raw.rstrip("\n")
         if not raw_stripped:
-            return CodeRenderable(
+            return _MarkdownCodeBlock(
                 id=block_id,
                 block_type="text",
                 lines=[],
@@ -403,7 +403,7 @@ class MarkdownRenderable(Renderable):
         lines = raw_stripped.split("\n")
         processed_lines = [self._process_text_line(line) for line in lines]
 
-        return CodeRenderable(
+        return _MarkdownCodeBlock(
             id=block_id,
             block_type="text",
             lines=processed_lines,
@@ -413,7 +413,7 @@ class MarkdownRenderable(Renderable):
 
     def _update_table_renderable(
         self,
-        renderable: TextTableRenderable,
+        renderable: _MarkdownTableBlock,
         token: MarkedToken,
         margin_bottom: int = 0,
     ) -> None:
@@ -469,7 +469,7 @@ class MarkdownRenderable(Renderable):
 
     def _apply_table_options_to_blocks(self) -> None:
         for state in self._block_states:
-            if isinstance(state.renderable, TextTableRenderable):
+            if isinstance(state.renderable, _MarkdownTableBlock):
                 state.renderable.column_width_mode = self._table_options.width_mode
                 state.renderable.column_fitter = self._table_options.column_fitter
                 state.renderable.wrap_mode = self._table_options.wrap_mode
@@ -598,7 +598,7 @@ class MarkdownRenderable(Renderable):
             )
             custom = self._render_node(token, ctx)
             if custom is not None:
-                if isinstance(custom, _MarkdownBlockRenderable | CodeRenderable):
+                if isinstance(custom, _MarkdownBlockRenderable | _MarkdownCodeBlock):
                     return custom
                 return _ExternalBlockRenderable(
                     child=custom,
@@ -646,7 +646,7 @@ class MarkdownRenderable(Renderable):
 
         if (
             token.type == "table"
-            and isinstance(state.renderable, TextTableRenderable)
+            and isinstance(state.renderable, _MarkdownTableBlock)
             and token.rows
         ):
             self._update_table_renderable(state.renderable, token, margin_bottom)
@@ -663,7 +663,7 @@ class MarkdownRenderable(Renderable):
 
             if (
                 token.type == "table"
-                and isinstance(state.renderable, TextTableRenderable)
+                and isinstance(state.renderable, _MarkdownTableBlock)
                 and token.rows
             ):
                 self._update_table_renderable(state.renderable, token, margin_bottom)

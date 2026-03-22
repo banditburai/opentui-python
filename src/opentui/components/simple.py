@@ -1,4 +1,4 @@
-"""Advanced components - Code, Diff, Markdown, etc."""
+"""Simple component variants - Code, Diff, Markdown, etc."""
 
 from __future__ import annotations
 

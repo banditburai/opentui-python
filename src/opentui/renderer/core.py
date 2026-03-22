@@ -21,7 +21,7 @@ from .. import diagnostics as _diag
 from .. import hooks
 from .. import structs as s
 from ..components.base import BaseRenderable
-from ..console import TerminalConsole
+from .console import TerminalConsole
 from ..ffi import get_native, is_native_available
 from .layout import (
     clear_all_dirty,
@@ -45,11 +45,11 @@ from .native import (
 )
 from .repaint import (
     apply_yoga_layout_native,
-    dedupe_common_roots,
-    dedupe_common_roots_from_facts,
-    layout_repaint_rect_from_fact,
     node_bounds_rect,
-    promote_layout_repaint_root_from_facts,
+)
+from .repaint_plan import (
+    collect_dirty_common_roots,
+    compute_layout_common_repaint_plan,
 )
 
 
@@ -1250,132 +1250,17 @@ class CliRenderer(MouseHandlingMixin):
         layout_repaint_facts: list[LayoutRepaintFact],
     ) -> list[tuple[Any, tuple[int, int, int, int]]] | None:
         root = self._root
-        if (
-            root is None
-            or self._force_next_render
-            or self._post_process_fns
-            or self._tree_has_custom_update_layout
-            or not layout_repaint_facts
-        ):
+        if root is None:
             return None
-        if not self._prepare_common_tree_render(root):
-            return None
-
-        return self._compute_layout_common_repaint_plan_from_facts(root, layout_repaint_facts)
-
-    def _compute_layout_common_repaint_plan_from_facts(
-        self,
-        root,
-        facts: list[LayoutRepaintFact],
-    ) -> list[tuple[Any | None, tuple[int, int, int, int]]] | None:
-        if len(facts) <= 8:
-            return self._compute_layout_common_repaint_plan_small_facts(root, facts)
-
-        root_id = id(root)
-        facts_by_id: dict[int, LayoutRepaintFact] = {}
-        for fact in facts:
-            node = fact[0]
-            facts_by_id[id(node)] = fact
-        if not facts_by_id:
-            return None
-        if root_id in facts_by_id:
-            return self._compute_structural_common_repaint_plan(root, facts_by_id[root_id])
-
-        promoted: list[Any] = []
-        for fact in facts_by_id.values():
-            promoted_node = promote_layout_repaint_root_from_facts(fact, facts_by_id, root_id, root)
-            if promoted_node is root:
-                return None
-            promoted.append(promoted_node)
-
-        roots = dedupe_common_roots_from_facts(promoted, facts_by_id, root_id)
-        if not roots:
-            return None
-
-        fact_by_node = {fact[0]: fact for fact in facts}
-        return [
-            (
-                node,
-                layout_repaint_rect_from_fact(fact_by_node.get(node))
-                if node in fact_by_node
-                else node_bounds_rect(node),
-            )
-            for node in roots
-        ]
-
-    def _compute_layout_common_repaint_plan_small_facts(
-        self,
-        root,
-        facts: list[LayoutRepaintFact],
-    ) -> list[tuple[Any | None, tuple[int, int, int, int]]] | None:
-        root_id = id(root)
-        node_ids = [id(fact[0]) for fact in facts]
-
-        for idx, node_id in enumerate(node_ids):
-            if node_id == root_id:
-                return self._compute_structural_common_repaint_plan(root, facts[idx])
-
-        promoted: list[Any] = []
-        for fact in facts:
-            current_fact = fact
-            current_node = fact[0]
-            parent_id = fact[1]
-            while parent_id and parent_id != root_id:
-                parent_fact = None
-                for idx, node_id in enumerate(node_ids):
-                    if node_id == parent_id:
-                        parent_fact = facts[idx]
-                        break
-                if parent_fact is None:
-                    break
-                current_fact = parent_fact
-                current_node = current_fact[0]
-                parent_id = current_fact[1]
-
-            has_children = bool(current_fact[2])
-            if parent_id == root_id and not has_children:
-                return None
-            if not has_children and parent_id and parent_id != root_id:
-                parent = getattr(current_node, "_parent", None)
-                if parent is not None:
-                    current_node = parent
-            promoted.append(current_node)
-
-        roots = dedupe_common_roots(promoted, root)
-        if not roots:
-            return None
-
-        plan: list[tuple[Any | None, tuple[int, int, int, int]]] = []
-        for node in roots:
-            node_fact = None
-            for fact in facts:
-                if fact[0] is node:
-                    node_fact = fact
-                    break
-            rect = (
-                layout_repaint_rect_from_fact(node_fact)
-                if node_fact is not None
-                else node_bounds_rect(node)
-            )
-            plan.append((node, rect))
-        return plan
-
-    def _compute_structural_common_repaint_plan(
-        self,
-        root,
-        root_fact: LayoutRepaintFact,
-    ) -> list[tuple[Any | None, tuple[int, int, int, int]]] | None:
-        if root_fact[4:8] != root_fact[8:12]:
-            return None
-
-        plan: list[tuple[Any | None, tuple[int, int, int, int]]] = [
-            (None, rect) for rect in self._pending_structural_clear_rects
-        ]
-        dirty_roots: list[Any] = []
-        self._collect_structural_common_roots(root, dirty_roots)
-        for node in dedupe_common_roots(dirty_roots, root):
-            plan.append((node, node_bounds_rect(node)))
-        return plan or None
+        return compute_layout_common_repaint_plan(
+            root,
+            layout_repaint_facts,
+            force_next_render=self._force_next_render,
+            has_post_process_fns=bool(self._post_process_fns),
+            tree_has_custom_update_layout=self._tree_has_custom_update_layout,
+            pending_structural_clear_rects=self._pending_structural_clear_rects,
+            prepare_common_tree_render_fn=self._prepare_common_tree_render,
+        )
 
     def _render_common_plan_fast(
         self,
@@ -1402,35 +1287,12 @@ class CliRenderer(MouseHandlingMixin):
 
     def _render_dirty_common_subtrees_fast(self, root, buffer: Buffer, delta_time: float) -> None:
         dirty_roots: list[Any] = []
-        self._collect_dirty_common_roots(root, dirty_roots)
+        collect_dirty_common_roots(root, dirty_roots)
         self._render_common_plan_fast(
             [(node, node_bounds_rect(node)) for node in dirty_roots],
             buffer,
             delta_time,
         )
-
-    def _collect_structural_common_roots(self, node, out: list[Any]) -> None:
-        for child in getattr(node, "_children", ()):
-            if getattr(child, "_destroyed", False):
-                continue
-            if not (
-                getattr(child, "_dirty", False)
-                or getattr(child, "_subtree_dirty", False)
-                or getattr(child, "_paint_subtree_dirty", False)
-            ):
-                continue
-            if supports_common_tree_strategy(child) and not _has_instance_render_override(child):
-                out.append(child)
-                continue
-            self._collect_structural_common_roots(child, out)
-
-    def _collect_dirty_common_roots(self, node, out: list[Any]) -> None:
-        if getattr(node, "_dirty", False):
-            out.append(node)
-            return
-        for child in getattr(node, "_children", ()):
-            if getattr(child, "_dirty", False) or getattr(child, "_paint_subtree_dirty", False):
-                self._collect_dirty_common_roots(child, out)
 
     def invalidate_handler_cache(self) -> None:
         self._handlers_dirty = True

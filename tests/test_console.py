@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from opentui.console import ConsoleBounds, ConsolePosition, TerminalConsole
+from opentui.renderer.console import ConsoleBounds, ConsolePosition, TerminalConsole
 
 
 # ---------------------------------------------------------------------------

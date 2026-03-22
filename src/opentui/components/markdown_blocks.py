@@ -353,8 +353,8 @@ class _MarkdownBlockRenderable(Renderable):
             buffer.draw_text(line, x, y + i)
 
 
-class TextTableRenderable(_MarkdownBlockRenderable):
-    """A table renderable - subclass for isinstance checks in tests."""
+class _MarkdownTableBlock(_MarkdownBlockRenderable):
+    """A table renderable used internally by MarkdownRenderable."""
 
     @property
     def border(self) -> bool:
@@ -389,8 +389,8 @@ class TextTableRenderable(_MarkdownBlockRenderable):
         pass
 
 
-class CodeRenderable(Renderable):
-    """Markdown block wrapper backed by a real TextRenderable."""
+class _MarkdownCodeBlock(Renderable):
+    """Markdown code block backed by a real TextRenderable."""
 
     __slots__ = (
         "_filetype",

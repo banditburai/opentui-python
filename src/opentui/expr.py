@@ -144,34 +144,9 @@ class Expr:
     def length(self) -> PropertyAccess:
         return PropertyAccess(self, "len")
 
-    def set(self, value: Any) -> Assignment:
-        return Assignment(self, _ensure_expr(value))
-
-    def add(self, amount: Any) -> Assignment:
-        return Assignment(self, BinaryOp(self, "+", _ensure_expr(amount)))
-
-    def sub(self, amount: Any) -> Assignment:
-        return Assignment(self, BinaryOp(self, "-", _ensure_expr(amount)))
-
-    def toggle(self, *values: Any) -> Assignment:
-        """Toggle between values or invert boolean."""
-        if not values:
-            return Assignment(self, UnaryOp("not", self))
-
-        current = self()
-        for i, v in enumerate(values):
-            if current == v:
-                next_val = values[(i + 1) % len(values)]
-                return Assignment(self, _ensure_expr(next_val))
-        return Assignment(self, _ensure_expr(values[0]))
-
     def if_(self, true_val: Any, false_val: Any = None) -> Conditional:
         """Ternary conditional."""
         return Conditional(self, _ensure_expr(true_val), _ensure_expr(false_val))
-
-    def default(self, fallback: Any) -> BinaryOp:
-        """Nullish coalescing: value ?? fallback."""
-        return BinaryOp(self, "or", _ensure_expr(fallback))
 
     def map(self, transform) -> MappedExpr:
         """Apply a transform function to this expression's value."""
