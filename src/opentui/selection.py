@@ -123,12 +123,22 @@ class Selection:
     def touched_renderables(self) -> list[Any]:
         return self._touched_renderables
 
-    def get_selected_text(self) -> str:
+    def get_selected_text(self, buffer: Any = None) -> str:
         """Get the selected text from all selected renderables.
 
-        Renderables are sorted in reading order (top-to-bottom, then
-        left-to-right). Destroyed renderables are skipped.
+        Tries component-level text first (richer, logical text).  Falls back
+        to buffer-level character extraction when no component text is found
+        and a buffer is provided.
         """
+        component_text = self._get_component_text()
+        if component_text:
+            return component_text
+        if buffer is not None:
+            return self._extract_from_buffer(buffer)
+        return ""
+
+    def _get_component_text(self) -> str:
+        """Get selected text from component-level selection (rich text)."""
         sorted_renderables = sorted(
             self._selected_renderables,
             key=lambda r: (r.y, r.x),
@@ -143,6 +153,35 @@ class Selection:
             if text:
                 texts.append(text)
         return "\n".join(texts)
+
+    def _extract_from_buffer(self, buffer: Any) -> str:
+        """Extract visible text from buffer within selection bounds."""
+        anchor = self.anchor
+        focus = self.focus
+        if (anchor["y"], anchor["x"]) <= (focus["y"], focus["x"]):
+            start_x, start_y = anchor["x"], anchor["y"]
+            end_x, end_y = focus["x"], focus["y"]
+        else:
+            start_x, start_y = focus["x"], focus["y"]
+            end_x, end_y = anchor["x"], anchor["y"]
+
+        lines: list[str] = []
+        w, h = buffer.width, buffer.height
+        for row in range(max(0, start_y), min(end_y + 1, h)):
+            col_start = start_x if row == start_y else 0
+            col_end = (end_x + 1) if row == end_y else w
+            col_start = max(0, col_start)
+            col_end = min(col_end, w)
+
+            chars: list[str] = []
+            for col in range(col_start, col_end):
+                code = buffer.get_char_code(col, row)
+                chars.append(chr(code) if code > 0 else " ")
+            lines.append("".join(chars).rstrip())
+
+        while lines and not lines[-1]:
+            lines.pop()
+        return "\n".join(lines)
 
 
 @dataclass

@@ -65,16 +65,9 @@ def _compute_from_facts(
         return _compute_small_facts(root, facts, pending_structural_clear_rects)
 
     root_id = id(root)
-    facts_by_id: dict[int, LayoutRepaintFact] = {}
-    for fact in facts:
-        node = fact[0]
-        facts_by_id[id(node)] = fact
-    if not facts_by_id:
-        return None
+    facts_by_id: dict[int, LayoutRepaintFact] = {id(fact[0]): fact for fact in facts}
     if root_id in facts_by_id:
-        return _compute_structural_plan(
-            root, facts_by_id[root_id], pending_structural_clear_rects
-        )
+        return _compute_structural_plan(root, facts_by_id[root_id], pending_structural_clear_rects)
 
     promoted: list[Any] = []
     for fact in facts_by_id.values():
@@ -110,9 +103,7 @@ def _compute_small_facts(
 
     for idx, node_id in enumerate(node_ids):
         if node_id == root_id:
-            return _compute_structural_plan(
-                root, facts[idx], pending_structural_clear_rects
-            )
+            return _compute_structural_plan(root, facts[idx], pending_structural_clear_rects)
 
     promoted: list[Any] = []
     for fact in facts:

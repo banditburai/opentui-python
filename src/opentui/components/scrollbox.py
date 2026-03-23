@@ -2,71 +2,31 @@
 
 from __future__ import annotations
 
-import math
-import time
-from collections import deque
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from ..events import MouseButton
+from ._scrollbox_state import (
+    apply_scroll_axis,
+    apply_sticky_start,
+    handle_mouse_scroll,
+    is_at_sticky_position,
+    max_scroll_x,
+    max_scroll_y,
+    scroll_to_element,
+    set_scroll_offsets,
+    sync_scroll_metrics,
+    update_sticky_state,
+    viewport_inner_size,
+)
 from .base import BaseRenderable
 from .box import Box, _normalize_box_child
+from .scrollbox_acceleration import LinearScrollAccel, MacOSScrollAccel
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
 
 # Lazy-cached import of For (avoids circular import at module level)
 _For_cls: type | None = None
-
-
-class LinearScrollAccel:
-    def tick(self, _now_ms: float | None = None) -> float:
-        return 1.0
-
-    def reset(self) -> None:
-        return None
-
-
-class MacOSScrollAccel:
-    """macOS-inspired scroll acceleration."""
-
-    _HISTORY_SIZE = 3
-    _STREAK_TIMEOUT = 150  # ms
-    _MIN_TICK_INTERVAL = 6  # ms
-    _REFERENCE_INTERVAL = 100  # ms
-
-    def __init__(self, *, amplitude: float = 0.8, tau: float = 3.0, max_multiplier: float = 6.0):
-        self._amplitude = amplitude
-        self._tau = tau
-        self._max_multiplier = max_multiplier
-        self._last_tick_ms = 0.0
-        self._history: deque[float] = deque(maxlen=self._HISTORY_SIZE)
-
-    def tick(self, now_ms: float | None = None) -> float:
-        if now_ms is None:
-            now_ms = time.monotonic() * 1000.0
-
-        dt = (now_ms - self._last_tick_ms) if self._last_tick_ms else float("inf")
-        if dt == float("inf") or dt > self._STREAK_TIMEOUT:
-            self._last_tick_ms = now_ms
-            self._history.clear()
-            return 1.0
-
-        if dt < self._MIN_TICK_INTERVAL:
-            return 1.0
-
-        self._last_tick_ms = now_ms
-        self._history.append(dt)
-
-        avg_interval = sum(self._history) / len(self._history)
-        velocity = self._REFERENCE_INTERVAL / avg_interval
-        x = velocity / self._tau
-        multiplier = 1.0 + self._amplitude * (math.exp(x) - 1.0)
-        return min(multiplier, self._max_multiplier)
-
-    def reset(self) -> None:
-        self._last_tick_ms = 0.0
-        self._history.clear()
 
 
 class ScrollContent(Box):
@@ -325,34 +285,7 @@ class ScrollBox(Box):
         )
 
     def scroll_to_element(self, renderable: Any) -> None:
-        """Scroll to make *renderable* visible within this ScrollBox.
-
-        Calculates the element's position relative to the scroll content
-        and adjusts scroll offsets so it falls within the viewport.
-        """
-        # Walk up the parent chain to accumulate the offset relative to our content
-        target_y = int(getattr(renderable, "_y", 0))
-        target_x = int(getattr(renderable, "_x", 0))
-        target_h = int(getattr(renderable, "_layout_height", 0) or 0)
-        target_w = int(getattr(renderable, "_layout_width", 0) or 0)
-        node = getattr(renderable, "_parent", None)
-        content = self._scroll_content
-        while node is not None and node is not content and node is not self:
-            target_y += int(getattr(node, "_y", 0))
-            target_x += int(getattr(node, "_x", 0))
-            node = getattr(node, "_parent", None)
-
-        vw, vh = self._viewport_inner_size()
-        # Vertical: ensure element is within viewport
-        if target_y < self._scroll_offset_y:
-            self.scroll_to(x=self._scroll_offset_x, y=target_y)
-        elif target_y + target_h > self._scroll_offset_y + vh:
-            self.scroll_to(x=self._scroll_offset_x, y=target_y + target_h - vh)
-        # Horizontal: ensure element is within viewport
-        if target_x < self._scroll_offset_x:
-            self.scroll_to(x=target_x, y=self._scroll_offset_y)
-        elif target_x + target_w > self._scroll_offset_x + vw:
-            self.scroll_to(x=target_x + target_w - vw, y=self._scroll_offset_y)
+        scroll_to_element(self, renderable)
 
     def reset_sticky_scroll(self) -> None:
         """Re-enable sticky auto-follow at the configured sticky edge."""
@@ -361,12 +294,7 @@ class ScrollBox(Box):
             self._apply_sticky_start(self._sticky_start)
 
     def _viewport_inner_size(self) -> tuple[int, int]:
-        width = int(self._layout_width or 0)
-        height = int(self._layout_height or 0)
-        if self._border:
-            width = max(0, width - int(self._border_left) - int(self._border_right))
-            height = max(0, height - int(self._border_top) - int(self._border_bottom))
-        return width, height
+        return viewport_inner_size(self)
 
     def _measure_content(self) -> tuple[int, int]:
         content = self._scroll_content
@@ -376,127 +304,24 @@ class ScrollBox(Box):
         )
 
     def _max_scroll_x(self) -> int:
-        return max(0, self._scroll_width - self._viewport_width)
+        return max_scroll_x(self)
 
     def _max_scroll_y(self) -> int:
-        return max(0, self._scroll_height - self._viewport_height)
+        return max_scroll_y(self)
 
     def _is_at_sticky_position(
         self, *, offset_x: int | None = None, offset_y: int | None = None
     ) -> bool:
-        if not self._sticky_scroll or not self._sticky_start:
-            return False
-
-        scroll_x = self._scroll_offset_x if offset_x is None else offset_x
-        scroll_y = self._scroll_offset_y if offset_y is None else offset_y
-        th = self._sticky_threshold
-
-        if self._sticky_start == "top":
-            return scroll_y <= th
-        if self._sticky_start == "bottom":
-            return scroll_y >= self._max_scroll_y() - th
-        if self._sticky_start == "left":
-            return scroll_x <= th
-        if self._sticky_start == "right":
-            return scroll_x >= self._max_scroll_x() - th
-        return False
+        return is_at_sticky_position(self, offset_x=offset_x, offset_y=offset_y)
 
     def _update_sticky_state(self) -> None:
-        if not self._sticky_scroll:
-            return
-
-        max_scroll_y = self._max_scroll_y()
-        max_scroll_x = self._max_scroll_x()
-        th = self._sticky_threshold
-
-        if self._scroll_offset_y <= 0:
-            self._sticky_scroll_top = True
-            self._sticky_scroll_bottom = False
-            if not self._is_applying_sticky_scroll and (
-                self._sticky_start == "top"
-                or (self._sticky_start == "bottom" and max_scroll_y == 0)
-            ):
-                self._has_manual_scroll = False
-        elif self._scroll_offset_y >= max_scroll_y - th:
-            self._sticky_scroll_top = False
-            self._sticky_scroll_bottom = True
-            if not self._is_applying_sticky_scroll and self._sticky_start == "bottom":
-                self._has_manual_scroll = False
-        else:
-            self._sticky_scroll_top = False
-            self._sticky_scroll_bottom = False
-
-        if self._scroll_offset_x <= 0:
-            self._sticky_scroll_left = True
-            self._sticky_scroll_right = False
-            if not self._is_applying_sticky_scroll and (
-                self._sticky_start == "left"
-                or (self._sticky_start == "right" and max_scroll_x == 0)
-            ):
-                self._has_manual_scroll = False
-        elif self._scroll_offset_x >= max_scroll_x - th:
-            self._sticky_scroll_left = False
-            self._sticky_scroll_right = True
-            if not self._is_applying_sticky_scroll and self._sticky_start == "right":
-                self._has_manual_scroll = False
-        else:
-            self._sticky_scroll_left = False
-            self._sticky_scroll_right = False
+        update_sticky_state(self)
 
     def _apply_sticky_start(self, sticky_start: str) -> None:
-        was_applying = self._is_applying_sticky_scroll
-        self._is_applying_sticky_scroll = True
-        try:
-            if sticky_start == "top":
-                self._scroll_offset_y = 0
-                self._sticky_scroll_top = True
-                self._sticky_scroll_bottom = False
-            elif sticky_start == "bottom":
-                self._scroll_offset_y = self._max_scroll_y()
-                self._sticky_scroll_top = False
-                self._sticky_scroll_bottom = True
-            elif sticky_start == "left":
-                self._scroll_offset_x = 0
-                self._sticky_scroll_left = True
-                self._sticky_scroll_right = False
-            elif sticky_start == "right":
-                self._scroll_offset_x = self._max_scroll_x()
-                self._sticky_scroll_left = False
-                self._sticky_scroll_right = True
-        finally:
-            self._is_applying_sticky_scroll = was_applying
+        apply_sticky_start(self, sticky_start)
 
     def _sync_scroll_metrics(self) -> None:
-        viewport_width, viewport_height = self._viewport_inner_size()
-        content_width, content_height = self._measure_content()
-
-        self._viewport_width = viewport_width
-        self._viewport_height = viewport_height
-        self._scroll_width = max(viewport_width, content_width)
-        self._scroll_height = max(viewport_height, content_height)
-
-        self._scroll_offset_x = min(self._scroll_offset_x, self._max_scroll_x())
-        self._scroll_offset_y = min(self._scroll_offset_y, self._max_scroll_y())
-
-        if self._sticky_scroll:
-            new_max_y = self._max_scroll_y()
-            new_max_x = self._max_scroll_x()
-            if self._sticky_start and not self._has_manual_scroll:
-                self._apply_sticky_start(self._sticky_start)
-            else:
-                if self._sticky_scroll_top:
-                    self._scroll_offset_y = 0
-                elif self._sticky_scroll_bottom and new_max_y > 0:
-                    self._scroll_offset_y = new_max_y
-                if self._sticky_scroll_left:
-                    self._scroll_offset_x = 0
-                elif self._sticky_scroll_right and new_max_x > 0:
-                    self._scroll_offset_x = new_max_x
-
-        # Note: do NOT call _update_sticky_state() here — it is called only
-        # by _set_scroll_offsets() (user-initiated scrolls).  Calling it during
-        # content-size recalculation would incorrectly reset _has_manual_scroll
-        # when content shrinks and the scroll offset is clamped (issue #709).
+        sync_scroll_metrics(self)
 
     def _set_scroll_offsets(
         self,
@@ -505,110 +330,13 @@ class ScrollBox(Box):
         y: int | None = None,
         mark_manual: bool,
     ) -> bool:
-        self._sync_scroll_metrics()
-        changed = False
-
-        if x is not None and self._scroll_x:
-            new_x = min(self._max_scroll_x(), max(0, int(x)))
-            if new_x != self._scroll_offset_x:
-                self._scroll_offset_x = new_x
-                changed = True
-        if y is not None and self._scroll_y:
-            new_y = min(self._max_scroll_y(), max(0, int(y)))
-            if new_y != self._scroll_offset_y:
-                self._scroll_offset_y = new_y
-                changed = True
-
-        if (
-            changed
-            and mark_manual
-            and not self._is_applying_sticky_scroll
-            and (self._max_scroll_y() > 1 or self._max_scroll_x() > 1)
-            and not self._is_at_sticky_position()
-        ):
-            self._has_manual_scroll = True
-
-        if changed:
-            # Scrolling changes visible content and hit-testing without
-            # requiring Yoga reconfiguration.
-            self.mark_hit_paint_dirty()
-
-        self._update_sticky_state()
-        return changed
+        return set_scroll_offsets(self, x=x, y=y, mark_manual=mark_manual)
 
     def _apply_scroll_axis(self, signed_amount: float, axis: str) -> None:
-        if axis == "y":
-            self._scroll_accumulator_y += signed_amount
-            integer_scroll = math.trunc(self._scroll_accumulator_y)
-            if integer_scroll != 0:
-                moved = self._set_scroll_offsets(
-                    y=self._scroll_offset_y + integer_scroll,
-                    mark_manual=True,
-                )
-                self._scroll_accumulator_y -= integer_scroll
-                if not moved:
-                    self._scroll_accumulator_y = 0.0
-        else:
-            self._scroll_accumulator_x += signed_amount
-            integer_scroll = math.trunc(self._scroll_accumulator_x)
-            if integer_scroll != 0:
-                moved = self._set_scroll_offsets(
-                    x=self._scroll_offset_x + integer_scroll,
-                    mark_manual=True,
-                )
-                self._scroll_accumulator_x -= integer_scroll
-                if not moved:
-                    self._scroll_accumulator_x = 0.0
+        apply_scroll_axis(self, signed_amount, axis)
 
     def _handle_mouse_scroll(self, event: Any) -> None:
-        if self._scroll_offset_y_fn is not None:
-            return
-        if not self.contains_point(event.x, event.y):
-            return
-
-        direction = getattr(event, "scroll_direction", None)
-        if direction is None:
-            button = getattr(event, "button", None)
-            if button == MouseButton.WHEEL_LEFT:
-                direction = "left"
-            elif button == MouseButton.WHEEL_RIGHT:
-                direction = "right"
-            else:
-                direction = "down" if getattr(event, "scroll_delta", 0) > 0 else "up"
-        if getattr(event, "shift", False):
-            if direction == "up":
-                direction = "left"
-            elif direction == "down":
-                direction = "right"
-            elif direction == "left":
-                direction = "up"
-            elif direction == "right":
-                direction = "down"
-
-        scroll_amount = abs(getattr(event, "scroll_delta", 0) or 1)
-        multiplier = self._scroll_acceleration.tick(time.monotonic() * 1000.0)
-        total_amount = scroll_amount * multiplier
-        if direction in ("up", "down") and self._scroll_y:
-            sign = -1 if direction == "up" else 1
-            self._apply_scroll_axis(total_amount * sign, "y")
-        elif direction in ("left", "right") and self._scroll_x:
-            sign = -1 if direction == "left" else 1
-            self._apply_scroll_axis(total_amount * sign, "x")
-
-        if direction == "up" and self._scroll_offset_y <= 0:
-            self._scroll_accumulator_y = 0.0
-            self._scroll_acceleration.reset()
-        if direction == "down" and self._scroll_offset_y >= self._max_scroll_y():
-            self._scroll_accumulator_y = 0.0
-            self._scroll_acceleration.reset()
-        if direction == "left" and self._scroll_offset_x <= 0:
-            self._scroll_accumulator_x = 0.0
-            self._scroll_acceleration.reset()
-        if direction == "right" and self._scroll_offset_x >= self._max_scroll_x():
-            self._scroll_accumulator_x = 0.0
-            self._scroll_acceleration.reset()
-
-        event.stop_propagation()
+        handle_mouse_scroll(self, event)
 
     def handle_scroll_event(self, event: Any) -> None:
         self._handle_mouse_scroll(event)

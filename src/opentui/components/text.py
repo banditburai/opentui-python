@@ -8,14 +8,16 @@ from typing import TYPE_CHECKING, Any
 import yoga
 
 from .. import structs as s
-from ..colors import SELECTION_BG
+from .._signal_types import Signal, _ComputedSignal
 from ..editor.text_buffer_native import NativeTextBuffer
 from ..editor.text_view_native import NativeTextBufferView
 from ..enums import RenderStrategy
-from ..signals import Signal, _ComputedSignal, is_reactive
+from ..signals import is_reactive
+from ..structs import SELECTION_BG
 from ..structs import display_width as _display_width
 from ..text_utils import measure_text, wrap_text
 from .base import Renderable
+from .text_renderable import get_scroll_adjusted_position
 
 
 def _truncate_with_ellipsis(text: str, max_width: int) -> str:
@@ -73,6 +75,9 @@ class Text(Renderable):
         "_native_text_buffer",
         "_native_text_view",
         "_native_render_key",
+        "_selectable",
+        "_sel_start",
+        "_sel_end",
     )
 
     def __init__(
@@ -91,6 +96,7 @@ class Text(Renderable):
         selection_start: int | None = None,
         selection_end: int | None = None,
         selection_bg: s.RGBA | str | None = None,
+        selectable: bool = True,
         # Text wrap mode
         wrap_mode: str = "word",
         # Content (can be positional or keyword)
@@ -140,6 +146,9 @@ class Text(Renderable):
         self._selection_start = selection_start
         self._selection_end = selection_end
         self._selection_bg = self._parse_color(selection_bg) if selection_bg else SELECTION_BG
+        self._selectable = selectable
+        self._sel_start = None
+        self._sel_end = None
         self._set_or_bind(
             "_wrap_mode",
             wrap_mode,
@@ -166,8 +175,12 @@ class Text(Renderable):
 
     @property
     def _has_selection(self) -> bool:
+        # Only True for programmatic selection, NOT cross-renderable.
+        # Cross-renderable selection uses _sel_start/_sel_end and is drawn
+        # entirely by the native C++ renderer via _selection_start/_selection_end.
         return (
-            self._selection_start is not None
+            self._sel_start is None  # not cross-renderable source
+            and self._selection_start is not None
             and self._selection_end is not None
             and self._selection_start < self._selection_end
         )
@@ -179,6 +192,8 @@ class Text(Renderable):
     @content.setter
     def content(self, value: str) -> None:
         self._content = value
+        self._sel_start = None
+        self._sel_end = None
         self.mark_dirty()
         if self._yoga_node is not None:
             self._yoga_node.mark_dirty()
@@ -296,6 +311,102 @@ class Text(Renderable):
             self._native_text_view.set_viewport(0, 0, available_width, viewport_height)
             self._native_render_key = key
         return self._native_text_view
+
+    # -- Cross-renderable selection interface ----------------------------------
+
+    def _coord_to_offset(self, local_x: int, local_y: int) -> int:
+        """Convert visual (col, row) in display columns to character offset."""
+        if not self._content:
+            return 0
+        w = max(0, (self._layout_width or 0) - self._padding_left - self._padding_right)
+        lines = wrap_text(self._content, w, self._wrap_mode)
+        row = max(0, min(local_y, len(lines) - 1))
+        line = lines[row]
+        # Map display column to character index (wide-char aware)
+        col = 0
+        char_idx = len(line)
+        for i, ch in enumerate(line):
+            if col >= local_x:
+                char_idx = i
+                break
+            col += _display_width(ch)
+        # Convert to offset in _content: sum chars of prior lines + separators
+        offset = 0
+        for i in range(row):
+            offset += len(lines[i])
+            if offset < len(self._content):
+                c = self._content[offset]
+                if c == "\n" or (c == " " and self._wrap_mode == "word"):
+                    offset += 1
+        offset += char_idx
+        return min(offset, len(self._content))
+
+    def should_start_selection(self, x: int, y: int) -> bool:
+        return self._selectable
+
+    def has_selection(self) -> bool:
+        return (
+            self._sel_start is not None
+            and self._sel_end is not None
+            and self._sel_start < self._sel_end
+        )
+
+    def on_selection_changed(self, selection) -> bool:
+        from ..selection import convert_global_to_local_selection
+
+        screen_x, screen_y = get_scroll_adjusted_position(self)
+        local_sel = convert_global_to_local_selection(selection, screen_x, screen_y)
+
+        if local_sel is None or not local_sel.is_active:
+            if self._sel_start is not None or self._sel_end is not None:
+                self._sel_start = None
+                self._sel_end = None
+                self._selection_start = None
+                self._selection_end = None
+                self.mark_paint_dirty()
+            return False
+
+        ax = local_sel.anchor_x - self._padding_left
+        ay = local_sel.anchor_y - self._padding_top
+        fx = local_sel.focus_x - self._padding_left
+        fy = local_sel.focus_y - self._padding_top
+
+        anchor_off = self._coord_to_offset(ax, ay)
+        focus_off = self._coord_to_offset(fx, fy)
+        new_start = min(anchor_off, focus_off)
+        new_end = max(anchor_off, focus_off)
+
+        if new_start != self._sel_start or new_end != self._sel_end:
+            self._sel_start = new_start
+            self._sel_end = new_end
+            # Sync to native selection attrs — the C++ renderer reads these
+            self._selection_start = new_start
+            self._selection_end = new_end
+            self.mark_paint_dirty()
+
+        return self.has_selection()
+
+    def get_selected_text(self) -> str:
+        if self._sel_start is None or self._sel_end is None:
+            return ""
+        return self._content[self._sel_start : self._sel_end]
+
+    def clear_selection(self) -> None:
+        if self._sel_start is not None or self._sel_end is not None:
+            self._sel_start = None
+            self._sel_end = None
+            self._selection_start = None
+            self._selection_end = None
+            self.mark_paint_dirty()
+
+    def mark_dirty(self) -> None:
+        # After reconciliation, _selection_start/_selection_end may be reset to
+        # None (copied from transient new instance). Restore from the protected
+        # _sel_start/_sel_end which survive via _SKIP_ATTRS.
+        if self._sel_start is not None and self._sel_end is not None:
+            self._selection_start = self._sel_start
+            self._selection_end = self._sel_end
+        super().mark_dirty()
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         if not self._visible or not self._content:

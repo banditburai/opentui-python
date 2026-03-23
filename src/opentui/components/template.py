@@ -10,24 +10,23 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from ..signals import Signal, _tracking_context
+from .._signal_types import Signal
+from .._signals_runtime import _tracking_context
+from ._control_flow_region import subscribe_signals
+from ._control_flow_region import normalize_render_result
 from .base import BaseRenderable, Renderable
+from .structural import Portal
 
 _TEMPLATE_UNSET = object()
 _TEMPLATE_NO_KEY = object()
-
-if TYPE_CHECKING:
-    pass
 
 
 def _collect_template_refs(
     nodes: list[BaseRenderable],
     refs: dict[str, BaseRenderable] | None = None,
 ) -> dict[str, BaseRenderable]:
-    from .control_flow import Portal
-
     if refs is None:
         refs = {}
     for node in nodes:
@@ -121,8 +120,6 @@ class Mount(Renderable):
             self._update_fn(update_target)
 
     def _subscribe_data(self, tracked: set[Signal]) -> None:
-        from .control_flow import _subscribe_signals
-
         next_tracked = frozenset(tracked)
         if next_tracked == self._tracked_signals:
             return
@@ -132,14 +129,12 @@ class Mount(Renderable):
             self._data_cleanup = None
             self._tracked_signals = frozenset()
 
-        self._data_cleanup = _subscribe_signals(tracked, self._reactive_update)
+        self._data_cleanup = subscribe_signals(tracked, self._reactive_update)
         self._tracked_signals = next_tracked
 
     def _evaluate_template(
         self,
     ) -> tuple[set[Signal], Any, list[BaseRenderable] | None, bool]:
-        from .control_flow import _normalize_render_result
-
         tracked: set[Signal] = set()
         token = _tracking_context.set(tracked)
         try:
@@ -164,7 +159,7 @@ class Mount(Renderable):
                     build_tracked: set[Signal] = set()
                     build_token = _tracking_context.set(build_tracked)
                     try:
-                        rebuilt_children = _normalize_render_result(self._build_fn())
+                        rebuilt_children = normalize_render_result(self._build_fn())
                     finally:
                         _tracking_context.reset(build_token)
                     tracked.update(build_tracked)
@@ -172,7 +167,7 @@ class Mount(Renderable):
                     # Recompute key from newly discovered deps
                     next_key = self._snapshot_auto_key()
                 else:
-                    rebuilt_children = _normalize_render_result(self._build_fn())
+                    rebuilt_children = normalize_render_result(self._build_fn())
 
                 force_replace = (
                     self._current_key is not _TEMPLATE_UNSET and next_key != self._current_key
@@ -194,23 +189,19 @@ class Mount(Renderable):
             return _TEMPLATE_NO_KEY
         return tuple(dep.peek() for dep in self._auto_tracked_deps)
 
-    def _snapshot_auto_key(self) -> tuple | object:
-        """Snapshot current values of auto-tracked deps (no tracking)."""
-        if not self._auto_tracked_deps:
-            return _TEMPLATE_NO_KEY
-        return tuple(dep.peek() for dep in self._auto_tracked_deps)
+    _snapshot_auto_key = _compute_auto_key
 
     def _setup_template(self) -> None:
-        from .control_flow import _apply_region_children
+        from ._control_flow_region import apply_region_children
 
         tracked, next_key, rebuilt_children, _force_replace = self._evaluate_template()
         if rebuilt_children is not None:
-            _apply_region_children(self, rebuilt_children)
+            apply_region_children(self, rebuilt_children)
         self._current_key = next_key
         self._subscribe_data(tracked)
 
     def _reactive_update(self) -> None:
-        from .control_flow import _apply_region_children, _replace_region_children
+        from ._control_flow_region import apply_region_children, replace_region_children
 
         if self._updating:
             return
@@ -219,9 +210,9 @@ class Mount(Renderable):
             tracked, next_key, rebuilt_children, force_replace = self._evaluate_template()
             if rebuilt_children is not None:
                 if force_replace:
-                    _replace_region_children(self, rebuilt_children)
+                    replace_region_children(self, rebuilt_children)
                 else:
-                    _apply_region_children(self, rebuilt_children)
+                    apply_region_children(self, rebuilt_children)
             self._current_key = next_key
             self._subscribe_data(tracked)
             self.mark_dirty()

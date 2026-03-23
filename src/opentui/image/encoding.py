@@ -320,27 +320,6 @@ class ImageRenderer:
         except Exception:
             return False
 
-    def load_image(self, path: str) -> tuple[bytes, int, int]:
-        """Load an image from file and return as RGBA.
-
-        Requires Pillow: pip install pillow
-
-        Args:
-            path: Path to image file (PNG, JPEG, etc.)
-
-        Returns:
-            Tuple of (RGBA_data, width, height)
-        """
-        try:
-            from PIL import Image
-        except ImportError:
-            raise ImportError("Pillow required for image loading: pip install pillow") from None
-
-        with Image.open(path) as img:
-            converted = img.convert("RGBA") if img.mode != "RGBA" else img
-            width, height = converted.size
-            return converted.tobytes(), width, height
-
 
 class _EmptyCapabilities:
     """Empty terminal capabilities for default case."""
@@ -565,8 +544,7 @@ def _clear_kitty_graphics(graphics_id: int | None = None) -> bytes:
     """
     if graphics_id is not None:
         return f"\x1b_Ga=d,d=I,i={graphics_id}\x1b\\".encode()
-    else:
-        return b"\x1b_Ga=d,d=A\x1b\\"
+    return b"\x1b_Ga=d,d=A\x1b\\"
 
 
 def _wrap_kitty_for_transport(chunks: list[bytes]) -> list[bytes] | None:

@@ -8,13 +8,13 @@ from .. import structs as s
 from ..enums import RenderStrategy
 from ..text_utils import wrap_text as _tu_wrap_text
 from .base import Renderable
+from .diff_config import DiffCodeAdapter, DiffLineNumberAdapter, resolve_diff_render_config
 from .diff_parser import (
-    LineColorConfig,
-    LineSign,
-    LogicalLine,
     StructuredPatch,
     parse_patch,
 )
+from .line_types import LineColorConfig, LineSign
+from .diff_views import build_error_view_lines, build_split_view_data, build_unified_view_data
 from .raster_cache import RasterCache
 
 if TYPE_CHECKING:
@@ -117,37 +117,51 @@ class DiffRenderable(Renderable):
             kwargs["flex_direction"] = "row" if view == "split" else "column"
         super().__init__(**kwargs)
 
-        self._diff_text = diff
-        self._view_mode = view
+        config = resolve_diff_render_config(
+            self._parse_color,
+            diff=diff,
+            view=view,
+            fg=fg,
+            filetype=filetype,
+            wrap_mode=wrap_mode,
+            conceal=conceal,
+            show_line_numbers=show_line_numbers,
+            line_number_fg=line_number_fg,
+            line_number_bg=line_number_bg,
+            added_bg=added_bg,
+            removed_bg=removed_bg,
+            context_bg=context_bg,
+            added_content_bg=added_content_bg,
+            removed_content_bg=removed_content_bg,
+            context_content_bg=context_content_bg,
+            added_sign_color=added_sign_color,
+            removed_sign_color=removed_sign_color,
+            added_line_number_bg=added_line_number_bg,
+            removed_line_number_bg=removed_line_number_bg,
+        )
+
+        self._diff_text = config.diff_text
+        self._view_mode = config.view_mode
         self._parsed_diff: StructuredPatch | None = None
         self._parse_error: Exception | None = None
 
-        # Code options — use a separate attribute name to avoid collision with base fg
-        self._diff_fg: s.RGBA | None = self._parse_color(fg) if fg else None
-        self._filetype_str = filetype
-        self._wrap_mode_str = wrap_mode
-        self._conceal_mode = conceal
-
-        # Line number options
-        self._show_line_numbers = show_line_numbers
-        self._line_number_fg_color = self._parse_color(line_number_fg)
-        self._line_number_bg_color = self._parse_color(line_number_bg)
-
-        # Diff styling
-        self._added_bg = self._parse_color(added_bg) or s.RGBA(0.102, 0.302, 0.102, 1)
-        self._removed_bg = self._parse_color(removed_bg) or s.RGBA(0.302, 0.102, 0.102, 1)
-        self._context_bg = self._parse_color(context_bg)
-        self._added_content_bg = self._parse_color(added_content_bg)
-        self._removed_content_bg = self._parse_color(removed_content_bg)
-        self._context_content_bg = self._parse_color(context_content_bg)
-        self._added_sign_color = self._parse_color(added_sign_color) or s.RGBA(
-            0.133, 0.773, 0.369, 1
-        )
-        self._removed_sign_color = self._parse_color(removed_sign_color) or s.RGBA(
-            0.937, 0.267, 0.267, 1
-        )
-        self._added_line_number_bg = self._parse_color(added_line_number_bg)
-        self._removed_line_number_bg = self._parse_color(removed_line_number_bg)
+        self._diff_fg = config.diff_fg
+        self._filetype_str = config.filetype
+        self._wrap_mode_str = config.wrap_mode
+        self._conceal_mode = config.conceal
+        self._show_line_numbers = config.show_line_numbers
+        self._line_number_fg_color = config.line_number_fg_color
+        self._line_number_bg_color = config.line_number_bg_color
+        self._added_bg = config.added_bg
+        self._removed_bg = config.removed_bg
+        self._context_bg = config.context_bg
+        self._added_content_bg = config.added_content_bg
+        self._removed_content_bg = config.removed_content_bg
+        self._context_content_bg = config.context_content_bg
+        self._added_sign_color = config.added_sign_color
+        self._removed_sign_color = config.removed_sign_color
+        self._added_line_number_bg = config.added_line_number_bg
+        self._removed_line_number_bg = config.removed_line_number_bg
 
         # Internal rendering data (unified view)
         self._unified_lines: list[str] = []
@@ -168,11 +182,10 @@ class DiffRenderable(Renderable):
         self._right_hide_line_numbers: set[int] = set()
 
         # Cached adapter renderables for event emission
-        self._left_code_adapter: _DiffCodeAdapter | None = None
-        self._right_code_adapter: _DiffCodeAdapter | None = None
-        # Cached line number adapter renderables
-        self._left_line_num_adapter: _DiffLineNumberAdapter | None = None
-        self._right_line_num_adapter: _DiffLineNumberAdapter | None = None
+        self._left_code_adapter: DiffCodeAdapter | None = None
+        self._right_code_adapter: DiffCodeAdapter | None = None
+        self._left_line_num_adapter: DiffLineNumberAdapter | None = None
+        self._right_line_num_adapter: DiffLineNumberAdapter | None = None
         self._raster = RasterCache(f"diff-{self.id}")
 
         if self._diff_text:
@@ -192,8 +205,6 @@ class DiffRenderable(Renderable):
         if hasattr(self, "_raster"):
             self._raster.invalidate()
         super().mark_paint_dirty()
-
-    # ── Properties ──────────────────────────────────────────────────────
 
     @property
     def diff(self) -> str:
@@ -348,25 +359,23 @@ class DiffRenderable(Renderable):
     def removed_line_number_bg(self) -> s.RGBA | None:
         return self._removed_line_number_bg
 
-    # ── Internal: access CodeRenderable-like and LineNumberRenderable-like ──
-
     @property
     def left_code_renderable(self) -> Any:
         if self._left_code_adapter is None:
-            self._left_code_adapter = _DiffCodeAdapter(self, "left")
+            self._left_code_adapter = DiffCodeAdapter(self, "left")
         return self._left_code_adapter
 
     @property
     def right_code_renderable(self) -> Any:
         if self._right_code_adapter is None:
-            self._right_code_adapter = _DiffCodeAdapter(self, "right")
+            self._right_code_adapter = DiffCodeAdapter(self, "right")
         return self._right_code_adapter
 
     @property
     def left_side(self) -> Any:
         if self._parsed_diff and self._parsed_diff.hunks:
             if self._left_line_num_adapter is None:
-                self._left_line_num_adapter = _DiffLineNumberAdapter(self, "left")
+                self._left_line_num_adapter = DiffLineNumberAdapter(self, "left")
             return self._left_line_num_adapter
         return None
 
@@ -374,11 +383,9 @@ class DiffRenderable(Renderable):
     def right_side(self) -> Any:
         if self._view_mode == "split" and self._parsed_diff and self._parsed_diff.hunks:
             if self._right_line_num_adapter is None:
-                self._right_line_num_adapter = _DiffLineNumberAdapter(self, "right")
+                self._right_line_num_adapter = DiffLineNumberAdapter(self, "right")
             return self._right_line_num_adapter
         return None
-
-    # ── Diff parsing ────────────────────────────────────────────────────
 
     def _parse_diff(self) -> None:
         self._left_line_num_adapter = None
@@ -400,8 +407,6 @@ class DiffRenderable(Renderable):
         except Exception as e:
             self._parsed_diff = None
             self._parse_error = e
-
-    # ── View building ───────────────────────────────────────────────────
 
     def _build_view(self) -> None:
         if self._parse_error:
@@ -440,248 +445,31 @@ class DiffRenderable(Renderable):
         self._unified_line_colors = {}
         self._unified_line_signs = {}
         self._unified_line_numbers = {}
-
-        self._unified_lines.append(f"Error parsing diff: {self._parse_error}")
-        self._unified_lines.append("")
-        self._unified_lines.extend(self._diff_text.split("\n"))
+        self._unified_lines.extend(build_error_view_lines(self._parse_error, self._diff_text))
 
         self.mark_dirty()
 
     def _build_unified_view(self) -> None:
-        if not self._parsed_diff:
-            return
-
-        content_lines: list[str] = []
-        line_colors: dict[int, LineColorConfig] = {}
-        line_signs: dict[int, LineSign] = {}
-        line_numbers: dict[int, int] = {}
-
-        line_index = 0
-
-        for hunk in self._parsed_diff.hunks:
-            old_line_num = hunk.old_start
-            new_line_num = hunk.new_start
-
-            for line in hunk.lines:
-                if not line:
-                    continue
-                first_char = line[0]
-                content = line[1:]
-
-                if first_char == "+":
-                    content_lines.append(content)
-                    config = LineColorConfig(
-                        gutter=self._added_line_number_bg,
-                        content=self._added_content_bg
-                        if self._added_content_bg
-                        else self._added_bg,
-                    )
-                    line_colors[line_index] = config
-                    line_signs[line_index] = LineSign(
-                        after=" +",
-                        after_color=self._added_sign_color,
-                    )
-                    line_numbers[line_index] = new_line_num
-                    new_line_num += 1
-                    line_index += 1
-                elif first_char == "-":
-                    content_lines.append(content)
-                    config = LineColorConfig(
-                        gutter=self._removed_line_number_bg,
-                        content=self._removed_content_bg
-                        if self._removed_content_bg
-                        else self._removed_bg,
-                    )
-                    line_colors[line_index] = config
-                    line_signs[line_index] = LineSign(
-                        after=" -",
-                        after_color=self._removed_sign_color,
-                    )
-                    line_numbers[line_index] = old_line_num
-                    old_line_num += 1
-                    line_index += 1
-                elif first_char == " ":
-                    content_lines.append(content)
-                    config = LineColorConfig(
-                        gutter=self._line_number_bg_color,
-                        content=self._context_content_bg
-                        if self._context_content_bg
-                        else self._context_bg,
-                    )
-                    line_colors[line_index] = config
-                    line_numbers[line_index] = new_line_num
-                    old_line_num += 1
-                    new_line_num += 1
-                    line_index += 1
-
-        self._unified_lines = content_lines
-        self._unified_line_colors = line_colors
-        self._unified_line_signs = line_signs
-        self._unified_line_numbers = line_numbers
+        (
+            self._unified_lines,
+            self._unified_line_colors,
+            self._unified_line_signs,
+            self._unified_line_numbers,
+        ) = build_unified_view_data(self)
 
     def _build_split_view(self) -> None:
-        if not self._parsed_diff:
-            return
-
-        left_logical: list[LogicalLine] = []
-        right_logical: list[LogicalLine] = []
-
-        for hunk in self._parsed_diff.hunks:
-            old_line_num = hunk.old_start
-            new_line_num = hunk.new_start
-
-            i = 0
-            while i < len(hunk.lines):
-                line = hunk.lines[i]
-                if not line:
-                    i += 1
-                    continue
-                first_char = line[0]
-
-                if first_char == " ":
-                    content = line[1:]
-                    left_logical.append(
-                        LogicalLine(
-                            content=content,
-                            line_num=old_line_num,
-                            color=self._context_bg,
-                            line_type="context",
-                        )
-                    )
-                    right_logical.append(
-                        LogicalLine(
-                            content=content,
-                            line_num=new_line_num,
-                            color=self._context_bg,
-                            line_type="context",
-                        )
-                    )
-                    old_line_num += 1
-                    new_line_num += 1
-                    i += 1
-                elif first_char == "\\":
-                    i += 1
-                else:
-                    # Collect a block of removes and adds
-                    removes: list[tuple[str, int]] = []
-                    adds: list[tuple[str, int]] = []
-
-                    while i < len(hunk.lines):
-                        current_line = hunk.lines[i]
-                        if not current_line:
-                            i += 1
-                            continue
-                        current_char = current_line[0]
-
-                        if current_char in {" ", "\\"}:
-                            break
-
-                        content = current_line[1:]
-                        if current_char == "-":
-                            removes.append((content, old_line_num))
-                            old_line_num += 1
-                        elif current_char == "+":
-                            adds.append((content, new_line_num))
-                            new_line_num += 1
-                        i += 1
-
-                    max_length = max(len(removes), len(adds))
-
-                    for j in range(max_length):
-                        if j < len(removes):
-                            left_logical.append(
-                                LogicalLine(
-                                    content=removes[j][0],
-                                    line_num=removes[j][1],
-                                    color=self._removed_bg,
-                                    sign=LineSign(after=" -", after_color=self._removed_sign_color),
-                                    line_type="remove",
-                                )
-                            )
-                        else:
-                            left_logical.append(
-                                LogicalLine(
-                                    content="",
-                                    hide_line_number=True,
-                                    line_type="empty",
-                                )
-                            )
-
-                        if j < len(adds):
-                            right_logical.append(
-                                LogicalLine(
-                                    content=adds[j][0],
-                                    line_num=adds[j][1],
-                                    color=self._added_bg,
-                                    sign=LineSign(after=" +", after_color=self._added_sign_color),
-                                    line_type="add",
-                                )
-                            )
-                        else:
-                            right_logical.append(
-                                LogicalLine(
-                                    content="",
-                                    hide_line_number=True,
-                                    line_type="empty",
-                                )
-                            )
-
-        # Build rendering data from logical lines
-        self._left_lines = [ll.content for ll in left_logical]
-        self._right_lines = [ll.content for ll in right_logical]
-
-        self._left_line_colors = {}
-        self._right_line_colors = {}
-        self._left_line_signs = {}
-        self._right_line_signs = {}
-        self._left_line_numbers = {}
-        self._right_line_numbers = {}
-        self._left_hide_line_numbers = set()
-        self._right_hide_line_numbers = set()
-
-        for idx, ll in enumerate(left_logical):
-            if ll.line_num is not None:
-                self._left_line_numbers[idx] = ll.line_num
-            if ll.hide_line_number:
-                self._left_hide_line_numbers.add(idx)
-            if ll.line_type == "remove":
-                self._left_line_colors[idx] = LineColorConfig(
-                    gutter=self._removed_line_number_bg,
-                    content=self._removed_content_bg
-                    if self._removed_content_bg
-                    else self._removed_bg,
-                )
-            elif ll.line_type == "context":
-                self._left_line_colors[idx] = LineColorConfig(
-                    gutter=self._line_number_bg_color,
-                    content=self._context_content_bg
-                    if self._context_content_bg
-                    else self._context_bg,
-                )
-            if ll.sign:
-                self._left_line_signs[idx] = ll.sign
-
-        for idx, ll in enumerate(right_logical):
-            if ll.line_num is not None:
-                self._right_line_numbers[idx] = ll.line_num
-            if ll.hide_line_number:
-                self._right_hide_line_numbers.add(idx)
-            if ll.line_type == "add":
-                self._right_line_colors[idx] = LineColorConfig(
-                    gutter=self._added_line_number_bg,
-                    content=self._added_content_bg if self._added_content_bg else self._added_bg,
-                )
-            elif ll.line_type == "context":
-                self._right_line_colors[idx] = LineColorConfig(
-                    gutter=self._line_number_bg_color,
-                    content=self._context_content_bg
-                    if self._context_content_bg
-                    else self._context_bg,
-                )
-            if ll.sign:
-                self._right_line_signs[idx] = ll.sign
-
-    # ── Rendering ───────────────────────────────────────────────────────
+        (
+            self._left_lines,
+            self._right_lines,
+            self._left_line_colors,
+            self._right_line_colors,
+            self._left_line_signs,
+            self._right_line_signs,
+            self._left_line_numbers,
+            self._right_line_numbers,
+            self._left_hide_line_numbers,
+            self._right_hide_line_numbers,
+        ) = build_split_view_data(self)
 
     def _render_diff_contents(self, buffer: Buffer) -> None:
         x = self._x + self._padding_left
@@ -1041,109 +829,10 @@ class DiffRenderable(Renderable):
                 )
                 visual_row += 1
 
-    # ── Destroy ─────────────────────────────────────────────────────────
-
     def destroy(self) -> None:
         """Release retained raster resources before normal teardown."""
         self._raster.release()
         super().destroy()
-
-
-class _DiffCodeAdapter:
-    """Adapter providing CodeRenderable-like API for DiffRenderable's left/right panes."""
-
-    def __init__(self, owner: DiffRenderable, side: str):
-        self._owner = owner
-        self._side = side
-        self._event_handlers: dict[str, list] = {}
-        self._fg_override: s.RGBA | None = None
-
-    @property
-    def fg(self) -> s.RGBA | None:
-        return self._owner._diff_fg
-
-    @fg.setter
-    def fg(self, value: s.RGBA | None) -> None:
-        self._owner._diff_fg = value
-
-    @property
-    def content(self) -> str:
-        if self._side == "left":
-            if self._owner._view_mode == "unified":
-                return "\n".join(self._owner._unified_lines)
-            return "\n".join(self._owner._left_lines)
-        return "\n".join(self._owner._right_lines)
-
-    @content.setter
-    def content(self, value: str) -> None:
-        self.emit("line-info-change")
-
-    @property
-    def wrapMode(self) -> str | None:
-        return self._owner._wrap_mode_str
-
-    @wrapMode.setter
-    def wrapMode(self, value: str) -> None:
-        pass
-
-    @property
-    def isHighlighting(self) -> bool:
-        return False
-
-    @property
-    def lineInfo(self) -> dict:
-        lines = self._owner._unified_lines if self._side == "left" else self._owner._right_lines
-        return {"lineSources": list(range(len(lines)))}
-
-    @property
-    def virtualLineCount(self) -> int:
-        lines = self._owner._unified_lines if self._side == "left" else self._owner._right_lines
-        return len(lines)
-
-    def on(self, event: str, handler: Any) -> None:
-        if event not in self._event_handlers:
-            self._event_handlers[event] = []
-        self._event_handlers[event].append(handler)
-
-    def off(self, event: str, handler: Any | None = None) -> None:
-        if event not in self._event_handlers:
-            return
-        if handler is None:
-            self._event_handlers[event] = []
-        else:
-            self._event_handlers[event] = [h for h in self._event_handlers[event] if h != handler]
-
-    def emit(self, event: str, *args: Any) -> None:
-        for handler in self._event_handlers.get(event, []):
-            handler(*args)
-
-    def listener_count(self, event: str) -> int:
-        return len(self._event_handlers.get(event, []))
-
-
-class _DiffLineNumberAdapter:
-    """Adapter providing LineNumberRenderable-like API for DiffRenderable's left/right panes."""
-
-    def __init__(self, owner: DiffRenderable, side: str):
-        self._owner = owner
-        self._side = side
-
-    @property
-    def isDestroyed(self) -> bool:
-        return self._owner._destroyed
-
-    @property
-    def is_destroyed(self) -> bool:
-        return self._owner._destroyed
-
-    @property
-    def showLineNumbers(self) -> bool:
-        return self._owner._show_line_numbers
-
-    @showLineNumbers.setter
-    def showLineNumbers(self, value: bool) -> None:
-        self._owner._show_line_numbers = value
-
 
 __all__ = [
     "DiffRenderable",

@@ -4,7 +4,7 @@ from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
-from ..colors import MUTED_GRAY
+from ..structs import MUTED_GRAY
 from ..events import KeyEvent
 from ..input.keymapping import (
     DEFAULT_KEY_ALIASES,
@@ -83,7 +83,6 @@ class InputRenderable(Renderable):
         "_on_paste_handler",
         "_undo_stack",
         "_redo_stack",
-        "_is_destroyed",
     )
 
     def __init__(
@@ -143,8 +142,6 @@ class InputRenderable(Renderable):
         self._key_bindings, self._key_alias_map, self._key_map = init_key_bindings(
             _DEFAULT_INPUT_BINDINGS, key_bindings, key_alias_map
         )
-
-        self._is_destroyed = False
 
         self._setup_measure_func()
 
@@ -246,7 +243,7 @@ class InputRenderable(Renderable):
 
     def blur(self) -> None:
         """Blur this input, emitting CHANGE if value changed since focus."""
-        if self._is_destroyed:
+        if self._destroyed:
             return
         if not self._focused:
             return
@@ -556,10 +553,6 @@ class InputRenderable(Renderable):
 
         if display_text:
             buffer.draw_text(display_text, x, y, draw_color, bg)
-
-    def destroy(self) -> None:
-        self._is_destroyed = True
-        super().destroy()
 
 
 __all__ = ["InputRenderable"]

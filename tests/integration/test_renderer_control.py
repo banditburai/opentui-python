@@ -187,6 +187,20 @@ class TestCliRendererMisc:
         r.set_background_color()
         assert "set_background_color" in n.renderer.calls
 
+    def test_set_background_color_with_color(self):
+        r, n = _make()
+        r.set_background_color("#ff0000")
+        args = n.renderer.calls["set_background_color"]
+        # args[0] is the ptr, args[1] is the color tuple
+        assert args[1] is not None
+        assert len(args[1]) == 4
+
+    def test_set_background_color_with_none(self):
+        r, n = _make()
+        r.set_background_color(None)
+        args = n.renderer.calls["set_background_color"]
+        assert args[1] is None
+
     def test_set_render_offset(self):
         r, n = _make()
         r.set_render_offset(42)

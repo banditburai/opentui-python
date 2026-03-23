@@ -9,7 +9,9 @@ from opentui.components.text import Text
 from opentui import test_render as _test_render
 from opentui.components.control_flow import Mount
 from opentui.reconciler import reconcile
-from opentui.signals import Batch, Signal, _ComputedSignal, _tracking_context, computed
+from opentui._signal_types import _ComputedSignal
+from opentui._signals_runtime import _tracking_context
+from opentui.signals import Batch, Signal, computed
 from opentui.structs import RGBA
 
 
@@ -132,7 +134,7 @@ class TestBindReactiveProp:
 
     def test_no_tracking_context_pollution(self):
         """Signal read during binding does NOT appear in outer tracking context."""
-        from opentui.signals import _tracking_context
+        from opentui._signals_runtime import _tracking_context
 
         sig = Signal(1, name="x")
         outer_tracked: set[Signal] = set()

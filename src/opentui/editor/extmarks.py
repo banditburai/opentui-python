@@ -27,33 +27,6 @@ from .extmarks_wrappers import (
 # ---------------------------------------------------------------------------
 
 
-class CursorPosition(Protocol):
-    @property
-    def row(self) -> int: ...
-
-    @property
-    def col(self) -> int: ...
-
-    @property
-    def offset(self) -> int: ...
-
-
-class SelectionRange(Protocol):
-    @property
-    def start(self) -> int: ...
-
-    @property
-    def end(self) -> int: ...
-
-
-class HighlightSpec(Protocol):
-    start: int
-    end: int
-    style_id: int
-    priority: int
-    hl_ref: int
-
-
 class EditBufferLike(Protocol):
     """Minimal interface an EditBuffer must satisfy."""
 
@@ -297,7 +270,7 @@ class ExtmarksController:
 
     def _find_virtual_extmark_containing(self, offset: int) -> Extmark | None:
         for em in self._extmarks.values():
-            if em.virtual and offset >= em.start and offset < em.end:
+            if em.virtual and em.start <= offset < em.end:
                 return em
         return None
 
@@ -489,7 +462,7 @@ class ExtmarksController:
         """Get all extmarks containing the given offset."""
         if self._destroyed:
             return []
-        return [em for em in self._extmarks.values() if offset >= em.start and offset < em.end]
+        return [em for em in self._extmarks.values() if em.start <= offset < em.end]
 
     def get_all_for_type_id(self, type_id: int) -> list[Extmark]:
         """Get all extmarks with the given type_id."""

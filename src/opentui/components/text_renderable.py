@@ -1,24 +1,52 @@
 from __future__ import annotations
 
-import contextlib
-import math
 from typing import TYPE_CHECKING, Any
-
-import yoga
 
 from .. import structs as s
 from ..editor.text_buffer_native import NativeTextBuffer
 from ..editor.text_view_native import NativeTextBufferView
 from .base import Renderable
+from .text_renderable_selection import (
+    clear_selection as _clear_selection,
+)
+from .text_renderable_selection import (
+    get_selected_text as _get_selected_text,
+)
+from .text_renderable_selection import (
+    get_selection as _get_selection,
+)
+from .text_renderable_selection import (
+    has_selection as _has_selection,
+)
+from .text_renderable_selection import (
+    on_selection_changed as _on_selection_changed,
+)
+from .text_renderable_selection import (
+    set_selection as _set_selection,
+)
+from .text_renderable_utils import (
+    coord_to_offset as _coord_to_offset,
+)
+from .text_renderable_utils import (
+    get_scroll_adjusted_position,
+    word_wrap,
+)
+from .text_renderable_utils import (
+    setup_text_measure_func as _setup_text_measure_func,
+)
+from .text_renderable_utils import (
+    sync_text_from_nodes as _sync_text_from_nodes,
+)
+from .text_renderable_utils import (
+    update_text_info as _update_text_info,
+)
+from .text_renderable_utils import (
+    update_viewport_offset as _update_viewport_offset,
+)
 from .textnode import StyledText, TextNode
-
-_MEASURE_UNDEFINED = yoga.MeasureMode.Undefined
-_MEASURE_AT_MOST = yoga.MeasureMode.AtMost
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
-
-
 class TextRenderable(Renderable):
     """Text renderable backed by native TextBuffer and TextBufferView.
 
@@ -108,7 +136,6 @@ class TextRenderable(Renderable):
         self._cross_renderable_selection_active = False
 
         # Set up yoga measure function BEFORE setting content
-        # (content setter calls mark_dirty which requires measure func on leaf)
         self._setup_text_measure_func()
 
         if content is not None:
@@ -162,17 +189,10 @@ class TextRenderable(Renderable):
 
     @property
     def line_info(self):
-        from .line_number_renderable import LineInfo
+        from .line_number_gutter import LineInfo
 
         try:
-            info = self._text_buffer_view.get_line_info()
-            return LineInfo(
-                line_start_cols=info.get("start_cols", info.get("lineStartCols", [])),
-                line_width_cols=info.get("width_cols", info.get("lineWidthCols", [])),
-                line_width_cols_max=info.get("width_cols_max", info.get("lineWidthColsMax", 0)),
-                line_sources=info.get("sources", info.get("lineSources", [])),
-                line_wraps=info.get("wraps", info.get("lineWraps", [])),
-            )
+            return LineInfo.from_native_dict(self._text_buffer_view.get_line_info())
         except Exception:
             return None
 
@@ -298,120 +318,29 @@ class TextRenderable(Renderable):
         self.mark_paint_dirty()
 
     def should_start_selection(self, x: int, y: int) -> bool:
-        if not self._selectable:
-            return False
-        local_x = x - self._x
-        local_y = y - self._y
-        w = self._layout_width or 0
-        h = self._layout_height or 0
-        return 0 <= local_x < w and 0 <= local_y < h
+        # The renderer's _find_deepest_hit already verified containment with
+        # scroll-adjusted coordinates.  Yoga layout positions (_x/_y) don't
+        # account for scroll offsets so a local bounds check fails for
+        # scrolled content.  Trust the hit test and just check _selectable.
+        return self._selectable
 
     def has_selection(self) -> bool:
-
-        if self._cross_renderable_selection_active:
-            try:
-                if self._text_buffer_view.has_selection():
-                    return True
-            except Exception:
-                pass
-        return self._current_selection is not None
+        return _has_selection(self)
 
     def get_selection(self) -> dict[str, int] | None:
-
-        if self._cross_renderable_selection_active:
-            try:
-                native_sel = self._text_buffer_view.get_selection()
-                if native_sel is not None:
-                    return native_sel
-            except Exception:
-                pass
-        return self._current_selection
+        return _get_selection(self)
 
     def get_selected_text(self) -> str:
-
-        if self._cross_renderable_selection_active:
-            try:
-                native_text = self._text_buffer_view.get_selected_text()
-                if native_text:
-                    return native_text
-            except Exception:
-                pass
-        sel = self._current_selection
-        if sel is None:
-            return ""
-        start = sel["start"]
-        end = sel["end"]
-        if start >= end:
-            return ""
-        text = self._text_buffer.get_plain_text()
-        return text[start:end]
+        return _get_selected_text(self)
 
     def on_selection_changed(self, selection) -> bool:
-        """Converts global selection coordinates to local and applies via the
-        native text buffer view's local selection API.  Returns True if this
-        renderable has a selection after the change.
-        """
-        from ..selection import convert_global_to_local_selection
-
-        local_sel = convert_global_to_local_selection(selection, self._x, self._y)
-
-        if local_sel is None or not local_sel.is_active:
-            self._cross_renderable_selection_active = False
-            self._text_buffer_view.reset_local_selection()
-            self._current_selection = None
-            self.mark_paint_dirty()
-            return False
-
-        self._cross_renderable_selection_active = True
-
-        changed: bool
-        if selection is not None and selection.is_start:
-            changed = self._text_buffer_view.set_local_selection(
-                local_sel.anchor_x,
-                local_sel.anchor_y,
-                local_sel.focus_x,
-                local_sel.focus_y,
-                bg_color=self._selection_bg_color,
-                fg_color=self._selection_fg_color,
-            )
-        else:
-            changed = self._text_buffer_view.update_local_selection(
-                local_sel.anchor_x,
-                local_sel.anchor_y,
-                local_sel.focus_x,
-                local_sel.focus_y,
-                bg_color=self._selection_bg_color,
-                fg_color=self._selection_fg_color,
-            )
-
-        if changed:
-            self.mark_paint_dirty()
-
-        return self.has_selection()
+        return _on_selection_changed(self, selection)
 
     def set_selection(self, start: int, end: int) -> None:
-        if start > end:
-            start, end = end, start
-        text = self._text_buffer.get_plain_text()
-        text_len = len(text)
-        start = max(0, min(start, text_len))
-        end = max(0, min(end, text_len))
-        if start == end:
-            self._current_selection = None
-        else:
-            self._current_selection = {"start": start, "end": end}
-        with contextlib.suppress(Exception):
-            self._text_buffer_view.set_selection(start, end)
-        self.mark_paint_dirty()
+        _set_selection(self, start, end)
 
     def clear_selection(self) -> None:
-        self._current_selection = None
-        self._cross_renderable_selection_active = False
-        with contextlib.suppress(Exception):
-            self._text_buffer_view.reset_selection()
-        with contextlib.suppress(Exception):
-            self._text_buffer_view.reset_local_selection()
-        self.mark_paint_dirty()
+        _clear_selection(self)
 
     @property
     def tab_indicator(self) -> str | int | None:
@@ -501,112 +430,19 @@ class TextRenderable(Renderable):
         return [c for c in self._root_text_node.get_children() if isinstance(c, TextNode)]
 
     def coord_to_offset(self, local_x: int, local_y: int) -> int:
-        text = self.plain_text
-        if not text:
-            return 0
-
-        orig_lines = text.split("\n")
-
-        if self._wrap_mode_str == "none" or (self._layout_width or 0) <= 0:
-            # No wrapping — simple line/col mapping
-            y = max(0, local_y + self._scroll_y)
-            if y >= len(orig_lines):
-                return len(text)
-            offset = sum(len(orig_lines[i]) + 1 for i in range(y))
-            offset += max(0, min(local_x, len(orig_lines[y])))
-            return min(offset, len(text))
-
-        # With wrapping — build visual→original offset map
-        w = self._layout_width
-        visual_line_offsets: list[int] = []  # offset in text for each visual line start
-        base_offset = 0
-        for orig_line in orig_lines:
-            if not orig_line or len(orig_line) <= w:
-                visual_line_offsets.append(base_offset)
-            elif self._wrap_mode_str == "word":
-                wrapped = _word_wrap(orig_line, w)
-                pos = 0
-                for wl in wrapped:
-                    visual_line_offsets.append(base_offset + pos)
-                    pos += len(wl)
-                    if pos < len(orig_line) and orig_line[pos] == " ":
-                        pos += 1
-            else:  # char
-                for i in range(0, len(orig_line), w):
-                    visual_line_offsets.append(base_offset + i)
-            base_offset += len(orig_line) + 1  # +1 for newline
-
-        y = max(0, local_y + self._scroll_y)
-        if y >= len(visual_line_offsets):
-            return len(text)
-
-        line_start = visual_line_offsets[y]
-        # Determine visual line length
-        if y + 1 < len(visual_line_offsets):
-            line_end = visual_line_offsets[y + 1]
-            # Don't count newline as part of this visual line
-            if line_end > 0 and line_end - 1 < len(text) and text[line_end - 1] == "\n":
-                line_end -= 1
-        else:
-            line_end = len(text)
-
-        line_len = line_end - line_start
-        col = max(0, min(local_x, line_len))
-        return min(line_start + col, len(text))
+        return _coord_to_offset(self, local_x, local_y)
 
     def _sync_text_from_nodes(self) -> None:
-        if self._has_manual_styled_text:
-            return
-        plain_text = self._root_text_node.to_plain_text()
-        self._text_buffer.set_text(plain_text)
-        self._update_text_info()
+        _sync_text_from_nodes(self)
 
     def _update_text_info(self) -> None:
-        if self._yoga_node is not None:
-            self._yoga_node.mark_dirty()
-        self._update_viewport_offset()
-        self.mark_dirty()
+        _update_text_info(self)
 
     def _update_viewport_offset(self) -> None:
-        w = self._layout_width or 0
-        h = self._layout_height or 0
-        if w > 0 and h > 0:
-            self._text_buffer_view.set_viewport(self._scroll_x, self._scroll_y, w, h)
+        _update_viewport_offset(self)
 
     def _setup_text_measure_func(self) -> None:
-        def measure(
-            yoga_node: Any, width: float, width_mode: Any, height: float, height_mode: Any
-        ) -> tuple[float, float]:
-            # Undefined = max-content (no wrapping constraint)
-            if width_mode == _MEASURE_UNDEFINED:
-                effective_width = 0
-            else:
-                effective_width = 0 if math.isnan(width) else int(width)
-
-            effective_height = 1 if math.isnan(height) else int(height)
-            if effective_height <= 0:
-                effective_height = 1
-
-            if effective_width > 0:
-                self._text_buffer_view.set_wrap_width(effective_width)
-
-            result = self._text_buffer_view.measure_for_dimensions(
-                effective_width, max(1, effective_height)
-            )
-
-            if result:
-                measured_w = max(1, result["widthColsMax"])
-                measured_h = max(1, result["lineCount"])
-            else:
-                measured_w = 1
-                measured_h = 1
-
-            if width_mode == _MEASURE_AT_MOST:
-                measured_w = min(int(width), measured_w)
-
-            return (measured_w, measured_h)
-
-        self._yoga_node.set_measure_func(measure)
+        _setup_text_measure_func(self)
 
     def _handle_scroll_event(self, event: Any) -> None:
         direction = getattr(event, "scroll_direction", None)
@@ -683,7 +519,7 @@ class TextRenderable(Renderable):
                 elif len(line) <= w:
                     wrapped_lines.append(line)
                 elif self._wrap_mode_str == "word":
-                    wrapped_lines.extend(_word_wrap(line, w))
+                    wrapped_lines.extend(word_wrap(line, w))
                 else:  # char
                     for i in range(0, len(line), w):
                         wrapped_lines.append(line[i : i + w])
@@ -730,31 +566,4 @@ class TextRenderable(Renderable):
         self._root_text_node.clear()
         self._current_selection = None
         super().destroy()
-
-
-def _word_wrap(text: str, width: int) -> list[str]:
-    if not text or width <= 0:
-        return [text]
-
-    lines: list[str] = []
-    remaining = text
-    while remaining:
-        if len(remaining) <= width:
-            lines.append(remaining)
-            break
-
-        # Find last space within width
-        break_pos = remaining.rfind(" ", 0, width + 1)
-        if break_pos <= 0:
-            # No space found — break at width (long word)
-            break_pos = width
-            lines.append(remaining[:break_pos])
-            remaining = remaining[break_pos:]
-        else:
-            lines.append(remaining[:break_pos])
-            remaining = remaining[break_pos + 1 :]  # Skip the space
-
-    return lines if lines else [""]
-
-
-__all__ = ["TextRenderable"]
+__all__ = ["TextRenderable", "get_scroll_adjusted_position"]

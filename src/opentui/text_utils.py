@@ -62,7 +62,12 @@ def _measure_word_wrap(line: str, max_width: int) -> tuple[int, int]:
     for word in words:
         word_width = _dw(word)
         if current_width == 0:
-            current_width = word_width
+            if word_width > max_width:
+                extra = (word_width - 1) // max_width
+                additional_lines += extra
+                current_width = word_width - extra * max_width
+            else:
+                current_width = word_width
         elif current_width + 1 + word_width > max_width:
             max_line_width = max(max_line_width, current_width)
             additional_lines += 1
@@ -139,8 +144,14 @@ def _wrap_line_word(line: str, max_width: int) -> list[str]:
     for word in words:
         word_width = _dw(word)
         if current_width == 0:
-            current.append(word)
-            current_width = word_width
+            if word_width > max_width:
+                broken = _wrap_line_char(word, max_width)
+                lines.extend(broken[:-1])
+                current = [broken[-1]]
+                current_width = _dw(broken[-1])
+            else:
+                current.append(word)
+                current_width = word_width
         elif current_width + 1 + word_width > max_width:
             lines.append(" ".join(current))
             current = [word]

@@ -1,0 +1,397 @@
+"""Mouse selection bookkeeping and overlay rendering helpers."""
+
+from __future__ import annotations
+
+import contextlib
+import logging
+from typing import Any
+
+from ..events import MouseEvent
+from .buffer import Buffer
+from ._mouse_hit_testing import accumulate_scroll_offsets, find_deepest_hit
+
+_log = logging.getLogger(__name__)
+
+
+def handle_selection_mouse(
+    renderer: Any,
+    event,
+    hit_renderable,
+    is_ctrl: bool,
+    button: int,
+) -> bool:
+    if (
+        event.type == "down"
+        and button == 0
+        and not (
+            renderer._current_selection is not None and renderer._current_selection.is_dragging
+        )
+        and not is_ctrl
+    ):
+        if hit_renderable is not None and not getattr(hit_renderable, "_destroyed", False):
+            is_selectable = getattr(hit_renderable, "selectable", False)
+            has_drag_handler = getattr(hit_renderable, "_on_mouse_drag", None) is not None
+            should_start = getattr(hit_renderable, "should_start_selection", None)
+            if should_start is not None and not should_start(event.x, event.y):
+                pass
+            elif is_selectable or not has_drag_handler:
+                renderer._pending_selection_start = {
+                    "x": event.x,
+                    "y": event.y,
+                    "renderable": hit_renderable,
+                }
+        return False
+
+    if (
+        event.type == "drag"
+        and renderer._pending_selection_start is not None
+        and (renderer._current_selection is None or not renderer._current_selection.is_dragging)
+    ):
+        pending = renderer._pending_selection_start
+        renderer._pending_selection_start = None
+        start_selection(renderer, pending["renderable"], pending["x"], pending["y"])
+
+    if (
+        event.type == "drag"
+        and renderer._current_selection is not None
+        and renderer._current_selection.is_dragging
+    ):
+        update_selection(renderer, hit_renderable, event.x, event.y)
+
+        if hit_renderable is not None:
+            drag_ev = MouseEvent(
+                type="drag",
+                x=event.x,
+                y=event.y,
+                button=button,
+                is_dragging=True,
+                shift=getattr(event, "shift", False),
+                ctrl=is_ctrl,
+                alt=getattr(event, "alt", False),
+            )
+            drag_ev.target = hit_renderable
+            handler = getattr(hit_renderable, "_on_mouse_drag", None)
+            if handler is not None:
+                handler(drag_ev)
+        return True
+
+    if event.type == "up" and renderer._pending_selection_start is not None:
+        renderer._pending_selection_start = None
+
+    if (
+        event.type == "up"
+        and renderer._current_selection is not None
+        and renderer._current_selection.is_dragging
+    ):
+        if hit_renderable is not None:
+            up_ev = MouseEvent(
+                type="up",
+                x=event.x,
+                y=event.y,
+                button=button,
+                is_dragging=True,
+                shift=getattr(event, "shift", False),
+                ctrl=is_ctrl,
+                alt=getattr(event, "alt", False),
+            )
+            up_ev.target = hit_renderable
+            handler = getattr(hit_renderable, "_on_mouse_up", None)
+            if handler is not None:
+                handler(up_ev)
+        finish_selection(renderer)
+        return True
+
+    if (
+        event.type == "down"
+        and button == 0
+        and renderer._current_selection is not None
+        and is_ctrl
+    ):
+        renderer._current_selection.is_dragging = True
+        update_selection(renderer, hit_renderable, event.x, event.y)
+        return True
+
+    return False
+
+
+def has_selection(renderer: Any) -> bool:
+    return renderer._current_selection is not None
+
+
+def get_selection(renderer: Any):
+    return renderer._current_selection
+
+
+def start_selection(renderer: Any, renderable, x: int, y: int) -> None:
+    if getattr(renderable, "_destroyed", False):
+        return
+
+    clear_selection(renderer)
+
+    from ..selection import Selection
+
+    parent = getattr(renderable, "_parent", None)
+    renderer._selection_containers.append(parent if parent is not None else renderer._root)
+    renderer._current_selection = Selection(renderable, {"x": x, "y": y}, {"x": x, "y": y})
+    renderer._current_selection.is_start = True
+
+    notify_selectables_of_selection_change(renderer)
+
+
+def update_selection(
+    renderer: Any,
+    current_renderable,
+    x: int,
+    y: int,
+    *,
+    finish_dragging: bool = False,
+) -> None:
+    if renderer._current_selection is None:
+        return
+
+    renderer._current_selection.is_start = False
+    renderer._current_selection.focus = {"x": x, "y": y}
+
+    if finish_dragging:
+        renderer._current_selection.is_dragging = False
+
+    if renderer._selection_containers:
+        current_container = renderer._selection_containers[-1]
+
+        if current_renderable is None or not is_within_container(current_renderable, current_container):
+            parent_container = getattr(current_container, "_parent", None)
+            if parent_container is None:
+                parent_container = renderer._root
+            renderer._selection_containers.append(parent_container)
+        elif current_renderable is not None and len(renderer._selection_containers) > 1:
+            container_index = -1
+            try:
+                container_index = renderer._selection_containers.index(current_renderable)
+            except ValueError:
+                parent = getattr(current_renderable, "_parent", None)
+                if parent is None:
+                    parent = renderer._root
+                with contextlib.suppress(ValueError):
+                    container_index = renderer._selection_containers.index(parent)
+
+            if container_index != -1 and container_index < len(renderer._selection_containers) - 1:
+                renderer._selection_containers = renderer._selection_containers[
+                    : container_index + 1
+                ]
+
+    notify_selectables_of_selection_change(renderer)
+
+
+def clear_selection(renderer: Any) -> None:
+    renderer._pending_selection_start = None
+    if renderer._current_selection is not None:
+        for renderable in renderer._current_selection.touched_renderables:
+            if getattr(renderable, "selectable", False) and not getattr(
+                renderable, "_destroyed", False
+            ):
+                renderable.on_selection_changed(None)
+        renderer._current_selection = None
+    renderer._selection_containers = []
+
+
+def finish_selection(renderer: Any) -> None:
+    if renderer._current_selection is not None:
+        renderer._current_selection.is_dragging = False
+        notify_selectables_of_selection_change(renderer)
+
+
+def is_within_container(renderable, container) -> bool:
+    current = renderable
+    while current is not None:
+        if current is container:
+            return True
+        current = getattr(current, "_parent", None)
+    return False
+
+
+def notify_selectables_of_selection_change(renderer: Any) -> None:
+    selected_renderables: list = []
+    touched_renderables: list = []
+    current_container = (
+        renderer._selection_containers[-1] if renderer._selection_containers else renderer._root
+    )
+
+    if renderer._current_selection is not None and current_container is not None:
+        init_sx, init_sy = 0, 0
+        ancestor = getattr(current_container, "_parent", None)
+        while ancestor is not None:
+            init_sx, init_sy = accumulate_scroll_offsets(ancestor, init_sx, init_sy)
+            ancestor = getattr(ancestor, "_parent", None)
+
+        walk_selectable_renderables(
+            renderer,
+            current_container,
+            renderer._current_selection.bounds,
+            selected_renderables,
+            touched_renderables,
+            init_sx,
+            init_sy,
+        )
+        if _log.isEnabledFor(logging.DEBUG):
+            _log.debug(
+                "selection notify: container=%s init_scroll=(%d,%d) bounds=%s "
+                "selected=%d touched=%d",
+                type(current_container).__name__,
+                init_sx,
+                init_sy,
+                renderer._current_selection.bounds,
+                len(selected_renderables),
+                len(touched_renderables),
+            )
+
+        for renderable in renderer._current_selection.touched_renderables:
+            if renderable not in touched_renderables and not getattr(renderable, "_destroyed", False):
+                renderable.on_selection_changed(None)
+
+        renderer._current_selection.update_selected_renderables(selected_renderables)
+        renderer._current_selection.update_touched_renderables(touched_renderables)
+
+
+def walk_selectable_renderables(
+    renderer: Any,
+    container,
+    selection_bounds: dict,
+    selected_renderables: list,
+    touched_renderables: list,
+    scroll_adjust_x: int = 0,
+    scroll_adjust_y: int = 0,
+) -> None:
+    try:
+        children = list(container.get_children())
+    except AttributeError:
+        return
+
+    child_sx, child_sy = accumulate_scroll_offsets(container, scroll_adjust_x, scroll_adjust_y)
+
+    for child in children:
+        cx = getattr(child, "_x", 0) - child_sx
+        cy = getattr(child, "_y", 0) - child_sy
+        cw = int(getattr(child, "_layout_width", 0) or 0)
+        ch = int(getattr(child, "_layout_height", 0) or 0)
+
+        sx = selection_bounds["x"]
+        sy = selection_bounds["y"]
+        sw = selection_bounds["width"]
+        sh = selection_bounds["height"]
+
+        if cx + cw <= sx or cx >= sx + sw or cy + ch <= sy or cy >= sy + sh:
+            gcc = getattr(child, "get_children_count", None)
+            if gcc is not None and gcc() > 0:
+                walk_selectable_renderables(
+                    renderer,
+                    child,
+                    selection_bounds,
+                    selected_renderables,
+                    touched_renderables,
+                    child_sx,
+                    child_sy,
+                )
+            continue
+
+        if getattr(child, "selectable", False):
+            has_sel = child.on_selection_changed(renderer._current_selection)
+            if has_sel:
+                selected_renderables.append(child)
+            touched_renderables.append(child)
+
+        gcc = getattr(child, "get_children_count", None)
+        if gcc is not None and gcc() > 0:
+            walk_selectable_renderables(
+                renderer,
+                child,
+                selection_bounds,
+                selected_renderables,
+                touched_renderables,
+                child_sx,
+                child_sy,
+            )
+
+
+def request_selection_update(renderer: Any) -> None:
+    if renderer._current_selection is not None and renderer._current_selection.is_dragging:
+        px = renderer._latest_pointer["x"]
+        py = renderer._latest_pointer["y"]
+        hit = find_deepest_hit(renderer, renderer._root, px, py)
+        update_selection(renderer, hit, px, py)
+
+
+def apply_selection_overlay(renderer: Any, buffer: Buffer, selection_bg: Any) -> None:
+    sel = renderer._current_selection
+    if sel is None or not sel.is_active:
+        return
+
+    anchor = sel.anchor
+    focus = sel.focus
+    if (anchor["y"], anchor["x"]) <= (focus["y"], focus["x"]):
+        start_x, start_y = anchor["x"], anchor["y"]
+        end_x, end_y = focus["x"], focus["y"]
+    else:
+        start_x, start_y = focus["x"], focus["y"]
+        end_x, end_y = anchor["x"], anchor["y"]
+
+    w = buffer.width
+    h = buffer.height
+    skip_rects: list[tuple[int, int, int, int]] = []
+    for renderable in sel.selected_renderables:
+        if not getattr(renderable, "_destroyed", False) and getattr(renderable, "has_selection", False):
+            skip_rects.append(
+                (
+                    getattr(renderable, "_x", 0),
+                    getattr(renderable, "_y", 0),
+                    int(getattr(renderable, "_layout_width", 0) or 0),
+                    int(getattr(renderable, "_layout_height", 0) or 0),
+                )
+            )
+
+    for row in range(max(0, start_y), min(end_y + 1, h)):
+        if row == start_y and row == end_y:
+            col_start = max(0, start_x)
+            col_end = min(end_x + 1, w)
+        elif row == start_y:
+            col_start = max(0, start_x)
+            col_end = w
+        elif row == end_y:
+            col_start = 0
+            col_end = min(end_x + 1, w)
+        else:
+            col_start = 0
+            col_end = w
+
+        segments = [(col_start, col_end)]
+        for sx, sy, sw, sh in skip_rects:
+            if row < sy or row >= sy + sh:
+                continue
+            new_segments = []
+            for seg_start, seg_end in segments:
+                if seg_start >= sx + sw or seg_end <= sx:
+                    new_segments.append((seg_start, seg_end))
+                else:
+                    if seg_start < sx:
+                        new_segments.append((seg_start, sx))
+                    if seg_end > sx + sw:
+                        new_segments.append((sx + sw, seg_end))
+            segments = new_segments
+
+        for seg_start, seg_end in segments:
+            rect_w = seg_end - seg_start
+            if rect_w > 0:
+                buffer.fill_rect(seg_start, row, rect_w, 1, selection_bg)
+
+
+__all__ = [
+    "apply_selection_overlay",
+    "clear_selection",
+    "finish_selection",
+    "get_selection",
+    "handle_selection_mouse",
+    "has_selection",
+    "notify_selectables_of_selection_change",
+    "request_selection_update",
+    "start_selection",
+    "update_selection",
+]

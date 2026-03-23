@@ -12,17 +12,37 @@ from ..enums import RenderStrategy
 from ..native import _nb
 from .base import Renderable
 from .raster_cache import RasterCache
-from .table_borders import (
+from .text_table_borders import (
     _BorderLayout,
     draw_borders,
     get_horizontal_border_count,
     get_vertical_border_count,
     resolve_border_layout,
 )
-from .table_layout_fitting import (
+from .text_table_fitting import (
     expand_column_widths,
     fit_column_widths,
 )
+from .text_table_config import resolve_text_table_config
+from .text_table_selection import (
+    get_selected_text as _get_selected_text,
+)
+from .text_table_selection import (
+    get_selection as _get_selection,
+)
+from .text_table_selection import (
+    has_selection as _has_selection,
+)
+from .text_table_selection import (
+    on_selection_changed as _on_selection_changed,
+)
+from .text_table_selection import (
+    setup_mouse_handlers as _setup_text_table_mouse_handlers,
+)
+from .text_table_selection import (
+    should_start_selection as _should_start_selection,
+)
+from .text_table_config import CellState, TableLayoutState
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -32,35 +52,6 @@ MEASURE_HEIGHT = 10_000
 
 TextTableCellContent = list[dict] | None
 TextTableContent = list[list[TextTableCellContent]]
-TextTableColumnWidthMode = str  # "content" | "full"
-TextTableColumnFitter = str  # "proportional" | "balanced"
-
-
-class _CellState:
-    __slots__ = ("text_buffer", "text_buffer_view")
-
-    def __init__(self, text_buffer: NativeTextBuffer, text_buffer_view: NativeTextBufferView):
-        self.text_buffer = text_buffer
-        self.text_buffer_view = text_buffer_view
-
-
-class _TableLayout:
-    __slots__ = (
-        "column_widths",
-        "row_heights",
-        "column_offsets",
-        "row_offsets",
-        "table_width",
-        "table_height",
-    )
-
-    def __init__(self):
-        self.column_widths: list[int] = []
-        self.row_heights: list[int] = []
-        self.column_offsets: list[int] = [0]
-        self.row_offsets: list[int] = [0]
-        self.table_width: int = 0
-        self.table_height: int = 0
 
 
 class TextTableRenderable(Renderable):
@@ -147,45 +138,58 @@ class TextTableRenderable(Renderable):
         kwargs.setdefault("flex_shrink", 0)
         super().__init__(**kwargs)
 
-        self._content: TextTableContent = content if content is not None else []
-        self._wrap_mode_str = wrap_mode if wrap_mode in ("none", "char", "word") else "word"
-        self._column_width_mode: str = (
-            column_width_mode if column_width_mode in ("content", "full") else "full"
+        config = resolve_text_table_config(
+            self._parse_color,
+            self._resolve_column_fitter,
+            self._resolve_cell_padding,
+            content=content,
+            wrap_mode=wrap_mode,
+            column_width_mode=column_width_mode,
+            column_fitter=column_fitter,
+            cell_padding=cell_padding,
+            show_borders=show_borders,
+            border=border,
+            outer_border=outer_border,
+            selectable=selectable,
+            selection_bg=selection_bg,
+            selection_fg=selection_fg,
+            border_style=border_style,
+            border_color=border_color,
+            border_background_color=border_background_color,
+            background_color=background_color,
+            fg=fg,
+            bg=bg,
+            attributes=attributes,
         )
-        self._column_fitter: str = self._resolve_column_fitter(column_fitter)
-        self._cell_padding: int = self._resolve_cell_padding(cell_padding)
-        self._show_borders: bool = show_borders
-        self._table_border: bool = border
-        self._has_explicit_outer_border: bool = outer_border is not None
-        self._outer_border: bool = outer_border if outer_border is not None else border
-        self._selectable_flag: bool = selectable
-        self._selection_bg_color = self._parse_color(selection_bg)
-        self._selection_fg_color = self._parse_color(selection_fg)
-        self._border_style_str: str = (
-            border_style if border_style in ("single", "double", "round") else "single"
-        )
-        self._border_color_val: s.RGBA = self._parse_color(border_color) or s.RGBA(
-            1.0, 1.0, 1.0, 1.0
-        )
-        self._border_bg_color: s.RGBA = self._parse_color(border_background_color) or s.RGBA(
-            0.0, 0.0, 0.0, 0.0
-        )
-        self._table_bg_color: s.RGBA = self._parse_color(background_color) or s.RGBA(
-            0.0, 0.0, 0.0, 0.0
-        )
-        self._default_fg: s.RGBA = self._parse_color(fg) or s.RGBA(1.0, 1.0, 1.0, 1.0)
-        self._default_bg: s.RGBA = self._parse_color(bg) or s.RGBA(0.0, 0.0, 0.0, 0.0)
-        self._default_attributes: int = attributes
+        self._content: TextTableContent = config.content
+        self._wrap_mode_str = config.wrap_mode
+        self._column_width_mode = config.column_width_mode
+        self._column_fitter = config.column_fitter
+        self._cell_padding = config.cell_padding
+        self._show_borders = config.show_borders
+        self._table_border = config.table_border
+        self._has_explicit_outer_border = config.has_explicit_outer_border
+        self._outer_border = config.outer_border
+        self._selectable_flag = config.selectable
+        self._selection_bg_color = config.selection_bg_color
+        self._selection_fg_color = config.selection_fg_color
+        self._border_style_str = config.border_style
+        self._border_color_val = config.border_color
+        self._border_bg_color = config.border_background_color
+        self._table_bg_color = config.table_background_color
+        self._default_fg = config.default_fg
+        self._default_bg = config.default_bg
+        self._default_attributes = config.default_attributes
 
-        self._cells: list[list[_CellState]] = []
+        self._cells: list[list[CellState]] = []
         self._prev_cell_content: list[list[TextTableCellContent]] = []
         self._row_count: int = 0
         self._column_count: int = 0
 
-        self._table_layout: _TableLayout = _TableLayout()
+        self._table_layout: TableLayoutState = TableLayoutState()
         self._layout_dirty: bool = True
         self._raster = RasterCache(f"text-table-{self.id}")
-        self._cached_measure_layout: _TableLayout | None = None
+        self._cached_measure_layout: TableLayoutState | None = None
         self._cached_measure_width: int | None = None
 
         self._last_local_selection: dict | None = None
@@ -341,317 +345,19 @@ class TextTableRenderable(Renderable):
         self.mark_dirty()
 
     def should_start_selection(self, x: int, y: int) -> bool:
-        if not self._selectable_flag:
-            return False
-        self._ensure_layout_ready()
-        local_x = x - self._x
-        local_y = y - self._y
-        return self._get_cell_at_local_position(local_x, local_y) is not None
+        return _should_start_selection(self, x, y)
 
     def has_selection(self) -> bool:
-        for row in self._cells:
-            for cell in row:
-                if cell.text_buffer_view.has_selection():
-                    return True
-        return False
+        return _has_selection(self)
 
     def get_selection(self) -> dict[str, int] | None:
-        for row in self._cells:
-            for cell in row:
-                sel = cell.text_buffer_view.get_selection()
-                if sel:
-                    return sel
-        return None
+        return _get_selection(self)
 
     def get_selected_text(self) -> str:
-        selected_rows: list[str] = []
-        for row_idx in range(self._row_count):
-            row_selections: list[str] = []
-            for col_idx in range(self._column_count):
-                cell = (
-                    self._cells[row_idx][col_idx]
-                    if row_idx < len(self._cells) and col_idx < len(self._cells[row_idx])
-                    else None
-                )
-                if not cell or not cell.text_buffer_view.has_selection():
-                    continue
-                selected_text = cell.text_buffer_view.get_selected_text()
-                if selected_text:
-                    row_selections.append(selected_text)
-            if row_selections:
-                selected_rows.append("\t".join(row_selections))
-        return "\n".join(selected_rows)
+        return _get_selected_text(self)
 
     def on_selection_changed(self, selection) -> bool:
-        self._ensure_layout_ready()
-
-        local_selection = self._convert_global_to_local_selection(selection)
-        self._last_local_selection = local_selection
-
-        if not local_selection or not local_selection.get("is_active"):
-            self._reset_cell_selections()
-            self._last_selection_mode = None
-        else:
-            is_start = getattr(selection, "is_start", False) if selection else False
-            self._apply_selection_to_cells(local_selection, is_start)
-
-        return self.has_selection()
-
-    def _convert_global_to_local_selection(self, selection) -> dict | None:
-        if selection is None:
-            return None
-
-        # Support both dict-based (legacy) and Selection object-based API
-        if isinstance(selection, dict):
-            anchor_x = selection.get("anchorX", selection.get("anchor_x", 0))
-            anchor_y = selection.get("anchorY", selection.get("anchor_y", 0))
-            focus_x = selection.get("focusX", selection.get("focus_x", 0))
-            focus_y = selection.get("focusY", selection.get("focus_y", 0))
-            is_active = selection.get("isActive", selection.get("is_active", False))
-        else:
-            anchor = selection.anchor
-            focus = selection.focus
-            anchor_x = anchor["x"]
-            anchor_y = anchor["y"]
-            focus_x = focus["x"]
-            focus_y = focus["y"]
-            is_active = getattr(selection, "is_active", True)
-
-        return {
-            "anchor_x": anchor_x - self._x,
-            "anchor_y": anchor_y - self._y,
-            "focus_x": focus_x - self._x,
-            "focus_y": focus_y - self._y,
-            "is_active": is_active,
-        }
-
-    def _apply_selection_to_cells(self, local_selection: dict, is_start: bool) -> None:
-        min_sel_y = min(local_selection["anchor_y"], local_selection["focus_y"])
-        max_sel_y = max(local_selection["anchor_y"], local_selection["focus_y"])
-
-        first_row = self._find_row_for_local_y(min_sel_y)
-        last_row = self._find_row_for_local_y(max_sel_y)
-        resolution = self._resolve_selection_resolution(local_selection)
-        mode_changed = self._last_selection_mode != resolution["mode"]
-        self._last_selection_mode = resolution["mode"]
-        lock_to_anchor_column = (
-            resolution["mode"] == "column-locked" and resolution.get("anchor_column") is not None
-        )
-
-        for row_idx in range(self._row_count):
-            if row_idx < first_row or row_idx > last_row:
-                self._reset_row_selection(row_idx)
-                continue
-
-            cell_top = (
-                (
-                    self._table_layout.row_offsets[row_idx]
-                    if row_idx < len(self._table_layout.row_offsets)
-                    else 0
-                )
-                + 1
-                + self._cell_padding
-            )
-
-            for col_idx in range(self._column_count):
-                cell = (
-                    self._cells[row_idx][col_idx]
-                    if row_idx < len(self._cells) and col_idx < len(self._cells[row_idx])
-                    else None
-                )
-                if not cell:
-                    continue
-
-                if lock_to_anchor_column and col_idx != resolution.get("anchor_column"):
-                    cell.text_buffer_view.reset_local_selection()
-                    continue
-
-                cell_left = (
-                    (
-                        self._table_layout.column_offsets[col_idx]
-                        if col_idx < len(self._table_layout.column_offsets)
-                        else 0
-                    )
-                    + 1
-                    + self._cell_padding
-                )
-
-                anchor_x = local_selection["anchor_x"] - cell_left
-                anchor_y = local_selection["anchor_y"] - cell_top
-                focus_x = local_selection["focus_x"] - cell_left
-                focus_y = local_selection["focus_y"] - cell_top
-
-                anchor_cell = resolution.get("anchor_cell")
-                is_anchor_cell = (
-                    anchor_cell is not None
-                    and anchor_cell[0] == row_idx
-                    and anchor_cell[1] == col_idx
-                )
-                force_set = is_anchor_cell and resolution["mode"] != "single-cell"
-
-                if force_set:
-                    col_width = (
-                        self._table_layout.column_widths[col_idx]
-                        if col_idx < len(self._table_layout.column_widths)
-                        else 1
-                    )
-                    row_height = (
-                        self._table_layout.row_heights[row_idx]
-                        if row_idx < len(self._table_layout.row_heights)
-                        else 1
-                    )
-                    content_width = max(1, col_width - self._get_horizontal_cell_padding())
-                    content_height = max(1, row_height - self._get_vertical_cell_padding())
-                    anchor_x = -1
-                    anchor_y = 0
-                    focus_x = content_width
-                    focus_y = content_height
-
-                should_use_set = is_start or mode_changed or force_set
-
-                if should_use_set:
-                    cell.text_buffer_view.set_local_selection(anchor_x, anchor_y, focus_x, focus_y)
-                else:
-                    cell.text_buffer_view.update_local_selection(
-                        anchor_x, anchor_y, focus_x, focus_y
-                    )
-
-    def _resolve_selection_resolution(self, local_selection: dict) -> dict:
-        anchor_cell = self._get_cell_at_local_position(
-            local_selection["anchor_x"], local_selection["anchor_y"]
-        )
-        focus_cell = self._get_cell_at_local_position(
-            local_selection["focus_x"], local_selection["focus_y"]
-        )
-        anchor_column = (
-            anchor_cell[1]
-            if anchor_cell
-            else self._get_column_at_local_x(local_selection["anchor_x"])
-        )
-
-        if (
-            anchor_cell is not None
-            and focus_cell is not None
-            and anchor_cell[0] == focus_cell[0]
-            and anchor_cell[1] == focus_cell[1]
-        ):
-            return {
-                "mode": "single-cell",
-                "anchor_cell": anchor_cell,
-                "anchor_column": anchor_column,
-            }
-
-        focus_column = self._get_column_at_local_x(local_selection["focus_x"])
-        if anchor_column is not None and focus_column == anchor_column:
-            return {
-                "mode": "column-locked",
-                "anchor_cell": anchor_cell,
-                "anchor_column": anchor_column,
-            }
-
-        return {"mode": "grid", "anchor_cell": anchor_cell, "anchor_column": anchor_column}
-
-    def _get_column_at_local_x(self, local_x: int) -> int | None:
-        if self._column_count == 0:
-            return None
-        if local_x < 0 or local_x >= self._table_layout.table_width:
-            return None
-        for col_idx in range(self._column_count):
-            col_start = (
-                self._table_layout.column_offsets[col_idx]
-                if col_idx < len(self._table_layout.column_offsets)
-                else 0
-            ) + 1
-            col_width = (
-                self._table_layout.column_widths[col_idx]
-                if col_idx < len(self._table_layout.column_widths)
-                else 1
-            )
-            col_end = col_start + col_width - 1
-            if local_x >= col_start and local_x <= col_end:
-                return col_idx
-        return None
-
-    def _find_row_for_local_y(self, local_y: int) -> int:
-        if self._row_count == 0:
-            return 0
-        if local_y < 0:
-            return 0
-        for row_idx in range(self._row_count):
-            row_start = (
-                self._table_layout.row_offsets[row_idx]
-                if row_idx < len(self._table_layout.row_offsets)
-                else 0
-            ) + 1
-            row_height = (
-                self._table_layout.row_heights[row_idx]
-                if row_idx < len(self._table_layout.row_heights)
-                else 1
-            )
-            row_end = row_start + row_height - 1
-            if local_y <= row_end:
-                return row_idx
-        return self._row_count - 1
-
-    def _reset_row_selection(self, row_idx: int) -> None:
-        if row_idx >= len(self._cells):
-            return
-        for cell in self._cells[row_idx]:
-            cell.text_buffer_view.reset_local_selection()
-
-    def _reset_cell_selections(self) -> None:
-        for row_idx in range(self._row_count):
-            self._reset_row_selection(row_idx)
-
-    def _get_cell_at_local_position(self, local_x: int, local_y: int) -> tuple[int, int] | None:
-        if self._row_count == 0 or self._column_count == 0:
-            return None
-        if local_x < 0 or local_y < 0:
-            return None
-        if local_x >= self._table_layout.table_width or local_y >= self._table_layout.table_height:
-            return None
-
-        row_idx = -1
-        for idx in range(self._row_count):
-            top = (
-                self._table_layout.row_offsets[idx]
-                if idx < len(self._table_layout.row_offsets)
-                else 0
-            ) + 1
-            row_h = (
-                self._table_layout.row_heights[idx]
-                if idx < len(self._table_layout.row_heights)
-                else 1
-            )
-            bottom = top + row_h - 1
-            if local_y >= top and local_y <= bottom:
-                row_idx = idx
-                break
-
-        if row_idx < 0:
-            return None
-
-        col_idx = -1
-        for idx in range(self._column_count):
-            left = (
-                self._table_layout.column_offsets[idx]
-                if idx < len(self._table_layout.column_offsets)
-                else 0
-            ) + 1
-            col_w = (
-                self._table_layout.column_widths[idx]
-                if idx < len(self._table_layout.column_widths)
-                else 1
-            )
-            right = left + col_w - 1
-            if local_x >= left and local_x <= right:
-                col_idx = idx
-                break
-
-        if col_idx < 0:
-            return None
-
-        return (row_idx, col_idx)
+        return _on_selection_changed(self, selection)
 
     def _setup_measure_func(self) -> None:
         def measure(
@@ -681,61 +387,7 @@ class TextTableRenderable(Renderable):
         self._yoga_node.set_measure_func(measure)
 
     def _setup_mouse_handlers(self) -> None:
-        """Wire mouse events to drive the selection system.
-
-        OpenTUI core has a dedicated selection dispatch system
-        (startSelection / updateSelection / notifySelectablesOfSelectionChange).
-        Since this Python renderer doesn't have that, we drive selection directly
-        from the mouse event handlers on the renderable.
-        """
-
-        def _on_down(event: Any) -> None:
-            x, y = event.x, event.y
-            if not self.should_start_selection(x, y):
-                return
-            self._is_selecting = True
-            self._selection_anchor = (x, y)
-            self.on_selection_changed(
-                {
-                    "anchorX": x,
-                    "anchorY": y,
-                    "focusX": x,
-                    "focusY": y,
-                    "isActive": True,
-                    "is_start": True,
-                }
-            )
-
-        def _on_drag(event: Any) -> None:
-            if not self._is_selecting or self._selection_anchor is None:
-                return
-            ax, ay = self._selection_anchor
-            self.on_selection_changed(
-                {
-                    "anchorX": ax,
-                    "anchorY": ay,
-                    "focusX": event.x,
-                    "focusY": event.y,
-                    "isActive": True,
-                    "is_start": False,
-                }
-            )
-
-        def _on_drag_end(event: Any) -> None:
-            if not self._is_selecting:
-                return
-            self._is_selecting = False
-            # Keep the selection active after drag ends (don't clear).
-
-        def _on_up(event: Any) -> None:
-            if not self._is_selecting:
-                return
-            self._is_selecting = False
-
-        self._on_mouse_down = _on_down
-        self._on_mouse_drag = _on_drag
-        self._on_mouse_drag_end = _on_drag_end
-        self._on_mouse_up = _on_up
+        _setup_text_table_mouse_handlers(self)
 
     def _rebuild_cells(self) -> None:
         new_row_count = len(self._content)
@@ -749,7 +401,7 @@ class TextTableRenderable(Renderable):
 
             for row_idx in range(new_row_count):
                 row_data = self._content[row_idx] if row_idx < len(self._content) else []
-                row_cells: list[_CellState] = []
+                row_cells: list[CellState] = []
                 row_refs: list[TextTableCellContent] = []
 
                 for col_idx in range(new_column_count):
@@ -796,7 +448,7 @@ class TextTableRenderable(Renderable):
         if new_row_count > old_row_count:
             for row_idx in range(old_row_count, new_row_count):
                 new_row = self._content[row_idx] if row_idx < len(self._content) else []
-                row_cells: list[_CellState] = []
+                row_cells: list[CellState] = []
                 row_refs: list[TextTableCellContent] = []
                 for col_idx in range(new_column_count):
                     cell_content = new_row[col_idx] if col_idx < len(new_row) else None
@@ -811,7 +463,7 @@ class TextTableRenderable(Renderable):
         self._row_count = new_row_count
         self._column_count = new_column_count
 
-    def _create_cell(self, content: TextTableCellContent) -> _CellState:
+    def _create_cell(self, content: TextTableCellContent) -> CellState:
         text = self._cell_content_to_text(content)
         text_buffer = NativeTextBuffer()
         text_buffer.set_text(text)
@@ -819,7 +471,7 @@ class TextTableRenderable(Renderable):
         text_buffer_view = NativeTextBufferView(text_buffer.ptr, text_buffer)
         text_buffer_view.set_wrap_mode(self._wrap_mode_str)
 
-        return _CellState(text_buffer, text_buffer_view)
+        return CellState(text_buffer, text_buffer_view)
 
     def _cell_content_to_text(self, content: TextTableCellContent) -> str:
         """Convert cell content to plain text.
@@ -834,15 +486,10 @@ class TextTableRenderable(Renderable):
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            parts = []
-            for chunk in content:
-                if isinstance(chunk, dict):
-                    parts.append(chunk.get("text", ""))
-                elif isinstance(chunk, str):
-                    parts.append(chunk)
-                else:
-                    parts.append(str(chunk))
-            return "".join(parts)
+            return "".join(
+                chunk.get("text", "") if isinstance(chunk, dict) else str(chunk)
+                for chunk in content
+            )
         return str(content)
 
     def _ensure_layout_ready(self) -> None:
@@ -868,9 +515,9 @@ class TextTableRenderable(Renderable):
         self._apply_layout_to_views(layout)
         self._layout_dirty = False
 
-    def _compute_layout(self, max_table_width: int | None = None) -> _TableLayout:
+    def _compute_layout(self, max_table_width: int | None = None) -> TableLayoutState:
         if self._row_count == 0 or self._column_count == 0:
-            return _TableLayout()
+            return TableLayoutState()
 
         border_layout = self._resolve_border_layout()
         column_widths = self._compute_column_widths(max_table_width, border_layout)
@@ -882,7 +529,7 @@ class TextTableRenderable(Renderable):
             row_heights, border_layout.top, border_layout.bottom, border_layout.inner_horizontal
         )
 
-        layout = _TableLayout()
+        layout = TableLayoutState()
         layout.column_widths = column_widths
         layout.row_heights = row_heights
         layout.column_offsets = column_offsets
@@ -898,7 +545,7 @@ class TextTableRenderable(Renderable):
     def _compute_column_widths(
         self, max_table_width: int | None, border_layout: _BorderLayout
     ) -> list[int]:
-        horizontal_padding = self._get_horizontal_cell_padding()
+        horizontal_padding = self._get_cell_padding()
         intrinsic_widths = [1 + horizontal_padding] * self._column_count
 
         for row_idx in range(self._row_count):
@@ -935,12 +582,12 @@ class TextTableRenderable(Renderable):
             intrinsic_widths,
             max_content_width,
             self._column_fitter,
-            self._get_horizontal_cell_padding(),
+            self._get_cell_padding(),
         )
 
     def _compute_row_heights(self, column_widths: list[int]) -> list[int]:
-        horizontal_padding = self._get_horizontal_cell_padding()
-        vertical_padding = self._get_vertical_cell_padding()
+        horizontal_padding = self._get_cell_padding()
+        vertical_padding = self._get_cell_padding()
         row_heights = [1 + vertical_padding] * self._row_count
 
         for row_idx in range(self._row_count):
@@ -963,16 +610,16 @@ class TextTableRenderable(Renderable):
         cursor = offsets[0]
 
         for idx in range(len(parts)):
-            size = parts[idx] if idx < len(parts) else 1
+            size = parts[idx]
             has_boundary_after = include_inner if idx < len(parts) - 1 else end_boundary
             cursor += size + (1 if has_boundary_after else 0)
             offsets.append(cursor)
 
         return offsets
 
-    def _apply_layout_to_views(self, layout: _TableLayout) -> None:
-        horizontal_padding = self._get_horizontal_cell_padding()
-        vertical_padding = self._get_vertical_cell_padding()
+    def _apply_layout_to_views(self, layout: TableLayoutState) -> None:
+        horizontal_padding = self._get_cell_padding()
+        vertical_padding = self._get_cell_padding()
 
         for row_idx in range(self._row_count):
             for col_idx in range(self._column_count):
@@ -996,10 +643,7 @@ class TextTableRenderable(Renderable):
             self._outer_border, self._table_border, self._column_count, self._row_count
         )
 
-    def _get_horizontal_cell_padding(self) -> int:
-        return self._cell_padding * 2
-
-    def _get_vertical_cell_padding(self) -> int:
+    def _get_cell_padding(self) -> int:
         return self._cell_padding * 2
 
     def _resolve_layout_width_constraint(self, width: int | None) -> int | None:
@@ -1051,6 +695,8 @@ class TextTableRenderable(Renderable):
     def _render_table_contents(self, buffer: Buffer) -> None:
         x = self._x
         y = self._y
+        if self._table_bg_color.a > 0:
+            buffer.fill_rect(x, y, self._layout_width, self._layout_height, self._table_bg_color)
         if self._show_borders:
             self._draw_borders(buffer, x, y)
 
@@ -1130,7 +776,10 @@ class TextTableRenderable(Renderable):
                     text = cell.text_buffer.get_plain_text()
                     if text:
                         buffer.draw_text(
-                            text, base_x + cell_x, base_y + cell_y, self._default_fg, None
+                            text, base_x + cell_x, base_y + cell_y,
+                            self._default_fg,
+                            self._default_bg if self._default_bg.a > 0 else None,
+                            self._default_attributes,
                         )
 
     def destroy(self) -> None:

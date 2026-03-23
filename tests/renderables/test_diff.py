@@ -1785,3 +1785,5 @@ Index: packages/core/src/examples/index.ts
             assert buggy_frame == correct_frame
         finally:
             setup.destroy()
+
+

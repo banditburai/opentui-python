@@ -7,31 +7,16 @@ Tests ported: 10/10
 import pytest
 
 from opentui.layout import (
-    _is_dimension_type,
     _is_flex_basis_type,
     _is_margin_type,
     _is_padding_type,
     _is_size_type,
     _is_valid_percentage,
-    validate_options,
 )
 
 
 class TestUtilityFunctions:
     """Maps to describe("Utility Functions")."""
-
-    def test_validate_options(self):
-        """Maps to test("validateOptions")."""
-        # Valid options - should not raise
-        validate_options("test", {"width": 100, "height": 100})
-
-        # Negative width - should raise ValueError
-        with pytest.raises(ValueError):
-            validate_options("test", {"width": -100, "height": 100})
-
-        # Negative height - should raise ValueError
-        with pytest.raises(ValueError):
-            validate_options("test", {"width": 100, "height": -100})
 
     def test_is_valid_percentage(self):
         """Maps to test("isValidPercentage")."""
@@ -58,11 +43,11 @@ class TestUtilityFunctions:
         assert _is_padding_type(float("nan")) is False
 
     def test_is_dimension_type(self):
-        """Maps to test("isDimensionType")."""
-        assert _is_dimension_type(100) is True
-        assert _is_dimension_type("auto") is True
-        assert _is_dimension_type("50%") is True
-        assert _is_dimension_type(float("nan")) is False
+        """Maps to test("isDimensionType") — dimensions use same rules as margins."""
+        assert _is_margin_type(100) is True
+        assert _is_margin_type("auto") is True
+        assert _is_margin_type("50%") is True
+        assert _is_margin_type(float("nan")) is False
 
     def test_is_flex_basis_type(self):
         """Maps to test("isFlexBasisType")."""

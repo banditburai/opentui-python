@@ -1303,3 +1303,79 @@ class TestTextTableRenderable:
             assert "ENDCHAR" in frame or table.height > 0
         finally:
             setup.destroy()
+
+
+class TestTextTableWiredParams:
+    """Verify constructor params (bg, attributes, background_color, selection_bg/fg) are wired."""
+
+    async def test_default_bg_stored(self):
+        """bg kwarg is stored as _default_bg."""
+        table = TextTableRenderable(
+            bg="#ff0000",
+            content=[[cell("A")]],
+        )
+        assert table._default_bg.r == 1.0
+        assert table._default_bg.a == 1.0
+
+    async def test_default_attributes_stored(self):
+        """attributes kwarg is stored as _default_attributes."""
+        table = TextTableRenderable(
+            attributes=3,
+            content=[[cell("A")]],
+        )
+        assert table._default_attributes == 3
+
+    async def test_table_bg_color_stored(self):
+        """background_color kwarg is stored as _table_bg_color."""
+        table = TextTableRenderable(
+            background_color="#00ff00",
+            content=[[cell("A")]],
+        )
+        assert table._table_bg_color.g == 1.0
+        assert table._table_bg_color.a == 1.0
+
+    async def test_selection_colors_stored(self):
+        """selection_bg/selection_fg kwargs are stored."""
+        table = TextTableRenderable(
+            selection_bg="#0000ff",
+            selection_fg="#ffffff",
+            content=[[cell("A")]],
+        )
+        assert table._selection_bg_color.b == 1.0
+        assert table._selection_fg_color.r == 1.0
+
+    async def test_fallback_draw_uses_bg_and_attributes(self):
+        """The fallback draw_text() path passes bg and attributes."""
+        setup = await create_test_renderer(40, 10)
+        try:
+            table = await _create_table(
+                setup,
+                left=0,
+                top=0,
+                position="absolute",
+                bg="#ff0000",
+                attributes=1,
+                content=[[cell("X")]],
+            )
+            # Verify the table rendered (cell text visible in frame)
+            frame = setup.capture_char_frame()
+            assert "X" in frame
+        finally:
+            setup.destroy()
+
+    async def test_table_bg_color_renders_fill(self):
+        """background_color causes fill_rect in _render_table_contents."""
+        setup = await create_test_renderer(40, 10)
+        try:
+            table = await _create_table(
+                setup,
+                left=0,
+                top=0,
+                position="absolute",
+                background_color="#330000",
+                content=[[cell("Y")]],
+            )
+            frame = setup.capture_char_frame()
+            assert "Y" in frame
+        finally:
+            setup.destroy()

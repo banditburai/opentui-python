@@ -289,3 +289,39 @@ def _char_code_to_key(char_code: int) -> str:
     if 0 < char_code < 0x10FFFF:
         return chr(char_code)
     return f"unknown-{char_code}"
+
+
+# ---------------------------------------------------------------------------
+# Kitty keyboard protocol flags
+# ---------------------------------------------------------------------------
+
+KITTY_FLAG_DISAMBIGUATE = 0b1  # bit 0: disambiguated escape codes
+KITTY_FLAG_EVENT_TYPES = 0b10  # bit 1: press/repeat/release event types
+KITTY_FLAG_ALTERNATE_KEYS = 0b100  # bit 2: alternate keys (numpad, shifted)
+KITTY_FLAG_ALL_KEYS_AS_ESCAPES = 0b1000  # bit 3: all keys as escape codes
+KITTY_FLAG_REPORT_TEXT = 0b10000  # bit 4: associated text with key events
+
+
+def build_kitty_keyboard_flags(options: dict[str, bool] | None = None) -> int:
+    """Build kitty keyboard protocol flags bitmask from options dict.
+
+    By default, ``disambiguate`` and ``alternate_keys`` are True.
+    Optional flags (``events``, ``all_keys_as_escapes``, ``report_text``)
+    default to False.
+
+    Returns 0 for *None* input (protocol disabled).
+    """
+    if options is None:
+        return 0
+    flags = 0
+    if options.get("disambiguate", True):
+        flags |= KITTY_FLAG_DISAMBIGUATE
+    if options.get("alternateKeys", True):
+        flags |= KITTY_FLAG_ALTERNATE_KEYS
+    if options.get("events", False):
+        flags |= KITTY_FLAG_EVENT_TYPES
+    if options.get("allKeysAsEscapes", False):
+        flags |= KITTY_FLAG_ALL_KEYS_AS_ESCAPES
+    if options.get("reportText", False):
+        flags |= KITTY_FLAG_REPORT_TEXT
+    return flags

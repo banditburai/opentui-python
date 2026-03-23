@@ -398,6 +398,3 @@ class NativeEditBuffer:
         _nb.edit_buffer.edit_buffer_insert_char(self._ptr, ch)
         self._emit("content_changed")
         self._emit("cursor_changed")
-
-    def get_id(self) -> int:
-        return _nb.edit_buffer.edit_buffer_get_id(self._ptr)

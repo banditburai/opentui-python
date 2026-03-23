@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .editor.text_buffer_native import NativeSyntaxStyle
-from .structs import RGBA, ColorInput, parse_color
+from .text_buffer_native import NativeSyntaxStyle
+from ..structs import RGBA, ColorInput, parse_color
 
 ATTR_NONE = 0
 ATTR_BOLD = 1 << 0  # 1

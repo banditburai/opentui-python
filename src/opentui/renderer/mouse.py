@@ -2,9 +2,28 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from typing import Any
+
+from ._mouse_hit_testing import (
+    dispatch_mouse_to_tree,
+    do_auto_focus,
+    find_deepest_hit,
+    find_focusable_ancestor,
+    hit_test,
+    recheck_hover_state,
+    update_hover_state,
+)
+from ._mouse_selection import (
+    clear_selection,
+    finish_selection,
+    get_selection,
+    handle_selection_mouse,
+    has_selection,
+    request_selection_update,
+    start_selection,
+    update_selection,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -15,8 +34,6 @@ _MOUSE_HANDLER_MAP = {
     "drag": "_on_mouse_drag",
     "scroll": "_on_mouse_scroll",
 }
-
-
 class MouseHandlingMixin:
     """Mixin providing mouse dispatch, hit testing, hover, and selection."""
 
@@ -55,6 +72,43 @@ class MouseHandlingMixin:
             return False
 
     # -- Mouse dispatch --------------------------------------------------------
+
+    def _handle_selection_mouse(self, event, hit_renderable, is_ctrl: bool, button: int) -> bool:
+        return handle_selection_mouse(self, event, hit_renderable, is_ctrl, button)
+
+    def _handle_capture_mouse(self, event, captured) -> bool:
+        """Route mouse events to the captured element.
+
+        Returns True if the event was fully handled (caller should return early).
+        """
+        # Route drag/move events directly to captured element (skip tree walk).
+        if captured is not None and event.type not in ("up", "down"):
+            handler = getattr(captured, "_on_mouse_drag", None)
+            if handler is not None:
+                event.target = captured
+                handler(event)
+                _log.debug("mouse capture→drag handler fired on %s", type(captured).__name__)
+            else:
+                _log.debug(
+                    "mouse capture active but no _on_mouse_drag on %s", type(captured).__name__
+                )
+            return True
+
+        # On mouse-up: send drag-end + up to captured element, then release.
+        if captured is not None and event.type == "up":
+            drag_end_handler = getattr(captured, "_on_mouse_drag_end", None)
+            if drag_end_handler is not None:
+                event.target = captured
+                drag_end_handler(event)
+            up_handler = getattr(captured, "_on_mouse_up", None)
+            if up_handler is not None:
+                event.target = captured
+                up_handler(event)
+            self._captured_renderable = None
+            _log.debug("mouse capture released on up")
+            return True
+
+        return False
 
     def _dispatch_mouse_event(self, event) -> None:
         if self._root is None:
@@ -103,108 +157,12 @@ class MouseHandlingMixin:
         is_ctrl = getattr(event, "ctrl", False)
         button = getattr(event, "button", 0)
 
-        # 1. left-button down: start selection if target is selectable
-        if (
-            event.type == "down"
-            and button == 0  # left button only
-            and not (self._current_selection is not None and self._current_selection.is_dragging)
-            and not is_ctrl
-        ):
-            can_start = bool(
-                hit_renderable is not None
-                and getattr(hit_renderable, "selectable", False)
-                and not getattr(hit_renderable, "_destroyed", False)
-                and hit_renderable.should_start_selection(event.x, event.y)
-            )
-            if can_start:
-                self.start_selection(hit_renderable, event.x, event.y)
-                self._dispatch_mouse_to_tree(self._root, event)
-                return
-
-        # 2. drag while selection isDragging: update selection focus
-        if (
-            event.type == "drag"
-            and self._current_selection is not None
-            and self._current_selection.is_dragging
-        ):
-            self.update_selection(hit_renderable, event.x, event.y)
-
-            if hit_renderable is not None:
-                from ..events import MouseEvent
-
-                drag_ev = MouseEvent(
-                    type="drag",
-                    x=event.x,
-                    y=event.y,
-                    button=button,
-                    is_dragging=True,
-                    shift=getattr(event, "shift", False),
-                    ctrl=is_ctrl,
-                    alt=getattr(event, "alt", False),
-                )
-                drag_ev.target = hit_renderable
-                handler = getattr(hit_renderable, "_on_mouse_drag", None)
-                if handler is not None:
-                    handler(drag_ev)
+        # Selection-related branches (start, drag-update, up-finish, ctrl-extend).
+        if self._handle_selection_mouse(event, hit_renderable, is_ctrl, button):
             return
 
-        # 3. up while selection isDragging: dispatch up with isDragging, then finish
-        if (
-            event.type == "up"
-            and self._current_selection is not None
-            and self._current_selection.is_dragging
-        ):
-            if hit_renderable is not None:
-                from ..events import MouseEvent
-
-                up_ev = MouseEvent(
-                    type="up",
-                    x=event.x,
-                    y=event.y,
-                    button=button,
-                    is_dragging=True,
-                    shift=getattr(event, "shift", False),
-                    ctrl=is_ctrl,
-                    alt=getattr(event, "alt", False),
-                )
-                up_ev.target = hit_renderable
-                handler = getattr(hit_renderable, "_on_mouse_up", None)
-                if handler is not None:
-                    handler(up_ev)
-            self._finish_selection()
-            return
-
-        # 4. ctrl+click with existing selection: extend selection
-        if event.type == "down" and button == 0 and self._current_selection is not None and is_ctrl:
-            self._current_selection.is_dragging = True
-            self.update_selection(hit_renderable, event.x, event.y)
-            return
-
-        # Route drag/move events directly to captured element (skip tree walk).
-        if captured is not None and event.type not in ("up", "down"):
-            handler = getattr(captured, "_on_mouse_drag", None)
-            if handler is not None:
-                event.target = captured
-                handler(event)
-                _log.debug("mouse capture→drag handler fired on %s", type(captured).__name__)
-            else:
-                _log.debug(
-                    "mouse capture active but no _on_mouse_drag on %s", type(captured).__name__
-                )
-            return
-
-        # On mouse-up: send drag-end + up to captured element, then release.
-        if captured is not None and event.type == "up":
-            drag_end_handler = getattr(captured, "_on_mouse_drag_end", None)
-            if drag_end_handler is not None:
-                event.target = captured
-                drag_end_handler(event)
-            up_handler = getattr(captured, "_on_mouse_up", None)
-            if up_handler is not None:
-                event.target = captured
-                up_handler(event)
-            self._captured_renderable = None
-            _log.debug("mouse capture released on up")
+        # Captured element routing (drag/move forwarding, up release).
+        if self._handle_capture_mouse(event, captured):
             return
 
         # Track drag state so that auto-focus is suppressed during drag operations.
@@ -228,26 +186,7 @@ class MouseHandlingMixin:
         # Hover tracking: fire _on_mouse_out / _on_mouse_over when the
         # element under the pointer changes.
         if event.type in ("move", "drag"):
-            hit = self._find_deepest_hit(self._root, event.x, event.y)
-            last_over = self._last_over_renderable
-            if hit is not last_over:
-                if last_over is not None and not getattr(last_over, "_destroyed", False):
-                    out_handler = getattr(last_over, "_on_mouse_out", None)
-                    if out_handler is not None:
-                        from ..events import MouseEvent
-
-                        out_ev = MouseEvent(type="out", x=event.x, y=event.y)
-                        out_ev.target = last_over
-                        out_handler(out_ev)
-                self._last_over_renderable = hit
-                if hit is not None:
-                    over_handler = getattr(hit, "_on_mouse_over", None)
-                    if over_handler is not None:
-                        from ..events import MouseEvent
-
-                        over_ev = MouseEvent(type="over", x=event.x, y=event.y)
-                        over_ev.target = hit
-                        over_handler(over_ev)
+            update_hover_state(self, event.x, event.y)
 
         # Auto-focus on left-button mousedown
         if (
@@ -308,110 +247,40 @@ class MouseHandlingMixin:
 
     @property
     def has_selection(self) -> bool:
-        return self._current_selection is not None
+        return has_selection(self)
 
     def get_selection(self):
-        return self._current_selection
+        return get_selection(self)
 
     def start_selection(self, renderable, x: int, y: int) -> None:
-        if not getattr(renderable, "selectable", False):
-            return
-
-        self.clear_selection()
-
-        from ..selection import Selection
-
-        parent = getattr(renderable, "_parent", None)
-        self._selection_containers.append(parent if parent is not None else self._root)
-        self._current_selection = Selection(renderable, {"x": x, "y": y}, {"x": x, "y": y})
-        self._current_selection.is_start = True
-
-        self._notify_selectables_of_selection_change()
+        start_selection(self, renderable, x, y)
 
     def update_selection(
         self, current_renderable, x: int, y: int, *, finish_dragging: bool = False
     ) -> None:
-        if self._current_selection is None:
-            return
-
-        self._current_selection.is_start = False
-        self._current_selection.focus = {"x": x, "y": y}
-
-        if finish_dragging:
-            self._current_selection.is_dragging = False
-
-        if self._selection_containers:
-            current_container = self._selection_containers[-1]
-
-            if current_renderable is None or not self._is_within_container(
-                current_renderable, current_container
-            ):
-                parent_container = getattr(current_container, "_parent", None)
-                if parent_container is None:
-                    parent_container = self._root
-                self._selection_containers.append(parent_container)
-            elif current_renderable is not None and len(self._selection_containers) > 1:
-                container_index = -1
-                try:
-                    container_index = self._selection_containers.index(current_renderable)
-                except ValueError:
-                    parent = getattr(current_renderable, "_parent", None)
-                    if parent is None:
-                        parent = self._root
-                    with contextlib.suppress(ValueError):
-                        container_index = self._selection_containers.index(parent)
-
-                if container_index != -1 and container_index < len(self._selection_containers) - 1:
-                    self._selection_containers = self._selection_containers[: container_index + 1]
-
-        self._notify_selectables_of_selection_change()
-
-    def clear_selection(self) -> None:
-        if self._current_selection is not None:
-            for renderable in self._current_selection.touched_renderables:
-                if getattr(renderable, "selectable", False) and not getattr(
-                    renderable, "_destroyed", False
-                ):
-                    renderable.on_selection_changed(None)
-            self._current_selection = None
-        self._selection_containers = []
-
-    def _finish_selection(self) -> None:
-        if self._current_selection is not None:
-            self._current_selection.is_dragging = False
-            self._notify_selectables_of_selection_change()
-
-    def _is_within_container(self, renderable, container) -> bool:
-        current = renderable
-        while current is not None:
-            if current is container:
-                return True
-            current = getattr(current, "_parent", None)
-        return False
-
-    def _notify_selectables_of_selection_change(self) -> None:
-        selected_renderables: list = []
-        touched_renderables: list = []
-        current_container = (
-            self._selection_containers[-1] if self._selection_containers else self._root
+        update_selection(
+            self,
+            current_renderable,
+            x,
+            y,
+            finish_dragging=finish_dragging,
         )
 
-        if self._current_selection is not None and current_container is not None:
-            self._walk_selectable_renderables(
-                current_container,
-                self._current_selection.bounds,
-                selected_renderables,
-                touched_renderables,
-            )
+    def clear_selection(self) -> None:
+        clear_selection(self)
 
-            for renderable in self._current_selection.touched_renderables:
-                if renderable not in touched_renderables and not getattr(
-                    renderable, "_destroyed", False
-                ):
-                    renderable.on_selection_changed(None)
+    def _finish_selection(self) -> None:
+        finish_selection(self)
 
-            self._current_selection.update_selected_renderables(selected_renderables)
-            self._current_selection.update_touched_renderables(touched_renderables)
+    def _is_within_container(self, renderable, container) -> bool:
+        from ._mouse_selection import is_within_container
+
+        return is_within_container(renderable, container)
+
+    def _notify_selectables_of_selection_change(self) -> None:
+        from ._mouse_selection import notify_selectables_of_selection_change
+
+        notify_selectables_of_selection_change(self)
 
     def _walk_selectable_renderables(
         self,
@@ -419,108 +288,34 @@ class MouseHandlingMixin:
         selection_bounds: dict,
         selected_renderables: list,
         touched_renderables: list,
+        scroll_adjust_x: int = 0,
+        scroll_adjust_y: int = 0,
     ) -> None:
-        try:
-            children = list(container.get_children())
-        except AttributeError:
-            return
+        from ._mouse_selection import walk_selectable_renderables
 
-        for child in children:
-            cx = getattr(child, "_x", 0)
-            cy = getattr(child, "_y", 0)
-            cw = int(getattr(child, "_layout_width", 0) or 0)
-            ch = int(getattr(child, "_layout_height", 0) or 0)
-
-            sx = selection_bounds["x"]
-            sy = selection_bounds["y"]
-            sw = selection_bounds["width"]
-            sh = selection_bounds["height"]
-
-            if cx + cw <= sx or cx >= sx + sw or cy + ch <= sy or cy >= sy + sh:
-                gcc = getattr(child, "get_children_count", None)
-                if gcc is not None and gcc() > 0:
-                    self._walk_selectable_renderables(
-                        child, selection_bounds, selected_renderables, touched_renderables
-                    )
-                continue
-
-            if getattr(child, "selectable", False):
-                has_sel = child.on_selection_changed(self._current_selection)
-                if has_sel:
-                    selected_renderables.append(child)
-                touched_renderables.append(child)
-
-            gcc = getattr(child, "get_children_count", None)
-            if gcc is not None and gcc() > 0:
-                self._walk_selectable_renderables(
-                    child, selection_bounds, selected_renderables, touched_renderables
-                )
+        walk_selectable_renderables(
+            self,
+            container,
+            selection_bounds,
+            selected_renderables,
+            touched_renderables,
+            scroll_adjust_x,
+            scroll_adjust_y,
+        )
 
     def request_selection_update(self) -> None:
-        if self._current_selection is not None and self._current_selection.is_dragging:
-            px = self._latest_pointer["x"]
-            py = self._latest_pointer["y"]
-            hit = self._find_deepest_hit(self._root, px, py)
-            self.update_selection(hit, px, py)
+        request_selection_update(self)
 
     # -- Hit testing & hover ---------------------------------------------------
 
     @staticmethod
     def _iter_children_front_to_back(children) -> list:
-        indexed = list(enumerate(children))
-        indexed.sort(
-            key=lambda pair: (getattr(pair[1], "_z_index", 0), pair[0]),
-            reverse=True,
-        )
-        return [child for _, child in indexed]
+        from ._mouse_hit_testing import iter_children_front_to_back
+
+        return iter_children_front_to_back(children)
 
     def _recheck_hover_state(self) -> None:
-        if self.is_destroyed or not self._has_pointer:
-            return
-        if self._captured_renderable is not None:
-            return
-
-        px = self._latest_pointer["x"]
-        py = self._latest_pointer["y"]
-        hit = self._find_deepest_hit(self._root, px, py)
-        last_over = self._last_over_renderable
-
-        if hit is last_over:
-            return
-
-        from ..events import MouseEvent
-
-        if last_over is not None and not getattr(last_over, "_destroyed", False):
-            out_handler = getattr(last_over, "_on_mouse_out", None)
-            if out_handler is not None:
-                out_ev = MouseEvent(
-                    type="out",
-                    x=px,
-                    y=py,
-                    button=0,
-                    shift=self._last_pointer_modifiers.get("shift", False),
-                    alt=self._last_pointer_modifiers.get("alt", False),
-                    ctrl=self._last_pointer_modifiers.get("ctrl", False),
-                )
-                out_ev.target = last_over
-                out_handler(out_ev)
-
-        self._last_over_renderable = hit
-
-        if hit is not None:
-            over_handler = getattr(hit, "_on_mouse_over", None)
-            if over_handler is not None:
-                over_ev = MouseEvent(
-                    type="over",
-                    x=px,
-                    y=py,
-                    button=0,
-                    shift=self._last_pointer_modifiers.get("shift", False),
-                    alt=self._last_pointer_modifiers.get("alt", False),
-                    ctrl=self._last_pointer_modifiers.get("ctrl", False),
-                )
-                over_ev.target = hit
-                over_handler(over_ev)
+        recheck_hover_state(self)
 
     def _find_deepest_hit(
         self,
@@ -530,153 +325,25 @@ class MouseHandlingMixin:
         scroll_adjust_x: int = 0,
         scroll_adjust_y: int = 0,
     ) -> Any:
-        if renderable is None:
-            return None
-
-        check_x = x + scroll_adjust_x
-        check_y = y + scroll_adjust_y
-
-        contains_point = getattr(renderable, "contains_point", None)
-        inside = True if contains_point is None else contains_point(check_x, check_y)
-        host = getattr(renderable, "_host", None)
-
-        if not inside and host is None:
-            return None
-
-        overflow = getattr(renderable, "_overflow", "visible")
-        if overflow == "hidden":
-            rx = getattr(renderable, "_x", 0)
-            ry = getattr(renderable, "_y", 0)
-            rw = int(getattr(renderable, "_layout_width", 0) or 0)
-            rh = int(getattr(renderable, "_layout_height", 0) or 0)
-            if not (rx <= x < rx + rw and ry <= y < ry + rh):
-                return None
-
-        child_sx = scroll_adjust_x
-        child_sy = scroll_adjust_y
-        if getattr(renderable, "_scroll_y", False):
-            fn = getattr(renderable, "_scroll_offset_y_fn", None)
-            child_sy += int(fn()) if fn else int(getattr(renderable, "_scroll_offset_y", 0))
-        if getattr(renderable, "_scroll_x", False):
-            child_sx += int(getattr(renderable, "_scroll_offset_x", 0))
-
-        try:
-            children = list(renderable.get_children())
-        except AttributeError:
-            children = []
-
-        for child in self._iter_children_front_to_back(children):
-            hit = self._find_deepest_hit(child, x, y, child_sx, child_sy)
-            if hit is not None:
-                return hit
-
-        if inside:
-            return renderable
-        return None
+        return find_deepest_hit(self, renderable, x, y, scroll_adjust_x, scroll_adjust_y)
 
     def hit_test(self, x: int, y: int) -> int:
-        hit = self._find_deepest_hit(self._root, x, y)
-        if hit is None or hit is self._root:
-            return 0
-        return hit._num
+        return hit_test(self, x, y)
 
     def _find_focusable_ancestor(self, renderable) -> Any:
-        node = renderable
-        while node is not None:
-            if getattr(node, "_focusable", False):
-                return node
-            node = getattr(node, "_parent", None)
-        return None
+        return find_focusable_ancestor(renderable)
 
     def _do_auto_focus(self, renderable) -> None:
-        if self._focused_renderable is renderable:
-            return
-        if self._focused_renderable is not None:
-            with contextlib.suppress(Exception):
-                self._focused_renderable.blur()
-        self._focused_renderable = renderable
-        with contextlib.suppress(Exception):
-            renderable.focus()
-
-    def _find_scroll_target(
-        self, renderable, x: int, y: int, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0
-    ):
-        try:
-            children = list(renderable.get_children())
-        except AttributeError:
-            children = []
-
-        child_sx = scroll_adjust_x
-        child_sy = scroll_adjust_y
-        if getattr(renderable, "_scroll_y", False):
-            fn = getattr(renderable, "_scroll_offset_y_fn", None)
-            child_sy += int(fn()) if fn else int(getattr(renderable, "_scroll_offset_y", 0))
-        if getattr(renderable, "_scroll_x", False):
-            child_sx += int(getattr(renderable, "_scroll_offset_x", 0))
-
-        for child in reversed(children):
-            found = self._find_scroll_target(child, x, y, child_sx, child_sy)
-            if found is not None:
-                return found
-
-        check_x = x + scroll_adjust_x
-        check_y = y + scroll_adjust_y
-        contains_point = getattr(renderable, "contains_point", None)
-        inside = True if contains_point is None else contains_point(check_x, check_y)
-
-        if inside and getattr(renderable, "_is_scroll_target", False):
-            return renderable
-        return None
+        do_auto_focus(self, renderable)
 
     def _dispatch_mouse_to_tree(
         self, renderable, event, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0
     ) -> None:
-        if event.propagation_stopped:
-            return
-
-        check_x = event.x + scroll_adjust_x
-        check_y = event.y + scroll_adjust_y
-
-        contains_point = getattr(renderable, "contains_point", None)
-        inside = True if contains_point is None else contains_point(check_x, check_y)
-
-        try:
-            children = list(renderable.get_children())
-        except AttributeError:
-            children = []
-
-        child_scroll_x = scroll_adjust_x
-        child_scroll_y = scroll_adjust_y
-        if getattr(renderable, "_scroll_y", False):
-            fn = getattr(renderable, "_scroll_offset_y_fn", None)
-            child_scroll_y += int(fn()) if fn else int(getattr(renderable, "_scroll_offset_y", 0))
-        if getattr(renderable, "_scroll_x", False):
-            child_scroll_x += int(getattr(renderable, "_scroll_offset_x", 0))
-
-        for child in self._iter_children_front_to_back(children):
-            child_check_x = event.x + child_scroll_x
-            child_check_y = event.y + child_scroll_y
-            child_contains = getattr(child, "contains_point", None)
-            child_host = getattr(child, "_host", None)
-            if (
-                child_contains is not None
-                and not child_contains(child_check_x, child_check_y)
-                and child_host is None
-            ):
-                continue
-            self._dispatch_mouse_to_tree(child, event, child_scroll_x, child_scroll_y)
-            if event.propagation_stopped:
-                return
-            break
-
-        if not inside:
-            return
-
-        attr = _MOUSE_HANDLER_MAP.get(event.type)
-        if not attr:
-            return
-
-        handler = getattr(renderable, attr, None)
-        if handler is not None:
-            event.target = renderable
-            handler(event)
+        dispatch_mouse_to_tree(
+            self,
+            renderable,
+            event,
+            _MOUSE_HANDLER_MAP,
+            scroll_adjust_x,
+            scroll_adjust_y,
+        )

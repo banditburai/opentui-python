@@ -6,7 +6,7 @@ Tests ported: 94/94
 
 import pytest
 
-from opentui import create_test_renderer
+from opentui import ScrollBox, create_test_renderer
 from opentui.components.markdown_renderable import (
     _MarkdownCodeBlock,
     MarkdownRenderable,
@@ -47,6 +47,22 @@ def _render_markdown_sync(setup, markdown: str, conceal: bool = True) -> str:
     lines = _capture(setup).split("\n")
     lines = [ln.rstrip() for ln in lines]
     return "\n" + "\n".join(lines).rstrip()
+
+
+def _find_selectable_point(renderable, direction: str) -> tuple[int, int]:
+    points = []
+    for y in range(renderable.y, renderable.y + renderable.height):
+        for x in range(renderable.x, renderable.x + renderable.width):
+            if renderable.should_start_selection(x, y):
+                points.append((x, y))
+    assert points, "No selectable points found"
+
+    if direction == "top-left":
+        points.sort(key=lambda p: (p[1], p[0]))
+        return points[0]
+
+    points.sort(key=lambda p: (-p[1], -p[0]))
+    return points[0]
 
 
 class TestMarkdownRenderable:
@@ -361,11 +377,7 @@ class TestMarkdownRenderable:
 
     @pytest.mark.asyncio
     async def test_selection_across_markdown_table_includes_table_data(self, setup):
-        """Maps to test("selection across markdown table includes table data").
-
-        Selection requires mouse infrastructure and full _MarkdownTableBlock
-        selection support which is not yet available.
-        """
+        """Maps to test("selection across markdown table includes table data")."""
         md = MarkdownRenderable(
             id="markdown",
             content="Intro line above table.\n\n| Component | Status | Notes |\n|---|---|---|\n| Authentication | **Done** | OAuth2 + SSO |\n| Payments API | *In Progress* | Retry + idempotency |\n| Search Indexer | `Done` | Ranking + typo fix |\n\nOutro line below table.",
@@ -373,10 +385,77 @@ class TestMarkdownRenderable:
         setup.renderer.root.add(md)
         setup.render_frame()
 
-        frame = _capture(setup)
-        assert "Intro line above table." in frame
-        assert "Authentication" in frame
-        assert "Outro line below table." in frame
+        table = next(
+            state.renderable
+            for state in md._blockStates
+            if isinstance(state.renderable, _MarkdownTableBlock)
+        )
+        start = _find_selectable_point(table, "top-left")
+        end = _find_selectable_point(table, "bottom-right")
+
+        setup.mock_mouse.drag(start[0], start[1], end[0], end[1])
+        setup.render_frame()
+
+        assert table.has_selection() is True
+        selected = setup.renderer.get_selection().get_selected_text()
+        assert "Component" in selected
+        assert "Status" in selected
+        assert "Notes" in selected
+        assert "Authentication" in selected
+        assert "OAuth2 + SSO" in selected
+        assert "Payments API" in selected
+        assert "Retry + idempotency" in selected
+        assert "Search Indexer" in selected
+        assert "Ranking + typo fix" in selected
+
+    @pytest.mark.asyncio
+    async def test_markdown_paragraph_blocks_use_real_text_selection(self, setup):
+        md = MarkdownRenderable(
+            id="markdown-text-selection",
+            content="Hello markdown paragraph.\n\nAnother line.",
+        )
+        setup.renderer.root.add(md)
+        setup.render_frame()
+
+        text_block = next(
+            state.renderable
+            for state in md._blockStates
+            if isinstance(state.renderable, _MarkdownCodeBlock)
+        )
+        setup.mock_mouse.drag(text_block.x, text_block.y, text_block.x + 6, text_block.y)
+        setup.render_frame()
+
+        assert text_block.has_selection() is True
+        assert text_block.get_selected_text() in ("Hello ", "Hello m", "Hello")
+
+    @pytest.mark.asyncio
+    async def test_markdown_selection_stays_stable_when_scrolled(self, setup):
+        md = MarkdownRenderable(
+            id="markdown-scroll-selection",
+            content="\n\n".join(f"Line {i} with markdown text." for i in range(18)),
+            width=30,
+        )
+        scrollbox = ScrollBox(width=30, height=4, scroll_y=True)
+        scrollbox.add(md)
+        setup.renderer.root.add(scrollbox)
+        setup.render_frame()
+
+        text_block = next(
+            state.renderable
+            for state in md._blockStates
+            if isinstance(state.renderable, _MarkdownCodeBlock)
+        )
+        setup.mock_mouse.drag(text_block.x, text_block.y, text_block.x + 4, text_block.y)
+        setup.render_frame()
+
+        selected_before = setup.renderer.get_selection().get_selected_text()
+        assert selected_before
+
+        setup.mock_mouse.scroll(scrollbox.x + 1, scrollbox.y + 1, "down")
+        setup.render_frame()
+
+        selected_after = setup.renderer.get_selection().get_selected_text()
+        assert selected_after == selected_before
 
     # ── Code block tests ──────────────────────────────────────────────
 

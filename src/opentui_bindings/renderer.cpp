@@ -1,7 +1,11 @@
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/array.h>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
+#include <optional>
+#include <array>
 
 namespace nb = nanobind;
 
@@ -103,9 +107,15 @@ void bind_renderer(nb::module_& m) {
     m.def("update_stats", &updateStats, nb::arg("renderer"), nb::arg("fps"), nb::arg("frame_count"), nb::arg("avg_frame_time"));
     m.def("set_debug_overlay", &setDebugOverlay, nb::arg("renderer"), nb::arg("enable"), nb::arg("flags"));
 
-    m.def("set_background_color", [](void* renderer) {
-        setBackgroundColor(renderer, nullptr);
-    }, nb::arg("renderer"));
+    m.def("set_background_color", [](void* renderer,
+                                       std::optional<std::array<float, 4>> color) {
+        if (color.has_value()) {
+            float c[4] = {(*color)[0], (*color)[1], (*color)[2], (*color)[3]};
+            setBackgroundColor(renderer, c);
+        } else {
+            setBackgroundColor(renderer, nullptr);
+        }
+    }, nb::arg("renderer"), nb::arg("color") = std::nullopt);
     m.def("set_render_offset", &setRenderOffset, nb::arg("renderer"), nb::arg("offset"));
     m.def("set_use_thread", &setUseThread, nb::arg("renderer"), nb::arg("use_thread"));
 

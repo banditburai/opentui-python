@@ -16,14 +16,14 @@ class Expr:
     __hash__ = None  # type: ignore[assignment]  # Mutable; __eq__ returns BinaryOp
 
     def __call__(self):
-        return self.evaluate()
+        raise NotImplementedError(f"{type(self).__name__} must implement __call__")
 
     def evaluate(self) -> Any:
         """Evaluate this expression in Python.
 
-        Subclasses must override either __call__ or evaluate.
+        Subclasses override __call__; evaluate() delegates to it.
         """
-        raise NotImplementedError(f"{type(self).__name__} must implement __call__ or evaluate")
+        return self()
 
     def to_js(self) -> str:
         """Convert to external format string."""
@@ -129,20 +129,23 @@ class Expr:
     def __bool__(self) -> bool:
         return bool(self())
 
-    def upper(self) -> MethodCall:
-        return MethodCall(self, "upper", [])
+    def __int__(self) -> int:
+        return int(self())
 
-    def lower(self) -> MethodCall:
-        return MethodCall(self, "lower", [])
+    def __float__(self) -> float:
+        return float(self())
 
-    def strip(self) -> MethodCall:
-        return MethodCall(self, "strip", [])
+    def __len__(self) -> int:
+        return len(self())
 
-    def contains(self, text: str) -> MethodCall:
-        return MethodCall(self, "contains", [_ensure_expr(text)])
+    def __contains__(self, item) -> bool:
+        return item in self()
 
-    def length(self) -> PropertyAccess:
-        return PropertyAccess(self, "len")
+    def __iter__(self):
+        return iter(self())
+
+    def __getitem__(self, key):
+        return self()[key]
 
     def if_(self, true_val: Any, false_val: Any = None) -> Conditional:
         """Ternary conditional."""
@@ -164,63 +167,12 @@ class Literal(Expr):
     def __call__(self):
         return self._value
 
-    def evaluate(self) -> Any:
-        return self._value
-
     def to_js(self) -> str:
         if self._value is None:
             return "null"
         if isinstance(self._value, bool):
             return "true" if self._value else "false"
-        if isinstance(self._value, str):
-            return repr(self._value)
         return repr(self._value)
-
-
-class PropertyAccess(Expr):
-    """Access a property on an object."""
-
-    __slots__ = ("_obj", "_property", "_fn")
-
-    def __init__(self, obj: Expr, prop: str):
-        self._obj = _ensure_expr(obj)
-        self._property = prop
-        o = self._obj
-        if prop == "len":
-            self._fn = lambda: len(o())
-        else:
-            p = prop
-            self._fn = lambda: getattr(o(), p)
-
-    def __call__(self):
-        return self._fn()
-
-    def evaluate(self) -> Any:
-        return self._fn()
-
-
-class MethodCall(Expr):
-    """Call a method on an object."""
-
-    __slots__ = ("_obj", "_method", "_args", "_fn")
-
-    def __init__(self, obj: Expr, method: str, args: list):
-        self._obj = _ensure_expr(obj)
-        self._method = method
-        self._args = [_ensure_expr(a) for a in args]
-        o = self._obj
-        m = method
-        a = self._args
-        if a:
-            self._fn = lambda: getattr(o(), m)(*[x() for x in a])
-        else:
-            self._fn = lambda: getattr(o(), m)()  # noqa: PLW0108
-
-    def __call__(self):
-        return self._fn()
-
-    def evaluate(self) -> Any:
-        return self._fn()
 
 
 _BINARY_OPS: dict[str, Any] = {
@@ -250,8 +202,6 @@ _UNARY_OPS: dict[str, Any] = {
 
 
 class BinaryOp(Expr):
-    """Binary operation."""
-
     __slots__ = ("_left", "_op", "_right", "_fn")
 
     def __init__(self, left: Any, op: str, right: Any):
@@ -265,9 +215,6 @@ class BinaryOp(Expr):
         self._fn = lambda: op_fn(left(), right())
 
     def __call__(self):
-        return self._fn()
-
-    def evaluate(self) -> Any:
         return self._fn()
 
     def to_js(self) -> str:
@@ -284,8 +231,6 @@ class BinaryOp(Expr):
 
 
 class UnaryOp(Expr):
-    """Unary operation."""
-
     __slots__ = ("_op", "_expr", "_fn")
 
     def __init__(self, op: str, expr: Expr):
@@ -300,9 +245,6 @@ class UnaryOp(Expr):
     def __call__(self):
         return self._fn()
 
-    def evaluate(self) -> Any:
-        return self._fn()
-
     def to_js(self) -> str:
         if self._op == "not":
             return f"!{self._expr.to_js()}"
@@ -310,8 +252,6 @@ class UnaryOp(Expr):
 
 
 class Conditional(Expr):
-    """Ternary conditional: condition ? true_val : false_val."""
-
     __slots__ = ("_condition", "_true_val", "_false_val", "_fn")
 
     def __init__(self, condition: Any, true_val: Any, false_val: Any):
@@ -322,9 +262,6 @@ class Conditional(Expr):
         self._fn = lambda: t() if c() else f()
 
     def __call__(self):
-        return self._fn()
-
-    def evaluate(self) -> Any:
         return self._fn()
 
     def to_js(self) -> str:
@@ -344,29 +281,6 @@ class MappedExpr(Expr):
 
     def __call__(self):
         return self._fn()
-
-    def evaluate(self) -> Any:
-        return self._fn()
-
-
-class Assignment(Expr):
-    """Assignment expression (for setting Signal values)."""
-
-    __slots__ = ("_target", "_value")
-
-    def __init__(self, target: Expr, value: Expr):
-        self._target = target
-        self._value = value
-
-    def evaluate(self) -> Any:
-        value = self._value()
-        # Duck-type: if target has set(), call it
-        if hasattr(self._target, "set") and callable(self._target.set):
-            self._target.set(value)
-        return value
-
-    def to_js(self) -> str:
-        return f"({self._target.to_js()} = {self._value.to_js()})"
 
 
 def _ensure_expr(value: Any) -> Expr:
@@ -419,9 +333,6 @@ __all__ = [
     "UnaryOp",
     "Conditional",
     "MappedExpr",
-    "PropertyAccess",
-    "MethodCall",
-    "Assignment",
     "_ensure_expr",
     "all_",
     "any_",

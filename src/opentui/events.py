@@ -273,6 +273,7 @@ def handler(
         handler(select_item, item_id, stop=True)
         handler(handle_click, item_id, stop=True, pass_event=True)
     """
+
     def _handler(event: Any) -> None:
         if stop:
             event.stop_propagation()

@@ -29,7 +29,7 @@ except Exception:
     __version__ = "0.1.0"
 
 from . import hooks as hooks
-from . import signals as signals_module
+from . import signals as signals
 
 from .context import Context, create_context, use_context
 
@@ -46,15 +46,10 @@ from .enums import (
 )
 
 from .components import (
-    AsciiFont,
-    BaseRenderable,
-    Bold,
     Box,
-    LayoutRect,
     Code,
     Column,
     Diff,
-    DiffRenderable,
     Dynamic,
     ErrorBoundary,
     FlexFill,
@@ -66,8 +61,6 @@ from .components import (
     Lazy,
     LineBreak,
     LineNumber,
-    LineNumberRenderable,
-    LineSign,
     Link,
     LinearScrollAccel,
     MacOSScrollAccel,
@@ -92,16 +85,19 @@ from .components import (
     TabSelect,
     Text,
     Textarea,
-    TextModifier,
-    InputRenderable,
-    SelectRenderable,
-    TextareaRenderable,
-    TextRenderable,
     TextTable,
     Underline,
-    VRenderable,
     component,
 )
+from .components.base import BaseRenderable, LayoutRect, VRenderable
+from .components.line_types import LineColorConfig, LineSign
+from .components.diff_renderable import DiffRenderable
+from .components.input_renderable import InputRenderable
+from .components.line_number_renderable import LineNumberRenderable
+from .components.select_renderable import SelectRenderable
+from .components.text import Bold, TextModifier
+from .components.text_renderable import TextRenderable
+from .components.textarea_renderable import TextareaRenderable
 
 from .editor.edit_buffer import (
     EditBuffer,
@@ -155,7 +151,7 @@ from .selection import (
     convert_global_to_local_selection,
 )
 
-from .animation import Animation, Timeline
+from .animation import Timeline
 
 from .hooks import (
     clear_keyboard_handlers,
@@ -209,7 +205,7 @@ from .expr import (
     match,
 )
 
-from .syntax_style import StyleDefinition, SyntaxStyle as NativeSyntaxStyle
+from .editor.syntax_style import StyleDefinition, SyntaxStyle as NativeSyntaxStyle
 from .tree_sitter_client import PyTreeSitterClient
 
 
@@ -255,7 +251,7 @@ async def render(
 
     set_renderer(renderer)
 
-    from .signals import _signal_state
+    from ._signals_runtime import _signal_state
 
     _signal_state.reset()
 
@@ -327,6 +323,7 @@ __all__ = [
     "TextareaRenderable",
     "TextRenderable",
     "VRenderable",
+    "LineColorConfig",
     "LineNumberRenderable",
     "LineSign",
     "For",
@@ -343,7 +340,6 @@ __all__ = [
     "Diff",
     "DiffRenderable",
     "Markdown",
-    "AsciiFont",
     "TabSelect",
     "Slider",
     "TextTable",
@@ -398,7 +394,6 @@ __all__ = [
     "use_selection_handler",
     "use_timeline",
     "Timeline",
-    "Animation",
     "clear_keyboard_handlers",
     "clear_mouse_handlers",
     "clear_paste_handlers",
@@ -437,5 +432,3 @@ __all__ = [
     "Position",
     "TitleAlignment",
 ]
-
-signals = signals_module

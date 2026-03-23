@@ -16,7 +16,7 @@ class EditBuffer:
         self._native = native
 
     def insert_text(self, text: str) -> None:
-        text_bytes = text.encode("utf-8") if isinstance(text, str) else text
+        text_bytes = text.encode("utf-8")
         self._native.edit_buffer.insert_text(self._ptr, text_bytes, len(text_bytes))
 
     def get_text(self) -> str:
@@ -30,7 +30,7 @@ class EditBuffer:
             buf_size *= 2
 
     def set_text(self, text: str) -> None:
-        text_bytes = text.encode("utf-8") if isinstance(text, str) else text
+        text_bytes = text.encode("utf-8")
         self._native.edit_buffer.set_text(self._ptr, text_bytes, len(text_bytes))
 
     def delete_char(self) -> None:

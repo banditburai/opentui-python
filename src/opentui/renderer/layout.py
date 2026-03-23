@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from .native import _CUSTOM_UPDATE_LAYOUT_CACHE, _DEFAULT_UPDATE_LAYOUT_FN
+
+_log = logging.getLogger(__name__)
 
 
 def collect_top_dirty_layout_nodes(root) -> list[Any]:
@@ -38,6 +41,22 @@ def collect_local_layout_subtree(
         return None
     if getattr(parent, "_dirty", False):
         return None
+
+    # Bail out for scroll content containers — their natural height can grow
+    # beyond the previous layout frame when children change, but a local
+    # subtree pass would constrain them to _layout_height (the old size).
+    # Only bail for ScrollBox hosts; other components that set _host (e.g.
+    # Portal) don't have the same grow-beyond-bounds behaviour.
+    from ..components.scrollbox import ScrollBox
+
+    host = getattr(parent, "_host", None)
+    if host is not None and isinstance(host, ScrollBox):
+        _log.debug(
+            "local_subtree: bail — parent %s is scroll content (host is ScrollBox)",
+            type(parent).__name__,
+        )
+        return None
+
     if not hasattr(parent, "_layout_width") or not hasattr(parent, "_layout_height"):
         return None
 

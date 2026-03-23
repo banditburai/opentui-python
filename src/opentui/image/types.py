@@ -74,6 +74,7 @@ __all__ = [
     "ImageFit",
     "ImageProtocol",
     "ImageSource",
+    "resize_rgba_nearest",
 ]
 
 
@@ -100,6 +101,3 @@ def resize_rgba_nearest(
             dst_idx = (dst_row_offset + x) * 4
             out[dst_idx : dst_idx + 4] = data[src_idx : src_idx + 4]
     return bytes(out)
-
-
-__all__.append("resize_rgba_nearest")

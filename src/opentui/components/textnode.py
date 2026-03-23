@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass
-from typing import Any
 
 from .. import structs as s
 
@@ -182,20 +181,6 @@ def styled_dim(input_val: str | int | bool | TextChunk) -> TextChunk:
     return _apply_style(input_val, dim=True)
 
 
-def styled_fg(color: s.RGBA | str):
-    def apply(input_val: str | int | bool | TextChunk) -> TextChunk:
-        return _apply_style(input_val, fg=color)
-
-    return apply
-
-
-def styled_bg(color: s.RGBA | str):
-    def apply(input_val: str | int | bool | TextChunk) -> TextChunk:
-        return _apply_style(input_val, bg=color)
-
-    return apply
-
-
 def styled_text(*parts: str | TextChunk) -> StyledText:
     """Build a StyledText from a sequence of strings and TextChunks.
 
@@ -364,27 +349,10 @@ class TextNode:
                 parts.append(child.to_plain_text())
         return "".join(parts)
 
-    @classmethod
-    def from_string(cls, text: str) -> TextNode:
-        node = cls("")
-        node.append(text)
-        return node
-
-    @classmethod
-    def from_nodes(cls, nodes: list[TextNode | str]) -> TextNode:
-        node = cls("")
-        for child in nodes:
-            node.append(child)
-        return node
-
     def __repr__(self) -> str:
         if self._children:
             return f"TextNode({self._text!r}, children={len(self._children)})"
         return f"TextNode({self._text!r})"
-
-
-def is_textnode_renderable(obj: Any) -> bool:
-    return isinstance(obj, TextNode)
 
 
 _parse_color = s.parse_color_opt
@@ -396,7 +364,6 @@ __all__ = [
     "StyledChunk",
     "TextChunk",
     "StyledText",
-    "is_textnode_renderable",
     "styled_text",
     "styled_red",
     "styled_green",
@@ -411,8 +378,6 @@ __all__ = [
     "styled_underline",
     "styled_strikethrough",
     "styled_dim",
-    "styled_fg",
-    "styled_bg",
     "TEXT_ATTR_BOLD",
     "TEXT_ATTR_ITALIC",
     "TEXT_ATTR_UNDERLINE",

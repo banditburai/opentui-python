@@ -67,14 +67,16 @@ def _preload_opentui_library() -> None:
     package_dir = os.path.dirname(current_dir)
     lib_names = _get_lib_names()
 
-    candidates = []
-    for lib_name in lib_names:
-        candidates.append(os.path.join(current_dir, "opentui-libs", lib_name))
-        candidates.append(os.path.join(package_dir, "opentui", "opentui-libs", lib_name))
-
-    for so_dir in _iter_binding_search_dirs():
-        for lib_name in lib_names:
-            candidates.append(os.path.join(so_dir, "opentui-libs", lib_name))
+    candidates = [
+        os.path.join(d, "opentui-libs", n)
+        for d in [current_dir, os.path.join(package_dir, "opentui")]
+        for n in lib_names
+    ]
+    candidates.extend(
+        os.path.join(so_dir, "opentui-libs", n)
+        for so_dir in _iter_binding_search_dirs()
+        for n in lib_names
+    )
 
     for candidate in candidates:
         if not os.path.isfile(candidate):

@@ -129,15 +129,6 @@ class TerminalConsole:
         ):
             return False
 
-        if event.type == "scroll":
-            return True
-
-        if local_y == 0:
-            return True
-
-        if event.type in ("down", "drag", "up"):
-            return True
-
         return True
 
     def resize(self) -> None:

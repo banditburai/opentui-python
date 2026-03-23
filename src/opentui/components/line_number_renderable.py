@@ -5,14 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
-from ..colors import MUTED_GRAY, MUTED_GRAY_HEX
+from ..structs import MUTED_GRAY, MUTED_GRAY_HEX
 from .base import Renderable
+from .line_types import LineColorConfig, LineSign
 from .line_number_gutter import (
     GutterRenderable,
-    LineColorConfig,
     LineInfo,
     LineInfoProvider,
-    LineSign,
     _darken_color,
     _parse_color,
 )
@@ -111,40 +110,33 @@ class LineNumberRenderable(Renderable):
         self.mark_dirty()
 
     def _parse_line_color(self, line: int, color: Any) -> None:
+        # Normalize dict / LineColorConfig to (gutter_raw, content_raw)
         if isinstance(color, dict) and ("gutter" in color or "content" in color):
-            # LineColorConfig format
-            if color.get("gutter"):
-                parsed_gutter = _parse_color(color["gutter"])
-                if parsed_gutter:
-                    self._line_colors_gutter[line] = parsed_gutter
-            if color.get("content"):
-                parsed_content = _parse_color(color["content"])
-                if parsed_content:
-                    self._line_colors_content[line] = parsed_content
-            elif color.get("gutter"):
-                # If only gutter is specified, use a darker version for content
-                parsed_gutter = _parse_color(color["gutter"])
-                if parsed_gutter:
-                    self._line_colors_content[line] = _darken_color(parsed_gutter)
+            gutter_raw, content_raw = color.get("gutter"), color.get("content")
         elif isinstance(color, LineColorConfig):
-            if color.gutter:
-                parsed_gutter = _parse_color(color.gutter)
-                if parsed_gutter:
-                    self._line_colors_gutter[line] = parsed_gutter
-            if color.content:
-                parsed_content = _parse_color(color.content)
-                if parsed_content:
-                    self._line_colors_content[line] = parsed_content
-            elif color.gutter:
-                parsed_gutter = _parse_color(color.gutter)
-                if parsed_gutter:
-                    self._line_colors_content[line] = _darken_color(parsed_gutter)
+            gutter_raw, content_raw = color.gutter, color.content
         elif isinstance(color, str | s.RGBA) or color is None:
-            # Simple format - same color for both, but content is darker
             parsed = _parse_color(color)
             if parsed:
                 self._line_colors_gutter[line] = parsed
                 self._line_colors_content[line] = _darken_color(parsed)
+            return
+        else:
+            return
+
+        if gutter_raw:
+            parsed_gutter = _parse_color(gutter_raw)
+            if parsed_gutter:
+                self._line_colors_gutter[line] = parsed_gutter
+        if content_raw:
+            parsed_content = _parse_color(content_raw)
+            if parsed_content:
+                self._line_colors_content[line] = parsed_content
+        elif gutter_raw:
+            # Only gutter specified — derive darker content color
+            parsed_gutter = _parse_color(gutter_raw)
+            if parsed_gutter:
+                self._line_colors_content[line] = _darken_color(parsed_gutter)
 
     def _set_target(self, target: Any) -> None:
         if self._target is target:

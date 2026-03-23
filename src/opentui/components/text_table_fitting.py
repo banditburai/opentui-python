@@ -140,14 +140,10 @@ def allocate_shrink_by_weight(shrinkable: list[int], target_shrink: int, mode: s
     if target_shrink <= 0:
         return shrink
 
-    weights = []
-    for value in shrinkable:
-        if value <= 0:
-            weights.append(0.0)
-        elif mode == "sqrt":
-            weights.append(math.sqrt(value))
-        else:
-            weights.append(float(value))
+    weights = [
+        0.0 if value <= 0 else math.sqrt(value) if mode == "sqrt" else float(value)
+        for value in shrinkable
+    ]
 
     total_weight = sum(weights)
     if total_weight <= 0:

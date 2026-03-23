@@ -11,7 +11,6 @@ from opentui.components.textnode import (
     TextStyle,
     TextChunk,
     StyledText,
-    is_textnode_renderable,
     styled_text,
     styled_red,
     styled_bold,
@@ -75,10 +74,9 @@ class TestTextNodeTypeGuard:
     def test_should_identify_textnode_instances(self):
         """Maps to it("should identify TextNodeRenderable instances")."""
         node = TextNode("")
-        assert is_textnode_renderable(node) is True
-        assert is_textnode_renderable("not a node") is False
-        assert is_textnode_renderable(42) is False
-        assert is_textnode_renderable(None) is False
+        assert isinstance(node, TextNode) is True
+        assert isinstance("not a node", TextNode) is False
+        assert isinstance(42, TextNode) is False
 
 
 # ── add Method ────────────────────────────────────────────────────
@@ -568,47 +566,6 @@ class TestTextNodeGatherWithInheritedStyle:
         assert chunks[3].style.fg == RGBA(1.0, 1.0, 1.0, 1.0)
         assert chunks[3].style.bg == RGBA(0.0, 0.0, 1.0, 1.0)
         assert chunks[3].style.attributes == 5  # 1 | 4
-
-
-# ── Static Factory Methods ────────────────────────────────────────
-
-
-class TestTextNodeStaticFactoryMethods:
-    """Maps to describe("Static Factory Methods")."""
-
-    def test_should_create_textnode_from_string(self):
-        """Maps to it("should create TextNode from string using fromString")."""
-        node = TextNode.from_string("Hello World")
-        assert node._text == ""
-        children = node.get_children()
-        assert len(children) == 1
-        assert children[0] == "Hello World"
-
-        chunks = node.to_chunks()
-        assert len(chunks) == 1
-        assert chunks[0].text == "Hello World"
-
-    def test_should_create_textnode_from_nodes(self):
-        """Maps to it("should create TextNode from nodes using fromNodes")."""
-        child1 = TextNode("", fg=RGBA(1.0, 0.0, 0.0, 1.0))
-        child1.append("Red")
-        child2 = TextNode("", fg=RGBA(0.0, 1.0, 0.0, 1.0))
-        child2.append("Green")
-
-        node = TextNode.from_nodes([child1, "plain", child2])
-        children = node.get_children()
-        assert len(children) == 3
-        assert children[0] is child1
-        assert children[1] == "plain"
-        assert children[2] is child2
-
-        chunks = node.to_chunks()
-        assert len(chunks) == 3
-        assert chunks[0].text == "Red"
-        assert chunks[0].style.fg == RGBA(1.0, 0.0, 0.0, 1.0)
-        assert chunks[1].text == "plain"
-        assert chunks[2].text == "Green"
-        assert chunks[2].style.fg == RGBA(0.0, 1.0, 0.0, 1.0)
 
 
 # ── Utility Methods ───────────────────────────────────────────────

@@ -33,6 +33,7 @@ struct CommonOffsets {
     Py_ssize_t wrap_mode = -1;
     Py_ssize_t selection_start = -1;
     Py_ssize_t selection_end = -1;
+    Py_ssize_t selection_bg = -1;
     Py_ssize_t bold = -1;
     Py_ssize_t italic = -1;
     Py_ssize_t underline = -1;
@@ -74,6 +75,7 @@ bool parse_offsets(nb::dict mapping, CommonOffsets& o) {
     o.wrap_mode = get("_wrap_mode");
     o.selection_start = get("_selection_start");
     o.selection_end = get("_selection_end");
+    o.selection_bg = get("_selection_bg");
     o.bold = get("_bold");
     o.italic = get("_italic");
     o.underline = get("_underline");
@@ -201,9 +203,7 @@ const char* title_alignment_cstr(PyObject* value) {
 
 bool is_common_text_eligible(PyObject* node, const CommonOffsets& o) {
     if (!is_none_slot(node, o.render_before) || !is_none_slot(node, o.render_after)) return false;
-    PyObject* selection_start = read_slot(node, o.selection_start);
-    PyObject* selection_end = read_slot(node, o.selection_end);
-    if (selection_start != Py_None || selection_end != Py_None) return false;
+    // Selection is now handled in the C++ fast path — no longer a rejection reason.
     PyObject* wrap_mode = read_slot(node, o.wrap_mode);
     if (!wrap_mode || !PyUnicode_Check(wrap_mode)) return false;
     const bool wrap_none = PyUnicode_CompareWithASCIIString(wrap_mode, "none") == 0;
@@ -312,6 +312,28 @@ void render_text_node(PyObject* node, void* buffer, const CommonOffsets& o) {
     }
     x += static_cast<uint32_t>(pad_left);
     y += static_cast<uint32_t>(pad_top);
+
+    // --- Selection highlight (before text so fg draws on top) ---
+    PyObject* sel_start_obj = read_slot(node, o.selection_start);
+    PyObject* sel_end_obj = read_slot(node, o.selection_end);
+    if (sel_start_obj != Py_None && sel_end_obj != Py_None) {
+        Py_ssize_t sel_start = PyLong_AsSsize_t(sel_start_obj);
+        Py_ssize_t sel_end = PyLong_AsSsize_t(sel_end_obj);
+        if (!PyErr_Occurred() && sel_start >= 0 && sel_end > sel_start && sel_start < len) {
+            uint32_t sel_x = x + static_cast<uint32_t>(sel_start);
+            uint32_t sel_width = static_cast<uint32_t>(std::min(sel_end, len) - sel_start);
+
+            float sel_bg[4];
+            if (o.selection_bg >= 0 && extract_rgba(read_slot(node, o.selection_bg), sel_bg)) {
+                bufferFillRect(buffer, sel_x, y, sel_width, 1, sel_bg);
+            } else {
+                // Must match _SELECTION_BG in renderer/core.py
+                float default_sel[4] = {0.3f, 0.3f, 0.7f, 1.0f};
+                bufferFillRect(buffer, sel_x, y, sel_width, 1, default_sel);
+            }
+        }
+        if (PyErr_Occurred()) PyErr_Clear();
+    }
 
     float fg_color[4];
     float bg_color[4];

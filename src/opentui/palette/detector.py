@@ -11,6 +11,7 @@ real terminal is required.
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any, Protocol, runtime_checkable
 
 from .common import (
@@ -65,12 +66,8 @@ class TerminalPaletteDetector:
         self._active_listeners: list[Any] = []
         self._active_handles: list[asyncio.TimerHandle | asyncio.Task] = []
 
-    # -- write helper -------------------------------------------------------
-
     def _write_osc(self, osc: str) -> None:
         self._write_fn(osc)
-
-    # -- listener management ------------------------------------------------
 
     def _add_stdin_listener(self, listener: Any) -> None:
         """Add a data listener to stdin (supports both mock and real)."""
@@ -97,20 +94,18 @@ class TerminalPaletteDetector:
             self._remove_stdin_listener(listener)
         self._active_listeners.clear()
 
-    # -- detection methods --------------------------------------------------
+    def _is_tty(self) -> bool:
+        """Check if both stdout and stdin are TTYs."""
+        is_out = getattr(self._stdout, "is_tty", getattr(self._stdout, "isTTY", False))
+        is_in = getattr(self._stdin, "is_tty", getattr(self._stdin, "isTTY", False))
+        return bool(is_out and is_in)
 
     async def detect_osc_support(self, timeout_ms: float = 300) -> bool:
         """Send ``OSC 4;0;?`` and wait for a response.
 
         Returns True if the terminal responds, False on timeout.
         """
-        stdout = self._stdout
-        stdin = self._stdin
-
-        is_tty_out = getattr(stdout, "is_tty", getattr(stdout, "isTTY", False))
-        is_tty_in = getattr(stdin, "is_tty", getattr(stdin, "isTTY", False))
-
-        if not is_tty_out or not is_tty_in:
+        if not self._is_tty():
             return False
 
         loop = asyncio.get_running_loop()
@@ -135,145 +130,87 @@ class TerminalPaletteDetector:
         finally:
             self._remove_stdin_listener(on_data)
 
-    async def _query_palette(
+    async def _query_colors(
         self,
         indices: list[int],
+        regex: re.Pattern,
+        query_fmt: str,
         timeout_ms: float = 1200,
+    ) -> dict[int, str | None]:
+        """Query colours via OSC sequences.
+
+        Args:
+            indices: Colour indices to query.
+            regex: Compiled pattern matching terminal responses.
+            query_fmt: Format string for query (e.g. ``"\\x1b]4;{i};?\\x07"``).
+            timeout_ms: Timeout in milliseconds.
+        """
+        results: dict[int, str | None] = dict.fromkeys(indices)
+        if not self._is_tty():
+            return results
+
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[int, str | None]] = loop.create_future()
+        buf = ""
+        idle_handle: asyncio.TimerHandle | None = None
+
+        def _resolve() -> None:
+            nonlocal idle_handle
+            if idle_handle is not None:
+                idle_handle.cancel()
+                idle_handle = None
+            self._remove_stdin_listener(on_data)
+            if not future.done():
+                future.set_result(results)
+
+        def on_data(chunk: Any) -> None:
+            nonlocal buf, idle_handle
+            buf += str(chunk) if not isinstance(chunk, str) else chunk
+            matched = False
+
+            for m in regex.finditer(buf):
+                idx = int(m.group(1))
+                if idx in results:
+                    results[idx] = _to_hex(m.group(2), m.group(3), m.group(4), m.group(5))
+                    matched = True
+
+            if len(buf) > 8192:
+                buf = buf[-4096:]
+
+            if all(v is not None for v in results.values()):
+                _resolve()
+                return
+
+            if not matched:
+                return
+
+            if idle_handle is not None:
+                idle_handle.cancel()
+            idle_handle = loop.call_later(0.15, _resolve)
+
+        self._add_stdin_listener(on_data)
+        self._write_osc("".join(query_fmt.format(i=i) for i in indices))
+
+        try:
+            return await asyncio.wait_for(future, timeout=timeout_ms / 1000.0)
+        except (TimeoutError, asyncio.CancelledError):
+            return results
+        finally:
+            if idle_handle is not None:
+                idle_handle.cancel()
+            self._remove_stdin_listener(on_data)
+
+    async def _query_palette(
+        self, indices: list[int], timeout_ms: float = 1200,
     ) -> dict[int, str | None]:
         """Query indexed colours via OSC 4."""
-        stdout = self._stdout
-        stdin = self._stdin
+        return await self._query_colors(indices, _OSC4_RE, "\x1b]4;{i};?\x07", timeout_ms)
 
-        results: dict[int, str | None] = dict.fromkeys(indices)
-
-        is_tty_out = getattr(stdout, "is_tty", getattr(stdout, "isTTY", False))
-        is_tty_in = getattr(stdin, "is_tty", getattr(stdin, "isTTY", False))
-
-        if not is_tty_out or not is_tty_in:
-            return results
-
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[dict[int, str | None]] = loop.create_future()
-        buf = ""
-        idle_handle: asyncio.TimerHandle | None = None
-
-        def _resolve() -> None:
-            nonlocal idle_handle
-            if idle_handle is not None:
-                idle_handle.cancel()
-                idle_handle = None
-            self._remove_stdin_listener(on_data)
-            if not future.done():
-                future.set_result(results)
-
-        def on_data(chunk: Any) -> None:
-            nonlocal buf, idle_handle
-            buf += str(chunk) if not isinstance(chunk, str) else chunk
-
-            for m in _OSC4_RE.finditer(buf):
-                idx = int(m.group(1))
-                if idx in results:
-                    results[idx] = _to_hex(m.group(2), m.group(3), m.group(4), m.group(5))
-
-            # Trim buffer to prevent unbounded growth
-            if len(buf) > 8192:
-                buf = buf[-4096:]
-
-            # Check if all indices resolved
-            done_count = sum(1 for v in results.values() if v is not None)
-            if done_count == len(results):
-                _resolve()
-                return
-
-            # Reset idle timer on each data arrival
-            if idle_handle is not None:
-                idle_handle.cancel()
-            idle_handle = loop.call_later(0.15, _resolve)
-
-        self._add_stdin_listener(on_data)
-
-        queries = "".join(f"\x1b]4;{i};?\x07" for i in indices)
-        self._write_osc(queries)
-
-        try:
-            return await asyncio.wait_for(future, timeout=timeout_ms / 1000.0)
-        except (TimeoutError, asyncio.CancelledError):
-            return results
-        finally:
-            if idle_handle is not None:
-                idle_handle.cancel()
-            self._remove_stdin_listener(on_data)
-
-    async def _query_special_colors(
-        self,
-        timeout_ms: float = 1200,
-    ) -> dict[int, str | None]:
+    async def _query_special_colors(self, timeout_ms: float = 1200) -> dict[int, str | None]:
         """Query special colours via OSC 10-19."""
-        stdout = self._stdout
-        stdin = self._stdin
-
-        special_indices = [10, 11, 12, 13, 14, 15, 16, 17, 19]
-        results: dict[int, str | None] = dict.fromkeys(special_indices)
-
-        is_tty_out = getattr(stdout, "is_tty", getattr(stdout, "isTTY", False))
-        is_tty_in = getattr(stdin, "is_tty", getattr(stdin, "isTTY", False))
-
-        if not is_tty_out or not is_tty_in:
-            return results
-
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[dict[int, str | None]] = loop.create_future()
-        buf = ""
-        idle_handle: asyncio.TimerHandle | None = None
-
-        def _resolve() -> None:
-            nonlocal idle_handle
-            if idle_handle is not None:
-                idle_handle.cancel()
-                idle_handle = None
-            self._remove_stdin_listener(on_data)
-            if not future.done():
-                future.set_result(results)
-
-        def on_data(chunk: Any) -> None:
-            nonlocal buf, idle_handle
-            buf += str(chunk) if not isinstance(chunk, str) else chunk
-            updated = False
-
-            for m in _OSC_SPECIAL_RE.finditer(buf):
-                idx = int(m.group(1))
-                if idx in results:
-                    results[idx] = _to_hex(m.group(2), m.group(3), m.group(4), m.group(5))
-                    updated = True
-
-            if len(buf) > 8192:
-                buf = buf[-4096:]
-
-            done_count = sum(1 for v in results.values() if v is not None)
-            if done_count == len(results):
-                _resolve()
-                return
-
-            if not updated:
-                return
-
-            if idle_handle is not None:
-                idle_handle.cancel()
-            idle_handle = loop.call_later(0.15, _resolve)
-
-        self._add_stdin_listener(on_data)
-
-        queries = "".join(f"\x1b]{i};?\x07" for i in special_indices)
-        self._write_osc(queries)
-
-        try:
-            return await asyncio.wait_for(future, timeout=timeout_ms / 1000.0)
-        except (TimeoutError, asyncio.CancelledError):
-            return results
-        finally:
-            if idle_handle is not None:
-                idle_handle.cancel()
-            self._remove_stdin_listener(on_data)
+        return await self._query_colors(
+            [10, 11, 12, 13, 14, 15, 16, 17, 19], _OSC_SPECIAL_RE, "\x1b]{i};?\x07", timeout_ms,
+        )
 
     async def detect(
         self,

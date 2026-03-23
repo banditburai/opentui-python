@@ -10,10 +10,7 @@ import re
 from dataclasses import dataclass, field
 
 from .. import structs as s
-
-# ---------------------------------------------------------------------------
-# Dataclasses
-# ---------------------------------------------------------------------------
+from .line_types import LineColorConfig, LineSign
 
 
 @dataclass
@@ -35,18 +32,6 @@ class StructuredPatch:
 
 
 @dataclass
-class LineSign:
-    after: str = ""
-    after_color: s.RGBA | None = None
-
-
-@dataclass
-class LineColorConfig:
-    gutter: s.RGBA | None = None
-    content: s.RGBA | None = None
-
-
-@dataclass
 class LogicalLine:
     content: str = ""
     line_num: int | None = None
@@ -55,10 +40,6 @@ class LogicalLine:
     sign: LineSign | None = None
     line_type: str = "context"  # "context" | "add" | "remove" | "empty"
 
-
-# ---------------------------------------------------------------------------
-# Parser
-# ---------------------------------------------------------------------------
 
 _HUNK_HEADER_RE = re.compile(r"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@")
 

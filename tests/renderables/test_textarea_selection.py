@@ -1647,6 +1647,39 @@ class TestTextareaSelectionPreservedOnViewportScroll:
         editor.destroy()
         setup.destroy()
 
+    async def test_should_preserve_cross_renderable_selection_when_parent_scrollbox_scrolls(self):
+        """Cross-renderable selection should stay stable when a parent scrollbox moves the textarea."""
+        from opentui.components.scrollbox import ScrollBox
+
+        setup = await create_test_renderer(80, 24)
+        scrollbox = ScrollBox(width=40, height=6, scroll_y=True)
+        editor = await _make_with_renderer(
+            setup,
+            initial_value="\n".join(f"Line {i}" for i in range(30)),
+            width=40,
+            height=10,
+            selectable=True,
+        )
+        scrollbox.add(editor)
+        setup.renderer.root.add(scrollbox)
+        setup.render_frame()
+
+        setup.mock_mouse.drag(editor._x, editor._y, editor._x + 4, editor._y)
+        setup.render_frame()
+
+        selected_before = editor.get_selected_text()
+        assert selected_before
+
+        setup.mock_mouse.scroll(scrollbox.x + 1, scrollbox.y + 1, "down")
+        setup.render_frame()
+
+        selected_after = editor.get_selected_text()
+        assert selected_after == selected_before
+
+        editor.destroy()
+        scrollbox.destroy()
+        setup.destroy()
+
 
 class TestTextareaKeyboardSelectionWithViewportScrolling:
     """Maps to describe("Textarea - Selection Tests") > describe("Keyboard Selection with Viewport Scrolling")."""

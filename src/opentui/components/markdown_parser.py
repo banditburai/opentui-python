@@ -12,10 +12,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Token dataclass
-# ---------------------------------------------------------------------------
-
 
 @dataclass
 class MarkedToken:
@@ -32,11 +28,6 @@ class MarkedToken:
     rows: list[list[dict[str, Any]]] = field(default_factory=list)
 
 
-# ---------------------------------------------------------------------------
-# ParseState
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class ParseState:
     """Holds the result of a markdown parse: the source content and tokens."""
@@ -44,10 +35,6 @@ class ParseState:
     content: str
     tokens: list[MarkedToken]
 
-
-# ---------------------------------------------------------------------------
-# Lexer -- a minimal GFM tokenizer
-# ---------------------------------------------------------------------------
 
 # Regex patterns (order matters -- checked sequentially)
 _RE_SPACE = re.compile(r"^\n+")
@@ -231,11 +218,6 @@ def lex(src: str) -> list[MarkedToken]:
 
 class LexError(Exception):
     """Raised when the lexer cannot process input."""
-
-
-# ---------------------------------------------------------------------------
-# Incremental parser
-# ---------------------------------------------------------------------------
 
 
 def parse_markdown_incremental(

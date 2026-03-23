@@ -11,12 +11,13 @@ import types
 from collections import defaultdict, deque
 from typing import TYPE_CHECKING
 
-from .components.base import _SIMPLE_DEFAULTS
+from .components._renderable_base import _sync_yoga_children
+from .components._renderable_constants import _SIMPLE_DEFAULTS
 from .components.control_flow import For, Portal
 from .components.scrollbox import ScrollBox
 
 if TYPE_CHECKING:
-    from .components.base import BaseRenderable
+    from .components._renderable_base import BaseRenderable
 
 _SENTINEL = object()
 
@@ -119,6 +120,10 @@ _SKIP_ATTRS: frozenset[str] = frozenset(
         # ErrorBoundary internal state
         "_error",
         "_has_error",
+        # Cross-renderable selection state (preserved across reconciliation;
+        # synced to _selection_start/_selection_end via Text.mark_dirty)
+        "_sel_start",
+        "_sel_end",
     }
 )
 
@@ -292,6 +297,9 @@ def reconcile(
     - Unmatched old: destroy
     - Unmatched new: insert as-is
     """
+    if not old_children and not new_children:
+        return
+
     if _can_patch_positionally(old_children, new_children):
         result = [
             _reconcile_matched_child(parent, matched, new_child)
@@ -299,7 +307,7 @@ def reconcile(
         ]
         parent._children = result
         parent._children_tuple = None
-        parent._subtree_dirty = True
+        parent.mark_dirty()
         return
 
     old_by_key: dict[tuple[type, str | int | None], BaseRenderable] = {}
@@ -339,7 +347,7 @@ def reconcile(
 
     parent._children = result
     parent._children_tuple = None
-    parent._subtree_dirty = True
+    parent.mark_dirty()
 
     # Sync yoga tree BEFORE destroying unmatched old nodes.
     #
@@ -355,14 +363,7 @@ def reconcile(
     )
 
     if parent._yoga_node is not None and yoga_structure_changed:
-        yoga_children = []
-        for child in result:
-            if child._yoga_node is not None:
-                yoga_owner = child._yoga_node.owner
-                if yoga_owner is not None and yoga_owner is not parent._yoga_node:
-                    yoga_owner.remove_child(child._yoga_node)
-                yoga_children.append(child._yoga_node)
-        parent._yoga_node.set_children(yoga_children)
+        _sync_yoga_children(parent._yoga_node, result)
 
     # Now safe to destroy unmatched old nodes — their yoga nodes are no
     # longer referenced by the parent's yoga tree.

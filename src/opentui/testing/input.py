@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import re as _re
+
 from .. import hooks
 from ..events import KeyEvent, Keys, MouseButton, MouseEvent
 
@@ -11,18 +13,11 @@ if TYPE_CHECKING:
     from . import TestSetup
 
 
-# ---------------------------------------------------------------------------
-# MockInput
-# ---------------------------------------------------------------------------
-
-
 class MockInput:
     """Simulate keyboard / paste input for tests."""
 
     def __init__(self, setup: TestSetup) -> None:
         self._setup = setup
-
-    # -- core dispatch -------------------------------------------------------
 
     def press_key(
         self,
@@ -56,8 +51,6 @@ class MockInput:
         for ch in text:
             self.press_key(ch)
 
-    # -- convenience ---------------------------------------------------------
-
     def press_enter(self) -> None:
         self.press_key(Keys.RETURN)
 
@@ -81,8 +74,6 @@ class MockInput:
     def press_ctrl_c(self) -> None:
         self.press_key("c", ctrl=True)
 
-    # -- paste ---------------------------------------------------------------
-
     def paste_text(self, text: str) -> None:
         """Dispatch text to paste handlers."""
         from ..attachments import normalize_paste_payload
@@ -103,11 +94,6 @@ class MockInput:
         self._setup._stdin_bridge.emit("data", raw)
 
 
-# ---------------------------------------------------------------------------
-# MockMouse
-# ---------------------------------------------------------------------------
-
-
 class MockMouse:
     """Simulate mouse input for tests."""
 
@@ -117,8 +103,6 @@ class MockMouse:
         self._y: int = 0
         self._pressed_buttons: set[int] = set()
 
-    # -- properties ----------------------------------------------------------
-
     @property
     def position(self) -> tuple[int, int]:
         return self._x, self._y
@@ -127,8 +111,6 @@ class MockMouse:
     def pressed_buttons(self) -> set[int]:
         return set(self._pressed_buttons)
 
-    # -- dispatch helpers ----------------------------------------------------
-
     def _dispatch_mouse(self, event: MouseEvent) -> None:
         """Dispatch *event* through the renderer's mouse dispatch.
 
@@ -136,48 +118,6 @@ class MockMouse:
         tracking (over/out) and capture logic work the same as production.
         """
         self._setup.renderer._dispatch_mouse_event(event)
-
-    def _dispatch_to_tree(
-        self, renderable: Any, event: MouseEvent, scroll_adjust_x: int = 0, scroll_adjust_y: int = 0
-    ) -> None:
-        """Walk children in reverse order (front-most first), depth-first.
-
-        Accumulates scroll offsets from ancestor ScrollBoxes so that
-        ``contains_point`` checks use content-space coordinates.
-        """
-        if event.propagation_stopped:
-            return
-
-        children = list(renderable.get_children()) if hasattr(renderable, "get_children") else []
-
-        # Accumulate scroll offset for children
-        child_sx = scroll_adjust_x
-        child_sy = scroll_adjust_y
-        if getattr(renderable, "_scroll_y", False):
-            fn = getattr(renderable, "_scroll_offset_y_fn", None)
-            child_sy += int(fn()) if fn else int(getattr(renderable, "_scroll_offset_y", 0))
-        if getattr(renderable, "_scroll_x", False):
-            child_sx += int(getattr(renderable, "_scroll_offset_x", 0))
-
-        for child in reversed(children):
-            self._dispatch_to_tree(child, event, child_sx, child_sy)
-            if event.propagation_stopped:
-                return
-
-        handler_map = {
-            "down": "_on_mouse_down",
-            "up": "_on_mouse_up",
-            "move": "_on_mouse_move",
-            "drag": "_on_mouse_drag",
-            "scroll": "_on_mouse_scroll",
-        }
-        attr = handler_map.get(event.type)
-        if attr:
-            handler = getattr(renderable, attr, None)
-            if handler is not None:
-                handler(event)
-
-    # -- public API ----------------------------------------------------------
 
     def click(
         self,
@@ -273,11 +213,6 @@ class MockMouse:
         self._dispatch_mouse(event)
 
 
-# ---------------------------------------------------------------------------
-# KeyCodes — terminal escape codes for common keys
-# ---------------------------------------------------------------------------
-
-
 class KeyCodes:
     """Terminal escape codes for common keys."""
 
@@ -318,10 +253,6 @@ _KEY_CODES_MAP: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Kitty keyboard protocol key mappings
-# ---------------------------------------------------------------------------
-
 _KITTY_KEY_CODE_MAP: dict[str, int] = {
     "escape": 27,
     "tab": 9,
@@ -352,6 +283,29 @@ _KITTY_KEY_CODE_MAP: dict[str, int] = {
 }
 
 
+def _build_mod_mask(
+    *,
+    shift: bool = False,
+    ctrl: bool = False,
+    meta: bool = False,
+    super_mod: bool = False,
+    hyper: bool = False,
+) -> int:
+    """Build a modifier bitmask from individual modifier flags."""
+    mask = 0
+    if shift:
+        mask |= 0x01
+    if meta:
+        mask |= 0x02
+    if ctrl:
+        mask |= 0x04
+    if super_mod:
+        mask |= 0x08
+    if hyper:
+        mask |= 0x10
+    return mask
+
+
 def _encode_kitty_sequence(
     codepoint: int,
     *,
@@ -362,22 +316,11 @@ def _encode_kitty_sequence(
     hyper: bool = False,
 ) -> str:
     """Encode a key as a kitty keyboard protocol CSI-u sequence."""
-    mod_mask = 0
-    if shift:
-        mod_mask |= 1
-    if meta:
-        mod_mask |= 2
-    if ctrl:
-        mod_mask |= 4
-    if super_mod:
-        mod_mask |= 8
-    if hyper:
-        mod_mask |= 16
+    mod_mask = _build_mod_mask(shift=shift, ctrl=ctrl, meta=meta, super_mod=super_mod, hyper=hyper)
 
     if mod_mask == 0:
         return f"\x1b[{codepoint}u"
-    else:
-        return f"\x1b[{codepoint};{mod_mask + 1}u"
+    return f"\x1b[{codepoint};{mod_mask + 1}u"
 
 
 def _encode_modify_other_keys_sequence(
@@ -390,17 +333,7 @@ def _encode_modify_other_keys_sequence(
     hyper: bool = False,
 ) -> str:
     """Encode a key as a modifyOtherKeys CSI 27;modifier;code~ sequence."""
-    mod_mask = 0
-    if shift:
-        mod_mask |= 1
-    if meta:
-        mod_mask |= 2
-    if ctrl:
-        mod_mask |= 4
-    if super_mod:
-        mod_mask |= 8
-    if hyper:
-        mod_mask |= 16
+    mod_mask = _build_mod_mask(shift=shift, ctrl=ctrl, meta=meta, super_mod=super_mod, hyper=hyper)
 
     if mod_mask == 0:
         return chr(char_code)
@@ -417,11 +350,6 @@ def _resolve_key_input(key: str) -> tuple[str, str | None]:
     if key in _KEY_CODES_MAP:
         return _KEY_CODES_MAP[key], key.lower()
     return key, None
-
-
-# ---------------------------------------------------------------------------
-# MockRenderer — stdin-level mock for create_mock_keys
-# ---------------------------------------------------------------------------
 
 
 class MockRenderer:
@@ -459,11 +387,6 @@ class MockRenderer:
         return "".join(self.emitted_data)
 
 
-# ---------------------------------------------------------------------------
-# MockKeys — simulate raw terminal key sequences for tests
-# ---------------------------------------------------------------------------
-
-
 class MockKeys:
     """Return type of :func:`create_mock_keys`.
 
@@ -477,8 +400,6 @@ class MockKeys:
         self._renderer = renderer
         self._kitty = kitty_keyboard
         self._other_mod = other_modifiers_mode and not kitty_keyboard
-
-    # -- internal helpers ---------------------------------------------------
 
     _VALUE_TO_KEY_NAME: dict[str, str] = {
         "\b": "backspace",
@@ -522,8 +443,6 @@ class MockKeys:
     def _emit(self, data: str) -> None:
         self._renderer.stdin.emit("data", data)
 
-    # -- public API ---------------------------------------------------------
-
     def press_keys(self, keys: list[str], delay_ms: float = 0) -> None:
         """Press multiple keys in sequence.
 
@@ -553,7 +472,6 @@ class MockKeys:
         super_mod = (modifiers or {}).get("super", False)
         hyper = (modifiers or {}).get("hyper", False)
 
-        # --- Kitty keyboard protocol mode ---
         if self._kitty:
             key_value, key_name = _resolve_key_input(key)
 
@@ -591,7 +509,6 @@ class MockKeys:
 
             # Fall through to regular mode for unknown keys
 
-        # --- modifyOtherKeys mode ---
         if self._other_mod and modifiers:
             key_value, key_name = _resolve_key_input(key)
 
@@ -615,20 +532,12 @@ class MockKeys:
 
             # Fall through to regular mode for arrow keys etc.
 
-        # --- Regular mode ---
         key_code, _ = _resolve_key_input(key)
 
         if modifiers:
-            import re as _re
-
             if key_code.startswith("\x1b[") and len(key_code) > 2:
-                modifier_val = (
-                    1
-                    + (1 if shift else 0)
-                    + (2 if meta else 0)
-                    + (4 if ctrl else 0)
-                    + (8 if super_mod else 0)
-                    + (16 if hyper else 0)
+                modifier_val = 1 + _build_mod_mask(
+                    shift=shift, ctrl=ctrl, meta=meta, super_mod=super_mod, hyper=hyper
                 )
                 if modifier_val > 1:
                     tilde_match = _re.match(r"^\x1b\[(\d+)~$", key_code)
@@ -641,13 +550,8 @@ class MockKeys:
                 char = key_code
 
                 if char == "\b" and (ctrl or super_mod or hyper):
-                    modifier_val = (
-                        1
-                        + (1 if shift else 0)
-                        + (2 if meta else 0)
-                        + (4 if ctrl else 0)
-                        + (8 if super_mod else 0)
-                        + (16 if hyper else 0)
+                    modifier_val = 1 + _build_mod_mask(
+                        shift=shift, ctrl=ctrl, meta=meta, super_mod=super_mod, hyper=hyper
                     )
                     key_code = f"\x1b[27;{modifier_val};127~"
                 elif ctrl:

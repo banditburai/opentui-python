@@ -486,3 +486,112 @@ class TestConvertGlobalToLocalSelection:
         assert result.anchor_y == 20
         assert result.focus_x == 20
         assert result.focus_y == 20
+
+
+# ===========================================================================
+# Selection — _extract_from_buffer fallback
+# ===========================================================================
+
+
+class _FakeBuffer:
+    """Minimal buffer stub for _extract_from_buffer tests."""
+
+    def __init__(self, lines: list[str], width: int | None = None) -> None:
+        self._lines = lines
+        self.height = len(lines)
+        self.width = width if width is not None else (max(len(l) for l in lines) if lines else 0)
+
+    def get_char_code(self, x: int, y: int) -> int:
+        if 0 <= y < len(self._lines) and 0 <= x < len(self._lines[y]):
+            return ord(self._lines[y][x])
+        return 0  # empty cell
+
+
+class TestSelectionExtractFromBuffer:
+    """Tests for Selection._extract_from_buffer() fallback path."""
+
+    def test_single_row_extraction(self):
+        """Select a single row, columns 2-6."""
+        buf = _FakeBuffer(["Hello World!"])
+        r = _FakeRenderable(x=0, y=0)
+        sel = Selection(r, {"x": 2, "y": 0}, {"x": 6, "y": 0})
+        assert sel.get_selected_text(buffer=buf) == "llo W"
+
+    def test_multi_row_extraction(self):
+        """Select across three rows."""
+        buf = _FakeBuffer(["AAAA", "BBBB", "CCCC"])
+        r = _FakeRenderable(x=0, y=0)
+        sel = Selection(r, {"x": 1, "y": 0}, {"x": 2, "y": 2})
+        result = sel.get_selected_text(buffer=buf)
+        assert result == "AAA\nBBBB\nCCC"
+
+    def test_empty_cells_become_spaces(self):
+        """Cells with char code 0 are rendered as spaces."""
+        buf = _FakeBuffer(["AB", "C"])  # row 1 only 1 char, col 1 returns 0
+        buf.width = 3  # wider than content
+        r = _FakeRenderable(x=0, y=0)
+        sel = Selection(r, {"x": 0, "y": 0}, {"x": 2, "y": 1})
+        result = sel.get_selected_text(buffer=buf)
+        # Row 0: "AB " (col 2 is empty → space), rstripped → "AB"
+        # Row 1: "C  " (cols 1-2 empty → spaces), rstripped → "C"
+        assert result == "AB\nC"
+
+    def test_trailing_whitespace_stripped(self):
+        """Trailing spaces on each line are stripped."""
+        buf = _FakeBuffer(["hi   ", "yo   "])
+        r = _FakeRenderable(x=0, y=0)
+        sel = Selection(r, {"x": 0, "y": 0}, {"x": 4, "y": 1})
+        result = sel.get_selected_text(buffer=buf)
+        assert result == "hi\nyo"
+
+    def test_trailing_empty_lines_stripped(self):
+        """Trailing blank rows are removed."""
+        buf = _FakeBuffer(["text", "", ""])
+        r = _FakeRenderable(x=0, y=0)
+        sel = Selection(r, {"x": 0, "y": 0}, {"x": 3, "y": 2})
+        result = sel.get_selected_text(buffer=buf)
+        assert result == "text"
+
+    def test_reversed_anchor_focus(self):
+        """When focus is before anchor (reverse drag), extraction still works."""
+        buf = _FakeBuffer(["Hello World!"])
+        r = _FakeRenderable(x=0, y=0)
+        # Anchor at col 8, focus at col 2 (dragged backwards)
+        sel = Selection(r, {"x": 8, "y": 0}, {"x": 2, "y": 0})
+        sel.focus = {"x": 2, "y": 0}
+        assert sel.get_selected_text(buffer=buf) == "llo Wor"
+
+    def test_component_text_takes_priority_over_buffer(self):
+        """When component-level text is available, buffer is not used."""
+        buf = _FakeBuffer(["SHOULD NOT SEE THIS"])
+        r = _FakeRenderable(x=0, y=0)
+        sel = Selection(r, {"x": 0, "y": 0}, {"x": 10, "y": 0})
+        sel.update_selected_renderables(
+            [_FakeRenderable(x=0, y=0, text="component text")]
+        )
+        assert sel.get_selected_text(buffer=buf) == "component text"
+
+    def test_buffer_fallback_when_no_component_text(self):
+        """When selected renderables return empty text, buffer is used."""
+        buf = _FakeBuffer(["buffer text here"])
+        r = _FakeRenderable(x=0, y=0)
+        sel = Selection(r, {"x": 0, "y": 0}, {"x": 10, "y": 0})
+        sel.update_selected_renderables(
+            [_FakeRenderable(x=0, y=0, text="")]  # empty component text
+        )
+        assert sel.get_selected_text(buffer=buf) == "buffer text"
+
+    def test_no_buffer_no_component_returns_empty(self):
+        """Without buffer and with no component text, returns empty string."""
+        r = _FakeRenderable(x=0, y=0)
+        sel = Selection(r, {"x": 0, "y": 0}, {"x": 10, "y": 0})
+        assert sel.get_selected_text() == ""
+
+    def test_selection_clamped_to_buffer_bounds(self):
+        """Selection extending past buffer edges is clamped."""
+        buf = _FakeBuffer(["AB", "CD"])
+        r = _FakeRenderable(x=0, y=0)
+        sel = Selection(r, {"x": 0, "y": 0}, {"x": 99, "y": 99})
+        sel.focus = {"x": 99, "y": 99}
+        result = sel.get_selected_text(buffer=buf)
+        assert result == "AB\nCD"

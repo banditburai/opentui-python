@@ -32,10 +32,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# Category bitmask constants
-# ---------------------------------------------------------------------------
-
 RESIZE = 1 << 0  # Terminal resize events
 LAYOUT = 1 << 1  # Yoga layout application + zero-size warnings
 VISIBILITY = 1 << 2  # _visible transitions, Show/Switch/For branch changes
@@ -50,10 +46,7 @@ _CATEGORY_MAP: dict[str, int] = {
     "all": ALL,
 }
 
-# ---------------------------------------------------------------------------
-# Module-level fast-check (hot path is `if _enabled:` → ~1ns when off)
-# ---------------------------------------------------------------------------
-
+# Hot path is `if _enabled:` → ~1ns when off
 _enabled: int = 0
 _log = logging.getLogger("opentui.diagnostics")
 _log_file_path: str | None = None
@@ -140,11 +133,6 @@ def get_log_file_path() -> str | None:
     return _log_file_path
 
 
-# ---------------------------------------------------------------------------
-# Diagnostic log helpers (each guards on its own category bit)
-# ---------------------------------------------------------------------------
-
-
 def _node_label(node: Any, depth: int = 2) -> str:
     """Return a human-readable label like ``Box > Row#header > Text``."""
     parts: list[str] = []
@@ -198,14 +186,14 @@ def log_layout_facts(facts: list[Any] | None) -> None:
         # Check min constraint violations (only for numeric min values)
         min_w = getattr(node, "_min_width", None)
         min_h = getattr(node, "_min_height", None)
-        if isinstance(min_w, (int, float)) and 0 < new_w < min_w:
+        if isinstance(min_w, int | float) and 0 < new_w < min_w:
             _log.warning(
                 "layout: %s min_width=%s but got width=%d (constraint overridden by parent)",
                 label,
                 min_w,
                 new_w,
             )
-        if isinstance(min_h, (int, float)) and 0 < new_h < min_h:
+        if isinstance(min_h, int | float) and 0 < new_h < min_h:
             _log.warning(
                 "layout: %s min_height=%s but got height=%d (constraint overridden by parent)",
                 label,
@@ -267,8 +255,15 @@ def log_dirty(node: Any, dirty_type: str) -> None:
     _log.debug("dirty: %s %s", _node_label(node), dirty_type)
 
 
-# ---------------------------------------------------------------------------
-# Auto-init from environment at import time
-# ---------------------------------------------------------------------------
+__all__ = [
+    "ALL",
+    "DIRTY",
+    "LAYOUT",
+    "RESIZE",
+    "VISIBILITY",
+    "disable_diagnostics",
+    "enable_diagnostics",
+    "get_log_file_path",
+]
 
 _init_from_env()

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
-from ..colors import MUTED_GRAY
+from ..structs import MUTED_GRAY
 from ..events import KeyEvent
 from ..hooks import use_cursor, use_cursor_style
 from ..text_utils import measure_text, wrap_text

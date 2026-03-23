@@ -253,10 +253,10 @@ class ErrorBoundary(Renderable):
         self._try_render()
 
     def _try_render(self) -> None:
-        from .control_flow import _normalize_render_result
+        from ._control_flow_region import normalize_render_result
 
         try:
-            children = _normalize_render_result(self._render_fn())
+            children = normalize_render_result(self._render_fn())
             self._has_error = False
             self._error = None
             for child in children:
@@ -267,13 +267,13 @@ class ErrorBoundary(Renderable):
             self._show_fallback(e)
 
     def _show_fallback(self, error: Exception) -> None:
-        from .control_flow import _normalize_render_result
+        from ._control_flow_region import normalize_render_result
 
         for c in list(self._children):
             self.remove(c)
             c.destroy_recursively()
         try:
-            for c in _normalize_render_result(self._fallback_fn(error, self._reset)):
+            for c in normalize_render_result(self._fallback_fn(error, self._reset)):
                 self.add(c)
         except Exception:
             pass  # Keep boundary alive but empty if fallback itself crashes
@@ -368,7 +368,7 @@ class Suspense(Renderable):
         self._update_children()
 
     def _update_children(self) -> None:
-        from .control_flow import _normalize_render_result
+        from ._control_flow_region import normalize_render_result
 
         child_node_ids = {id(n) for n in self._child_nodes}
         for c in list(self._children):
@@ -385,7 +385,7 @@ class Suspense(Renderable):
                 else:
                     fb = self._fallback_fn
                 if fb is not None:
-                    for c in _normalize_render_result(fb):
+                    for c in normalize_render_result(fb):
                         self.add(c)
         else:
             for child in self._child_nodes:
@@ -411,8 +411,5 @@ __all__ = [
     "ErrorBoundary",
     "Match",
     "Portal",
-    "_subtree_contains_portal",  # internal: used by control_flow.py
     "Suspense",
-    "_register_suspense_resource",
-    "_suspense_stack",
 ]

@@ -7,13 +7,34 @@ from typing import TYPE_CHECKING, Any
 import yoga
 
 from .. import structs as s
-from ..colors import MUTED_GRAY, SELECTED_TAB_BG
+from ..structs import MUTED_GRAY, SELECTED_TAB_BG
 from .base import Renderable
 
 _MEASURE_AT_MOST = yoga.MeasureMode.AtMost
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
+
+
+def _text_measure_func(renderable, content_fn, extra_width_fn=None):
+    """Create a yoga measure function for text-based renderables.
+
+    *content_fn* returns (lines, num_lines, max_line_width).
+    *extra_width_fn* returns additional columns to add (e.g. gutter width).
+    """
+
+    def measure(yoga_node, width, width_mode, height, height_mode):
+        h_pad = renderable._padding_left + renderable._padding_right
+        v_pad = renderable._padding_top + renderable._padding_bottom
+        lines, num_lines, max_w = content_fn()
+        content_w = max_w + (extra_width_fn() if extra_width_fn else 0)
+        measured_w = content_w + h_pad
+        measured_h = num_lines + v_pad
+        if width_mode == _MEASURE_AT_MOST:
+            measured_w = min(width, measured_w)
+        return (measured_w, measured_h)
+
+    renderable._yoga_node.set_measure_func(measure)
 
 
 class Code(Renderable):
@@ -30,7 +51,6 @@ class Code(Renderable):
         self,
         content: str = "",
         filetype: str = "plaintext",
-        tree_sitter_client: Any = None,
         show_line_numbers: bool = True,
         **kwargs,
     ):
@@ -54,26 +74,11 @@ class Code(Renderable):
             self._yoga_node.mark_dirty()
 
     def _setup_measure_func(self) -> None:
-        def measure(yoga_node, width, width_mode, height, height_mode):
-            total_padding = self._padding_left + self._padding_right
-            vertical_padding = self._padding_top + self._padding_bottom
-
+        def _content():
             lines = self._content.split("\n") if self._content else []
-            num_lines = len(lines)
+            return lines, len(lines), max((len(l) for l in lines), default=0)
 
-            gutter = 4 if self._show_line_numbers else 0
-            max_line_width = max((len(line) for line in lines), default=0)
-            content_w = max_line_width + gutter
-
-            measured_w = content_w + total_padding
-            measured_h = num_lines + vertical_padding
-
-            if width_mode == _MEASURE_AT_MOST:
-                measured_w = min(width, measured_w)
-
-            return (measured_w, measured_h)
-
-        self._yoga_node.set_measure_func(measure)
+        _text_measure_func(self, _content, lambda: 4 if self._show_line_numbers else 0)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         if not self._visible or not self._content:
@@ -113,7 +118,6 @@ class Diff(Renderable):
         diff = Diff(
             old_text="line 1\\nline 2",
             new_text="line 1\\nline 3",
-            mode="unified"
         )
     """
 
@@ -121,40 +125,28 @@ class Diff(Renderable):
         self,
         old_text: str = "",
         new_text: str = "",
-        mode: str = "unified",  # "unified" or "split"
+        *,
+        mode: str = "unified",  # noqa: ARG002 — accepted for API compat
         **kwargs,
     ):
         super().__init__(**kwargs)
 
         self._old_text = old_text
         self._new_text = new_text
-        self._mode = mode
 
         self._setup_measure_func()
 
     def _setup_measure_func(self) -> None:
-        def measure(yoga_node, width, width_mode, height, height_mode):
-            total_padding = self._padding_left + self._padding_right
-            vertical_padding = self._padding_top + self._padding_bottom
-
-            old_lines = self._old_text.split("\n") if self._old_text else []
-            new_lines = self._new_text.split("\n") if self._new_text else []
-            num_lines = len(old_lines) + len(new_lines)
-            max_line_width = max(
-                max((len(line) for line in old_lines), default=0),
-                max((len(line) for line in new_lines), default=0),
+        def _content():
+            old = self._old_text.split("\n") if self._old_text else []
+            new = self._new_text.split("\n") if self._new_text else []
+            max_w = max(
+                max((len(l) for l in old), default=0),
+                max((len(l) for l in new), default=0),
             )
-            content_w = max_line_width + 2
+            return None, len(old) + len(new), max_w
 
-            measured_w = content_w + total_padding
-            measured_h = num_lines + vertical_padding
-
-            if width_mode == _MEASURE_AT_MOST:
-                measured_w = min(width, measured_w)
-
-            return (measured_w, measured_h)
-
-        self._yoga_node.set_measure_func(measure)
+        _text_measure_func(self, _content, lambda: 2)
 
     def _compute_diff(self) -> list[tuple[str, str, int]]:
         import difflib
@@ -227,23 +219,11 @@ class Markdown(Renderable):
         self._setup_measure_func()
 
     def _setup_measure_func(self) -> None:
-        def measure(yoga_node, width, width_mode, height, height_mode):
-            total_padding = self._padding_left + self._padding_right
-            vertical_padding = self._padding_top + self._padding_bottom
-
+        def _content():
             lines = self._content.split("\n") if self._content else []
-            num_lines = len(lines)
-            max_line_width = max((len(line) for line in lines), default=0)
+            return lines, len(lines), max((len(l) for l in lines), default=0)
 
-            measured_w = max_line_width + total_padding
-            measured_h = num_lines + vertical_padding
-
-            if width_mode == _MEASURE_AT_MOST:
-                measured_w = min(width, measured_w)
-
-            return (measured_w, measured_h)
-
-        self._yoga_node.set_measure_func(measure)
+        _text_measure_func(self, _content)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         if not self._visible or not self._content:
@@ -290,24 +270,11 @@ class LineNumber(Renderable):
         self._setup_measure_func()
 
     def _setup_measure_func(self) -> None:
-        def measure(yoga_node, width, width_mode, height, height_mode):
-            total_padding = self._padding_left + self._padding_right
-            vertical_padding = self._padding_top + self._padding_bottom
-
+        def _content():
             lines = self._content.split("\n") if self._content else []
-            num_lines = len(lines)
-            max_line_width = max((len(line) for line in lines), default=0)
-            content_w = max_line_width + self._gutter_width + 1
+            return lines, len(lines), max((len(l) for l in lines), default=0)
 
-            measured_w = content_w + total_padding
-            measured_h = num_lines + vertical_padding
-
-            if width_mode == _MEASURE_AT_MOST:
-                measured_w = min(width, measured_w)
-
-            return (measured_w, measured_h)
-
-        self._yoga_node.set_measure_func(measure)
+        _text_measure_func(self, _content, lambda: self._gutter_width + 1)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         if not self._visible or not self._content:
@@ -329,33 +296,6 @@ class LineNumber(Renderable):
             content_x = x + self._gutter_width + 1
             display_line = line[: width - self._gutter_width - 1]
             buffer.draw_text(display_line, content_x, line_y, self._fg, self._background_color)
-
-
-class AsciiFont(Renderable):
-    """ASCII art text renderer.
-
-    Usage:
-        ascii = AsciiFont("Hello", font="doom")
-    """
-
-    def __init__(
-        self,
-        content: str = "",
-        font: str = "standard",
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-
-        self._content = content
-
-    def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        if not self._visible or not self._content:
-            return
-
-        x = self._x + self._padding_left
-        y = self._y + self._padding_top
-
-        buffer.draw_text(self._content, x, y, self._fg, self._background_color)
 
 
 class TabSelect(Renderable):
@@ -564,7 +504,6 @@ __all__ = [
     "Diff",
     "Markdown",
     "LineNumber",
-    "AsciiFont",
     "TabSelect",
     "Slider",
     "TextTable",

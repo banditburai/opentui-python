@@ -11,35 +11,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from .. import structs as s
-from ..colors import MUTED_GRAY
+from ..structs import MUTED_GRAY
 from ..structs import display_width as _string_width
 from .base import Renderable
+from .line_types import LineColorConfig, LineSign
 from .raster_cache import RasterCache
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
-
-# ---------------------------------------------------------------------------
-# Dataclasses & protocols
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class LineSign:
-    """Decorative marker for a line number gutter."""
-
-    before: str | None = None
-    before_color: s.RGBA | str | None = None
-    after: str | None = None
-    after_color: s.RGBA | str | None = None
-
-
-@dataclass
-class LineColorConfig:
-    """Separate gutter and content background colors for a line."""
-
-    gutter: s.RGBA | str | None = None
-    content: s.RGBA | str | None = None
 
 
 @dataclass
@@ -51,6 +30,17 @@ class LineInfo:
     line_width_cols_max: int = 0
     line_sources: list[int] = field(default_factory=list)
     line_wraps: list[int] = field(default_factory=list)
+
+    @classmethod
+    def from_native_dict(cls, info: dict) -> "LineInfo":
+        """Create from native dict, handling both snake_case and camelCase keys."""
+        return cls(
+            line_start_cols=info.get("start_cols", info.get("lineStartCols", [])),
+            line_width_cols=info.get("width_cols", info.get("lineWidthCols", [])),
+            line_width_cols_max=info.get("width_cols_max", info.get("lineWidthColsMax", 0)),
+            line_sources=info.get("sources", info.get("lineSources", [])),
+            line_wraps=info.get("wraps", info.get("lineWraps", [])),
+        )
 
 
 @runtime_checkable
@@ -70,20 +60,11 @@ class LineInfoProvider(Protocol):
     def scroll_y(self) -> int: ...
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 _parse_color = s.parse_color_opt
 
 
 def _darken_color(color: s.RGBA) -> s.RGBA:
     return s.RGBA(color.r * 0.8, color.g * 0.8, color.b * 0.8, color.a)
-
-
-# ---------------------------------------------------------------------------
-# GutterRenderable
-# ---------------------------------------------------------------------------
 
 
 class GutterRenderable(Renderable):

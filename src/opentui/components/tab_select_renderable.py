@@ -71,7 +71,6 @@ class TabSelectRenderable(Renderable):
         "_key_bindings",
         "_key_alias_map",
         "_key_map",
-        "_is_destroyed",
     )
 
     def __init__(
@@ -109,8 +108,6 @@ class TabSelectRenderable(Renderable):
         self._key_bindings: list[KeyBinding] = list(key_bindings) if key_bindings else []
         merged = merge_key_bindings(_DEFAULT_TAB_SELECT_BINDINGS, self._key_bindings)
         self._key_map = build_key_bindings_map(merged, self._key_alias_map)
-
-        self._is_destroyed = False
 
     @property
     def options(self) -> list[TabSelectOption]:
@@ -261,7 +258,6 @@ class TabSelectRenderable(Renderable):
             return
 
     def destroy(self) -> None:
-        self._is_destroyed = True
         super().destroy()
 
 

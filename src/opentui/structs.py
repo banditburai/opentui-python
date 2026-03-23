@@ -207,19 +207,6 @@ def get_border_chars(style: str) -> dict[str, str]:
     return BORDER_CHARS.get(style, BORDER_CHARS["single"])
 
 
-def get_border_chars_tuple(style: str) -> tuple[str, str, str, str, str, str]:
-    """Get border chars as (tl, tr, bl, br, horizontal, vertical) tuple."""
-    c = get_border_chars(style)
-    return (
-        c["top_left"],
-        c["top_right"],
-        c["bottom_left"],
-        c["bottom_right"],
-        c["horizontal"],
-        c["vertical"],
-    )
-
-
 def is_valid_border_style(value: Any) -> bool:
     """Check if value is a valid border style string."""
     return isinstance(value, str) and value in VALID_BORDER_STYLES
@@ -276,6 +263,14 @@ def display_width(text: str) -> int:
     return w
 
 
+# Named color constants
+MUTED_GRAY = RGBA(0.5, 0.5, 0.5, 1.0)
+MUTED_GRAY_HEX = "#888888"
+FOCUS_RING_BLUE = RGBA(0.3, 0.5, 1.0, 1.0)
+SELECTION_BG = RGBA(0.3, 0.3, 0.7, 1.0)
+SELECTED_TAB_BG = RGBA(0.2, 0.2, 0.4, 1.0)
+
+
 __all__ = [
     "RGBA",
     "ColorInput",
@@ -286,7 +281,6 @@ __all__ = [
     "VALID_BORDER_STYLES",
     "BORDER_CHARS",
     "get_border_chars",
-    "get_border_chars_tuple",
     "TEXT_ATTRIBUTE_BOLD",
     "TEXT_ATTRIBUTE_DIM",
     "TEXT_ATTRIBUTE_ITALIC",
@@ -298,4 +292,9 @@ __all__ = [
     "parse_color_opt",
     "char_width",
     "display_width",
+    "MUTED_GRAY",
+    "MUTED_GRAY_HEX",
+    "FOCUS_RING_BLUE",
+    "SELECTION_BG",
+    "SELECTED_TAB_BG",
 ]

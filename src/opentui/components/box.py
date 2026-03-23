@@ -5,11 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .. import structs as s
-from ..colors import FOCUS_RING_BLUE
 from ..enums import RenderStrategy
 from ..signals import is_reactive
+from ..structs import FOCUS_RING_BLUE
 from ..structs import display_width as _display_width
-from .base import _UNSET_FLEX_SHRINK, BaseRenderable, Renderable
+from ._renderable_constants import _UNSET_FLEX_SHRINK
+from .base import BaseRenderable, Renderable
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -421,9 +422,6 @@ class Box(Renderable):
             buffer.draw_text("┘", right_x, bottom_y, focus_color, None)
 
 
-# ── Layout helpers ────────────────────────────────────────────────────
-
-
 def Row(*children: Any, gap: int = 0, **kwargs) -> Box:
     """Horizontal flex container. Shorthand for ``Box(flex_direction="row")``."""
     return Box(*children, flex_direction="row", gap=gap, **kwargs)
@@ -452,7 +450,7 @@ def Spacer(**kwargs) -> Box:
     return Box(**kwargs)
 
 
-# Re-export for downstream consumers that import from box directly
+# Re-export for downstream consumers (talaria-tui imports ScrollBox from box)
 from .scrollbox import (  # noqa: E402, F401
     LinearScrollAccel,
     MacOSScrollAccel,

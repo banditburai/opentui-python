@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 from dataclasses import dataclass
 from typing import Any
 
@@ -126,7 +127,6 @@ class Buffer:
             if x + text_dw <= sx or x >= sx + sw:
                 return
             if x < sx:
-                # Trim characters from the left until we reach the scissor edge.
                 trim_cols = sx - x
                 trimmed = 0
                 i = 0
@@ -138,7 +138,6 @@ class Buffer:
             end = sx + sw
             remaining_dw = _display_width(text)
             if x + remaining_dw > end:
-                # Trim characters from the right to fit within the scissor.
                 max_cols = end - x
                 kept = 0
                 i = 0
@@ -159,7 +158,7 @@ class Buffer:
             link_id = self._native.link_alloc(link.encode("utf-8"))
             attributes = self._native.attributes_with_link(attributes, link_id)
 
-        text_bytes = text.encode("utf-8") if isinstance(text, str) else text
+        text_bytes = text.encode("utf-8")
 
         fg_tuple = (fg.r, fg.g, fg.b, fg.a) if fg else None
         bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
@@ -211,27 +210,18 @@ class Buffer:
         if x < 0 or x >= self.width or y < 0 or y >= self.height:
             raise IndexError(f"cell ({x}, {y}) out of bounds for {self.width}x{self.height} buffer")
 
-    def get_bg_color(self, x: int, y: int) -> s.RGBA:
-        import ctypes
-
+    def _get_color_at(self, x: int, y: int, ptr_attr: str) -> s.RGBA:
         self._check_bounds(x, y)
-        bg_ptr = self._native.buffer_get_bg_ptr(self._ptr)
-        w = self.width
-        offset = (y * w + x) * 4
-        arr_type = ctypes.c_float * 4
-        arr = arr_type.from_address(bg_ptr + offset * ctypes.sizeof(ctypes.c_float))
+        base_ptr = getattr(self._native, ptr_attr)(self._ptr)
+        offset = (y * self.width + x) * 4
+        arr = (ctypes.c_float * 4).from_address(base_ptr + offset * ctypes.sizeof(ctypes.c_float))
         return s.RGBA(arr[0], arr[1], arr[2], arr[3])
+
+    def get_bg_color(self, x: int, y: int) -> s.RGBA:
+        return self._get_color_at(x, y, "buffer_get_bg_ptr")
 
     def get_fg_color(self, x: int, y: int) -> s.RGBA:
-        import ctypes
-
-        self._check_bounds(x, y)
-        fg_ptr = self._native.buffer_get_fg_ptr(self._ptr)
-        w = self.width
-        offset = (y * w + x) * 4
-        arr_type = ctypes.c_float * 4
-        arr = arr_type.from_address(fg_ptr + offset * ctypes.sizeof(ctypes.c_float))
-        return s.RGBA(arr[0], arr[1], arr[2], arr[3])
+        return self._get_color_at(x, y, "buffer_get_fg_ptr")
 
     def draw_editor_view(self, editor_view: Any, x: int = 0, y: int = 0) -> None:
         from ..native import _nb
@@ -268,8 +258,6 @@ class Buffer:
         return "\n".join(lines)
 
     def get_attributes(self, x: int, y: int) -> int:
-        import ctypes
-
         self._check_bounds(x, y)
         attr_ptr = self._native.buffer_get_attributes_ptr(self._ptr)
         w = self.width
@@ -278,8 +266,6 @@ class Buffer:
         return arr[0]
 
     def get_char_code(self, x: int, y: int) -> int:
-        import ctypes
-
         self._check_bounds(x, y)
         char_ptr = self._native.buffer_get_char_ptr(self._ptr)
         w = self.width
@@ -368,51 +354,6 @@ class Buffer:
 
     def get_current_opacity(self) -> float:
         return self._cached_opacity
-
-    def draw_rectangle(
-        self,
-        x: int,
-        y: int,
-        width: int,
-        height: int,
-        border_style: str = "single",
-        border_color: s.RGBA | None = None,
-        bg: s.RGBA | None = None,
-    ) -> None:
-        if width < 2 or height < 2:
-            return
-
-        if self._offset_stack:
-            dx, dy = self._offset_stack[-1]
-            x += dx
-            y += dy
-
-        border_color = self._apply_opacity_to_color(border_color)
-        bg = self._apply_opacity_to_color(bg)
-
-        border_tuple = (
-            (border_color.r, border_color.g, border_color.b, border_color.a)
-            if border_color
-            else None
-        )
-        bg_tuple = (bg.r, bg.g, bg.b, bg.a) if bg else None
-        self._native.buffer_draw_box(
-            self._ptr,
-            x,
-            y,
-            width,
-            height,
-            border_style,
-            True,
-            True,
-            True,
-            True,
-            False,
-            border_tuple,
-            bg_tuple,
-            "",
-            "left",
-        )
 
     def draw_box(
         self,

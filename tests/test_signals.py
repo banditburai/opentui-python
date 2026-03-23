@@ -4,11 +4,11 @@ Upstream: N/A (Python-specific)
 """
 
 from opentui.expr import BinaryOp, Conditional, Expr, MappedExpr, UnaryOp
+from opentui._signals_runtime import _SignalState
 from opentui.signals import (
     Batch,
     ReadableSignal,
     Signal,
-    _SignalState,
     computed,
     effect,
     untrack,
@@ -1233,3 +1233,44 @@ class TestExprOperators:
         assert expr() == 320
         a.set(5)
         assert expr() == 350
+
+
+class TestSignalEagerDunders:
+    """Eager-eval dunders inherited from Expr work on Signal."""
+
+    def setup_method(self):
+        _SignalState.get_instance().reset()
+
+    def test_int(self):
+        assert int(Signal(3.7, name="x")) == 3
+
+    def test_float(self):
+        assert float(Signal(5, name="x")) == 5.0
+
+    def test_len(self):
+        assert len(Signal([1, 2, 3], name="items")) == 3
+
+    def test_contains(self):
+        s = Signal([1, 2, 3], name="items")
+        assert 2 in s
+        assert 5 not in s
+
+    def test_iter(self):
+        s = Signal([1, 2, 3], name="items")
+        assert list(s) == [1, 2, 3]
+
+    def test_getitem(self):
+        s = Signal([10, 20, 30], name="items")
+        assert s[1] == 20
+
+    def test_getitem_dict(self):
+        s = Signal({"a": 1, "b": 2}, name="data")
+        assert s["a"] == 1
+
+    def test_dunders_reflect_current_value(self):
+        """Eager dunders always read the current signal value."""
+        s = Signal([1, 2], name="items")
+        assert len(s) == 2
+        s.set([1, 2, 3, 4])
+        assert len(s) == 4
+

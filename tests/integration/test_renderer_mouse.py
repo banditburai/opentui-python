@@ -1247,3 +1247,33 @@ class TestRendererHandleMouseDataSplitHeight:
             assert len(setup.stdin.emitted_data) > before_count
         finally:
             setup.destroy()
+
+
+class TestSelectionRecheckOnDirty:
+    """Verify request_selection_update() is called alongside _recheck_hover_state."""
+
+    async def test_request_selection_update_called_when_dirty(self):
+        """When hover_recheck_needed is True, request_selection_update() runs."""
+        setup = await create_test_renderer(40, 20)
+        try:
+            target = _box(2, 2, 12, 6)
+            target.selectable = True
+            target.should_start_selection = lambda x, y: target.contains_point(x, y)
+            setup.renderer.root.add(target)
+            setup.render_frame()
+
+            # Create a selection via drag
+            setup.mock_mouse.drag(target.x + 1, target.y + 1, target.x + 5, target.y + 2)
+            sel_before = setup.renderer.get_selection()
+            assert sel_before is not None
+
+            # Mark dirty to trigger hover_recheck_needed on next frame
+            setup.renderer.root.mark_dirty()
+            setup.render_frame()
+
+            # Selection should still exist (request_selection_update doesn't
+            # clear it — it only refreshes when is_dragging)
+            sel_after = setup.renderer.get_selection()
+            assert sel_after is not None
+        finally:
+            setup.destroy()

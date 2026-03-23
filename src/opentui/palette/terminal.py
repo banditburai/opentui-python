@@ -159,18 +159,18 @@ class TerminalPalette:
 
     # -- palette query (synchronous, callback-driven) -----------------------
 
-    def query_palette(self, indices: list[int], timeout_ms: int = 1200) -> _PaletteQuery:
+    def query_palette(self, indices: list[int], timeout_ms: int = 1200) -> _ColorQuery:
         """Start a palette query for the given colour *indices*.
 
-        Returns a ``_PaletteQuery`` object whose ``.results`` dict is
+        Returns a ``_ColorQuery`` object whose ``.results`` dict is
         populated as data arrives from stdin.
         """
         results: dict[int, Hex] = dict.fromkeys(indices)
 
         if not self._stdout.is_tty or not self._stdin.is_tty:
-            return _PaletteQuery(results=results, done=True)
+            return _ColorQuery(results=results, done=True)
 
-        q = _PaletteQuery(results=results)
+        q = _ColorQuery(results=results)
 
         def on_data(chunk: str) -> None:
             q._buffer += chunk
@@ -184,8 +184,7 @@ class TerminalPalette:
             if len(q._buffer) > 8192:
                 q._buffer = q._buffer[-4096:]
 
-            done_count = sum(1 for v in results.values() if v is not None)
-            if done_count == len(results):
+            if all(v is not None for v in results.values()):
                 q._done = True
 
         self._stdin.on_data(on_data)
@@ -200,10 +199,10 @@ class TerminalPalette:
 
     # -- special colours query (synchronous, callback-driven) ---------------
 
-    def query_special_colors(self, timeout_ms: int = 1200) -> _SpecialColorsQuery:
+    def query_special_colors(self, timeout_ms: int = 1200) -> _ColorQuery:
         """Start a special-colours query (OSC 10-19).
 
-        Returns a ``_SpecialColorsQuery`` object whose ``.results`` dict
+        Returns a ``_ColorQuery`` object whose ``.results`` dict
         is populated as data arrives from stdin.
         """
         results: dict[int, Hex] = {
@@ -219,9 +218,9 @@ class TerminalPalette:
         }
 
         if not self._stdout.is_tty or not self._stdin.is_tty:
-            return _SpecialColorsQuery(results=results, done=True)
+            return _ColorQuery(results=results, done=True)
 
-        q = _SpecialColorsQuery(results=results)
+        q = _ColorQuery(results=results)
 
         def on_data(chunk: str) -> None:
             q._buffer += chunk
@@ -234,8 +233,7 @@ class TerminalPalette:
             if len(q._buffer) > 8192:
                 q._buffer = q._buffer[-4096:]
 
-            done_count = sum(1 for v in results.values() if v is not None)
-            if done_count == len(results):
+            if all(v is not None for v in results.values()):
                 q._done = True
 
         self._stdin.on_data(on_data)
@@ -305,30 +303,8 @@ class _OSCSupportDetection:
         return self._result if self._result is not None else default
 
 
-class _PaletteQuery:
-    """Tracks the state of a palette colour query."""
-
-    def __init__(self, results: dict[int, Hex], *, done: bool = False) -> None:
-        self.results = results
-        self._buffer: str = ""
-        self._done: bool = done
-        self._handler: Callable[[str], None] | None = None
-        self._palette: TerminalPalette | None = None
-
-    @property
-    def done(self) -> bool:
-        return self._done
-
-    def finish(self) -> dict[int, Hex]:
-        if self._handler and self._palette:
-            self._palette._stdin.remove_listener(self._handler)
-            if self._handler in self._palette._active_listeners:
-                self._palette._active_listeners.remove(self._handler)
-        return self.results
-
-
-class _SpecialColorsQuery:
-    """Tracks the state of a special-colours query."""
+class _ColorQuery:
+    """Tracks the state of a palette or special-colours query."""
 
     def __init__(self, results: dict[int, Hex], *, done: bool = False) -> None:
         self.results = results
@@ -375,8 +351,8 @@ class _FullDetection:
         self._tp = tp
         self._opts = opts
         self._osc_det: _OSCSupportDetection | None = None
-        self._palette_q: _PaletteQuery | None = None
-        self._special_q: _SpecialColorsQuery | None = None
+        self._palette_q: _ColorQuery | None = None
+        self._special_q: _ColorQuery | None = None
         self._phase: int = 0  # 0 = not started, 1 = probing, 2 = querying
         self._result: TerminalColors | None = None
 
@@ -444,12 +420,3 @@ class _FullDetection:
             highlight_background=special_colors.get(17),
             highlight_foreground=special_colors.get(19),
         )
-
-
-def create_terminal_palette(
-    stdin: ReadableStream,
-    stdout: WritableStream,
-    write_fn: WriteFunction | None = None,
-    is_legacy_tmux: bool = False,
-) -> TerminalPalette:
-    return TerminalPalette(stdin, stdout, write_fn, is_legacy_tmux)

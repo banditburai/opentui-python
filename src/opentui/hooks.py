@@ -6,7 +6,7 @@ import contextlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from .animation import Animation, Timeline
+from .animation import Timeline
 from .signals import Signal, on_cleanup
 from .structs import RGBA
 
@@ -324,7 +324,6 @@ __all__ = [
     "on_mount",
     "flush_mount_callbacks",
     "Timeline",
-    "Animation",
     "get_keyboard_handlers",
     "clear_keyboard_handlers",
     "get_mouse_handlers",

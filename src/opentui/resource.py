@@ -20,7 +20,7 @@ def _get_register_suspense_resource() -> Callable[..., None] | None:
     global _register_suspense_resource
     if _register_suspense_resource is None:
         try:
-            from .components.control_flow import _register_suspense_resource as _reg
+            from .components.structural import _register_suspense_resource as _reg
 
             _register_suspense_resource = _reg
         except ImportError:

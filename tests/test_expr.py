@@ -6,14 +6,11 @@ Upstream: N/A (Python-specific)
 import pytest
 
 from opentui.expr import (
-    Assignment,
     BinaryOp,
     Conditional,
     Expr,
     Literal,
     MappedExpr,
-    MethodCall,
-    PropertyAccess,
     UnaryOp,
     _ensure_expr,
     all_,
@@ -190,34 +187,6 @@ class TestMappedExpr:
         assert isinstance(expr, Expr)
 
 
-class TestAssignment:
-    def test_evaluate_with_set_target(self):
-        """Assignment calls set() on duck-typed target."""
-
-        class FakeTarget(Expr):
-            def __init__(self):
-                self.value = None
-
-            def set(self, v):
-                self.value = v
-
-            def __call__(self):
-                return self.value
-
-            def to_js(self):
-                return "target"
-
-        target = FakeTarget()
-        a = Assignment(target, Literal(42))
-        result = a.evaluate()
-        assert result == 42
-        assert target.value == 42
-
-    def test_to_js(self):
-        a = Assignment(Literal(0), Literal(42))
-        assert "=" in a.to_js()
-
-
 class TestEnsureExpr:
     def test_expr_passthrough(self):
         lit = Literal(42)
@@ -307,34 +276,6 @@ class TestExprOperators:
         assert result() == 10
 
 
-class TestExprMethods:
-    def test_upper(self):
-        result = Literal("hello").upper()
-        assert isinstance(result, MethodCall)
-        assert result.evaluate() == "HELLO"
-
-    def test_call_on_method_call(self):
-        result = Literal("hello").upper()
-        assert result() == "HELLO"
-
-    def test_lower(self):
-        result = Literal("HELLO").lower()
-        assert result.evaluate() == "hello"
-
-    def test_strip(self):
-        result = Literal("  hi  ").strip()
-        assert result.evaluate() == "hi"
-
-    def test_length(self):
-        result = Literal("hello").length()
-        assert isinstance(result, PropertyAccess)
-        assert result.evaluate() == 5
-
-    def test_call_on_property_access(self):
-        result = Literal("hello").length()
-        assert result() == 5
-
-
 class TestHelpers:
     def test_all_empty(self):
         result = all_()
@@ -363,3 +304,142 @@ class TestHelpers:
     def test_match_default(self):
         result = match(Literal("z"), a="found_a", default="none")
         assert result.evaluate() == "none"
+
+    def test_match_no_default(self):
+        result = match(Literal("z"), a="found_a")
+        assert result.evaluate() is None
+
+    def test_match_second_pattern(self):
+        result = match(Literal("b"), a="found_a", b="found_b", default="none")
+        assert result.evaluate() == "found_b"
+
+
+class TestExprIf:
+    def test_if_true(self):
+        result = Literal(True).if_("yes", "no")
+        assert isinstance(result, Conditional)
+        assert result() == "yes"
+
+    def test_if_false(self):
+        result = Literal(False).if_("yes", "no")
+        assert result() == "no"
+
+    def test_if_default_false_val(self):
+        result = Literal(False).if_("yes")
+        assert result() is None
+
+    def test_if_with_expr_values(self):
+        result = Literal(True).if_(Literal("A"), Literal("B"))
+        assert result() == "A"
+
+
+class TestExprEagerDunders:
+    """Eager-eval dunders on Expr base class (moved from Signal/ComputedSignal)."""
+
+    def test_int(self):
+        assert int(Literal(3.7)) == 3
+
+    def test_float(self):
+        assert float(Literal(5)) == 5.0
+
+    def test_len(self):
+        assert len(Literal([1, 2, 3])) == 3
+
+    def test_contains(self):
+        assert 2 in Literal([1, 2, 3])
+        assert 5 not in Literal([1, 2, 3])
+
+    def test_iter(self):
+        assert list(Literal([1, 2, 3])) == [1, 2, 3]
+
+    def test_getitem(self):
+        assert Literal([10, 20, 30])[1] == 20
+        assert Literal({"a": 1})["a"] == 1
+
+
+class TestExprToJs:
+    """to_js() serialization for all Expr subclasses."""
+
+    def test_literal_int(self):
+        assert Literal(42).to_js() == "42"
+
+    def test_binary_op_arithmetic(self):
+        op = Literal(2) + Literal(3)
+        assert op.to_js() == "(2 + 3)"
+
+    def test_unary_op_neg(self):
+        op = -Literal(5)
+        assert op.to_js() == "-(5)"
+
+    def test_unary_op_abs(self):
+        op = abs(Literal(-7))
+        assert op.to_js() == "abs(-7)"
+
+    def test_conditional_to_js(self):
+        cond = Conditional(Literal(True), Literal("a"), Literal("b"))
+        assert cond.to_js() == "(true ? 'a' : 'b')"
+
+    def test_mapped_expr_to_js_falls_back_to_repr(self):
+        m = MappedExpr(Literal(5), lambda v: v * 2)
+        # MappedExpr has no custom to_js(); base Expr.to_js() returns repr(self())
+        assert m.to_js() == repr(m())
+
+
+class TestExprReverseOperators:
+    """Reverse operators ensure Expr works on the right side of operations."""
+
+    def test_rsub(self):
+        result = 10 - Literal(3)
+        assert isinstance(result, BinaryOp)
+        assert result() == 7
+
+    def test_rmul(self):
+        result = 4 * Literal(5)
+        assert isinstance(result, BinaryOp)
+        assert result() == 20
+
+    def test_rtruediv(self):
+        result = 10 / Literal(2)
+        assert isinstance(result, BinaryOp)
+        assert result() == 5.0
+
+    def test_rfloordiv(self):
+        result = 10 // Literal(3)
+        assert isinstance(result, BinaryOp)
+        assert result() == 3
+
+    def test_rmod(self):
+        result = 10 % Literal(3)
+        assert isinstance(result, BinaryOp)
+        assert result() == 1
+
+    def test_rpow(self):
+        result = 2 ** Literal(3)
+        assert isinstance(result, BinaryOp)
+        assert result() == 8
+
+
+class TestExprChaining:
+    """Chained expressions compose correctly."""
+
+    def test_arithmetic_chain(self):
+        result = (Literal(2) + Literal(3)) * Literal(4)
+        assert result() == 20
+
+    def test_comparison_chain(self):
+        gt = Literal(10) > Literal(5)
+        assert gt() is True
+
+    def test_if_on_comparison(self):
+        cond = (Literal(10) > Literal(5)).if_("big", "small")
+        assert cond() == "big"
+
+    def test_map_then_operator(self):
+        mapped = Literal(5).map(lambda v: v * 2)
+        result = mapped + Literal(1)
+        assert result() == 11
+
+    def test_nested_ternary(self):
+        inner = Literal(True).if_("inner_yes", "inner_no")
+        outer = Literal(True).if_(inner, "outer_no")
+        assert outer() == "inner_yes"

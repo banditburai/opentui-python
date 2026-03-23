@@ -9,7 +9,7 @@ import time
 
 import pytest
 from opentui.structs import RGBA
-from opentui.syntax_style import SyntaxStyle, StyleDefinition
+from opentui.editor.syntax_style import SyntaxStyle, StyleDefinition
 
 
 @pytest.fixture

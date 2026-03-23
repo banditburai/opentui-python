@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .signals import Signal, _ComputedSignal
+from ._signal_types import Signal, _ComputedSignal
 
 
 def pick[T](

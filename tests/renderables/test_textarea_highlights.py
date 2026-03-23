@@ -9,7 +9,7 @@ from opentui import TestSetup, create_test_renderer
 from opentui.components.textarea_renderable import TextareaRenderable
 from opentui.native import NativeOptimizedBuffer
 from opentui.structs import RGBA
-from opentui.syntax_style import SyntaxStyle, StyleDefinition
+from opentui.editor.syntax_style import SyntaxStyle, StyleDefinition
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

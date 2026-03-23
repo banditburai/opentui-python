@@ -41,7 +41,7 @@ async def test_render(
 
     setup = await _init_test_renderer(config)
 
-    from ..signals import _signal_state
+    from .._signals_runtime import _signal_state
 
     component, _, _ = setup.renderer.evaluate_component(component_fn)
 
@@ -100,7 +100,7 @@ async def _init_test_renderer(config: CliRendererConfig) -> TestSetup:
     clear_resize_handlers()
     clear_selection_handlers()
 
-    from ..signals import _signal_state
+    from .._signals_runtime import _signal_state
 
     _signal_state.reset()
 

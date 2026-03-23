@@ -123,6 +123,7 @@ def _load_common_render(root) -> None:
             "_wrap_mode": discover(Text, "_wrap_mode"),
             "_selection_start": discover(Text, "_selection_start"),
             "_selection_end": discover(Text, "_selection_end"),
+            "_selection_bg": discover(Text, "_selection_bg"),
             "_bold": discover(Text, "_bold"),
             "_italic": discover(Text, "_italic"),
             "_underline": discover(Text, "_underline"),
@@ -141,6 +142,9 @@ def _load_common_render(root) -> None:
             "_render_before": discover(Box, "_render_before"),
             "_render_after": discover(Box, "_render_after"),
         }
+        # _selection_bg is intentionally omitted from `required` — when the
+        # offset is -1 the C++ render_text_node() falls back to a hardcoded
+        # default selection color (0.3, 0.3, 0.7, 1.0).
         required = (
             "_visible",
             "_children",

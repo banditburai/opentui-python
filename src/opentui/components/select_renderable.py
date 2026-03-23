@@ -72,7 +72,6 @@ class SelectRenderable(Renderable):
         "_key_bindings",
         "_key_alias_map",
         "_key_map",
-        "_is_destroyed",
         "_raster",
     )
 
@@ -143,7 +142,6 @@ class SelectRenderable(Renderable):
             _DEFAULT_SELECT_BINDINGS, key_bindings, key_alias_map
         )
 
-        self._is_destroyed = False
         self._raster = RasterCache(f"select-{self.id}")
 
         self._setup_measure_func()
@@ -437,7 +435,6 @@ class SelectRenderable(Renderable):
         )
 
     def destroy(self) -> None:
-        self._is_destroyed = True
         self._raster.release()
         super().destroy()
 
