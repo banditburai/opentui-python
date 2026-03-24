@@ -9,18 +9,15 @@ backward compatibility.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from .. import layout as yoga_layout
-from ..signals import Signal
+from .._signal_types import Signal
 from .base import BaseRenderable, Renderable
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
-
-_log = logging.getLogger(__name__)
 
 
 def _subtree_contains_portal(node: BaseRenderable) -> bool:
@@ -105,17 +102,15 @@ class Portal(Renderable):
         self._current_mount: BaseRenderable | None = None
         self._content_children: list[BaseRenderable] = list(children)
 
-    def _resolve_mount(self) -> BaseRenderable:
+    def _resolve_mount(self) -> BaseRenderable | None:
+        """Resolve the mount target. Returns None if no renderer is active yet."""
         if self._mount_source is None:
             from ..hooks import use_renderer
 
             try:
                 return use_renderer().root
             except RuntimeError:
-                raise RuntimeError(
-                    "Portal with mount=None requires an active renderer. "
-                    "Pass an explicit mount= target or ensure a renderer is running."
-                ) from None
+                return None
         if callable(self._mount_source):
             return self._mount_source()
         return self._mount_source
@@ -152,11 +147,15 @@ class Portal(Renderable):
         from .box import Box
 
         mount = self._resolve_mount()
+        if mount is None:
+            # No renderer running yet; defer container setup until the
+            # render loop calls _pre_configure_yoga with an active renderer.
+            return
 
         if self._container is not None and self._current_mount is not mount:
             if self._current_mount is not None and not self._current_mount._destroyed:
                 self._current_mount.remove(self._container)
-            self._container.destroy_recursively()
+            self._container.destroy()
             self._container = None
 
         if self._container is None:
@@ -214,7 +213,7 @@ class Portal(Renderable):
             if mount is not None and not mount._destroyed:
                 mount.remove(container)
             if not container._destroyed:
-                container.destroy_recursively()
+                container.destroy()
         self._content_children.clear()
         super().destroy()
 
@@ -271,7 +270,7 @@ class ErrorBoundary(Renderable):
 
         for c in list(self._children):
             self.remove(c)
-            c.destroy_recursively()
+            c.destroy()
         try:
             for c in normalize_render_result(self._fallback_fn(error, self._reset)):
                 self.add(c)
@@ -282,7 +281,7 @@ class ErrorBoundary(Renderable):
     def _reset(self) -> None:
         for c in list(self._children):
             self.remove(c)
-            c.destroy_recursively()
+            c.destroy()
         self._try_render()
         self.mark_dirty()
 
@@ -333,11 +332,7 @@ class Suspense(Renderable):
         # Push suspense context so create_resource can register
         _suspense_stack.append(self._pending_signals)
         try:
-            self._child_nodes: list[BaseRenderable] = []
-            if children:
-                for child in children:
-                    if child is not None:
-                        self._child_nodes.append(child)
+            self._child_nodes = [c for c in (children or ()) if c is not None]
         finally:
             _suspense_stack.pop()
 
@@ -353,9 +348,7 @@ class Suspense(Renderable):
                 self._show_fallback = _any_loading()
                 self._update_children()
 
-            unsubs: list[Callable[[], None]] = []
-            for sig in signals:
-                unsubs.append(sig.subscribe(_on_loading_change))
+            unsubs = [sig.subscribe(_on_loading_change) for sig in signals]
 
             def _cleanup() -> None:
                 for u in unsubs:
@@ -374,7 +367,7 @@ class Suspense(Renderable):
         for c in list(self._children):
             self.remove(c)
             if id(c) not in child_node_ids and not c._destroyed:
-                c.destroy_recursively()
+                c.destroy()
 
         if self._show_fallback:
             if self._fallback_fn is not None:
@@ -402,7 +395,7 @@ class Suspense(Renderable):
         current = {id(c) for c in self._children}
         for child in self._child_nodes:
             if id(child) not in current and not child._destroyed:
-                child.destroy_recursively()
+                child.destroy()
         self._child_nodes.clear()
         super().destroy()
 

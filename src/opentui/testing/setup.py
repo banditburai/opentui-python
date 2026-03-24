@@ -43,7 +43,7 @@ async def test_render(
 
     from .._signals_runtime import _signal_state
 
-    component, _, _ = setup.renderer.evaluate_component(component_fn)
+    component = setup.renderer.evaluate_component(component_fn)
 
     setup.renderer.root.add(component)
 

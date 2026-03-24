@@ -181,8 +181,8 @@ class TestPortalUnit:
 
         portal.destroy()
 
-    def test_default_mount_error_without_renderer(self):
-        """Portal with mount=None raises clear error when no renderer active."""
+    def test_default_mount_defers_without_renderer(self):
+        """Portal with mount=None defers container setup when no renderer active."""
         from opentui import hooks
 
         old = hooks._current_renderer
@@ -192,8 +192,11 @@ class TestPortalUnit:
                 Renderable(key="child"),
                 key="portal",
             )
-            with pytest.raises(RuntimeError, match="requires an active renderer"):
-                portal._ensure_container()
+            # _ensure_container should silently defer (not raise) when
+            # no renderer is running — the container will be set up later
+            # when the render loop calls _pre_configure_yoga.
+            portal._ensure_container()
+            assert portal._container is None
         finally:
             hooks._current_renderer = old
 

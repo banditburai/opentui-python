@@ -1131,7 +1131,7 @@ class TestScrollBoxRenderablePaddingBehavior:
 
 
 class TestScrollBoxRenderableDestroyRecursively:
-    """Maps to describe("ScrollBoxRenderable - destroy_recursively")."""
+    """Maps to describe("ScrollBoxRenderable - destroy")."""
 
     def test_destroys_internal_scrollbox_components(self):
         """Maps to test("destroys internal ScrollBox components")."""
@@ -1147,7 +1147,7 @@ class TestScrollBoxRenderableDestroyRecursively:
         assert parent.is_destroyed is False
         assert child.is_destroyed is False
 
-        parent.destroy_recursively()
+        parent.destroy()
 
         assert parent.is_destroyed is True
         assert child.is_destroyed is True

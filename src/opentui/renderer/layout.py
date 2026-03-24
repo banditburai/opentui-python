@@ -66,9 +66,13 @@ def collect_local_layout_subtree(
     if avail_width <= 0 or avail_height <= 0:
         return None
 
-    origin_parent = getattr(subtree, "_parent", None)
-    origin_x = int(getattr(origin_parent, "_x", 0) or 0) if origin_parent is not None else 0
-    origin_y = int(getattr(origin_parent, "_y", 0) or 0) if origin_parent is not None else 0
+    # Use the subtree's own absolute position as the origin.  Yoga's
+    # compute_layout treats the subtree root as (0,0), so origin must be the
+    # node's current screen position to get correct absolute coordinates.
+    # Using the grandparent's position was incorrect when the subtree wasn't
+    # the first child (its relative offset within the parent was lost).
+    origin_x = int(getattr(subtree, "_x", 0) or 0)
+    origin_y = int(getattr(subtree, "_y", 0) or 0)
     return (subtree, avail_width, avail_height, origin_x, origin_y)
 
 

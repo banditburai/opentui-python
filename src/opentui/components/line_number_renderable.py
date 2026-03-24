@@ -183,7 +183,7 @@ class LineNumberRenderable(Renderable):
     def add(self, child: Any, index: int | None = None) -> int:
         if self._target is None and self._is_line_info_provider(child):
             self._set_target(child)
-            return self.get_children_count() - 1
+            return len(self._children) - 1
         return -1
 
     def _is_line_info_provider(self, obj: Any) -> bool:
@@ -212,14 +212,6 @@ class LineNumberRenderable(Renderable):
         if self._target is not None and hasattr(self._target, "off"):
             self._target.off("line-info-change", self._handle_line_info_change)
         super().destroy()
-        self._gutter = None
-        self._target = None
-
-    def destroy_recursively(self) -> None:
-        self._is_destroying = True
-        if self._target is not None and hasattr(self._target, "off"):
-            self._target.off("line-info-change", self._handle_line_info_change)
-        super().destroy_recursively()
         self._gutter = None
         self._target = None
 

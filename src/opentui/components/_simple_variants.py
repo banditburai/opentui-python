@@ -76,7 +76,7 @@ class Code(Renderable):
     def _setup_measure_func(self) -> None:
         def _content():
             lines = self._content.split("\n") if self._content else []
-            return lines, len(lines), max((len(l) for l in lines), default=0)
+            return lines, len(lines), max((len(line) for line in lines), default=0)
 
         _text_measure_func(self, _content, lambda: 4 if self._show_line_numbers else 0)
 
@@ -126,7 +126,7 @@ class Diff(Renderable):
         old_text: str = "",
         new_text: str = "",
         *,
-        mode: str = "unified",  # noqa: ARG002 — accepted for API compat
+        mode: str = "unified",  # noqa: ARG002
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -141,8 +141,8 @@ class Diff(Renderable):
             old = self._old_text.split("\n") if self._old_text else []
             new = self._new_text.split("\n") if self._new_text else []
             max_w = max(
-                max((len(l) for l in old), default=0),
-                max((len(l) for l in new), default=0),
+                max((len(line) for line in old), default=0),
+                max((len(line) for line in new), default=0),
             )
             return None, len(old) + len(new), max_w
 
@@ -221,7 +221,7 @@ class Markdown(Renderable):
     def _setup_measure_func(self) -> None:
         def _content():
             lines = self._content.split("\n") if self._content else []
-            return lines, len(lines), max((len(l) for l in lines), default=0)
+            return lines, len(lines), max((len(line) for line in lines), default=0)
 
         _text_measure_func(self, _content)
 
@@ -272,7 +272,7 @@ class LineNumber(Renderable):
     def _setup_measure_func(self) -> None:
         def _content():
             lines = self._content.split("\n") if self._content else []
-            return lines, len(lines), max((len(l) for l in lines), default=0)
+            return lines, len(lines), max((len(line) for line in lines), default=0)
 
         _text_measure_func(self, _content, lambda: self._gutter_width + 1)
 

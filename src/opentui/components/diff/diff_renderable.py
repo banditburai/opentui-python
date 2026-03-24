@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from ... import structs as s
 from ...enums import RenderStrategy
@@ -19,6 +19,16 @@ from .._raster_cache import RasterCache
 
 if TYPE_CHECKING:
     from ...renderer import Buffer
+
+
+class _PanelGeometry(NamedTuple):
+    """Layout metrics for one side of a split diff view."""
+
+    start_x: int
+    content_x: int
+    content_width: int
+    gutter_width: int
+    sign_width: int
 
 
 class DiffRenderable(Renderable):
@@ -706,11 +716,7 @@ class DiffRenderable(Renderable):
         i: int,
         ly: int,
         rows: list[str],
-        sx: int,
-        cx: int,
-        cw: int,
-        gw: int,
-        sw: int,
+        geo: _PanelGeometry,
         cc: Any,
         line_nums: dict[int, int],
         signs: dict[int, Any],
@@ -720,15 +726,15 @@ class DiffRenderable(Renderable):
         if vr >= len(rows):
             return
         if cc and cc.gutter and self._show_line_numbers:
-            buf.fill_rect(sx, ly, gw + sw + 1, 1, cc.gutter)
+            buf.fill_rect(geo.start_x, ly, geo.gutter_width + geo.sign_width + 1, 1, cc.gutter)
         if cc and cc.content:
-            buf.fill_rect(cx, ly, cw, 1, cc.content)
+            buf.fill_rect(geo.content_x, ly, geo.content_width, 1, cc.content)
         if vr == 0 and self._show_line_numbers and i not in hide:
             ln = line_nums.get(i)
             if ln is not None:
                 buf.draw_text(
-                    str(ln).rjust(gw),
-                    sx,
+                    str(ln).rjust(geo.gutter_width),
+                    geo.start_x,
                     ly,
                     self._line_number_fg_color,
                     cc.gutter if cc else None,
@@ -736,10 +742,20 @@ class DiffRenderable(Renderable):
         if vr == 0 and self._show_line_numbers:
             sign = signs.get(i)
             if sign and sign.after:
-                buf.draw_text(sign.after, sx + gw, ly, sign.after_color, cc.gutter if cc else None)
-        if cw > 0:
+                buf.draw_text(
+                    sign.after,
+                    geo.start_x + geo.gutter_width,
+                    ly,
+                    sign.after_color,
+                    cc.gutter if cc else None,
+                )
+        if geo.content_width > 0:
             buf.draw_text(
-                rows[vr], cx, ly, self._diff_fg, cc.content if cc else self._background_color
+                rows[vr],
+                geo.content_x,
+                ly,
+                self._diff_fg,
+                cc.content if cc else self._background_color,
             )
 
     def _render_split(self, buffer: Buffer, x: int, y: int, width: int, height: int) -> None:
@@ -789,6 +805,8 @@ class DiffRenderable(Renderable):
             self._right_line_numbers, x + half_width
         )
 
+        l_geo = _PanelGeometry(x, l_cx, left_cw, l_gw, l_sw)
+        r_geo = _PanelGeometry(x + half_width, r_cx, right_cw, r_gw, r_sw)
         l_hide = self._left_hide_line_numbers
         r_hide = self._right_hide_line_numbers
 
@@ -808,14 +826,12 @@ class DiffRenderable(Renderable):
                     break
                 ly = y + visual_row
                 self._draw_split_side(
-                    buffer, vr, i, ly, lw, x, l_cx, left_cw,
-                    l_gw, l_sw, l_cc, self._left_line_numbers,
-                    self._left_line_signs, l_hide,
+                    buffer, vr, i, ly, lw, l_geo, l_cc,
+                    self._left_line_numbers, self._left_line_signs, l_hide,
                 )
                 self._draw_split_side(
-                    buffer, vr, i, ly, rw, x + half_width, r_cx, right_cw,
-                    r_gw, r_sw, r_cc, self._right_line_numbers,
-                    self._right_line_signs, r_hide,
+                    buffer, vr, i, ly, rw, r_geo, r_cc,
+                    self._right_line_numbers, self._right_line_signs, r_hide,
                 )
                 visual_row += 1
 

@@ -15,10 +15,6 @@ from typing import Any
 
 from ..structs import display_width as _string_width
 
-# ---------------------------------------------------------------------------
-# Cursor-movement wrappers
-# ---------------------------------------------------------------------------
-
 
 def install_cursor_wrappers(controller: Any, eb: Any, ev: Any) -> None:
     def move_cursor_left() -> None:
@@ -163,11 +159,6 @@ def install_cursor_wrappers(controller: Any, eb: Any, ev: Any) -> None:
     ev.move_down_visual = move_down_visual
 
 
-# ---------------------------------------------------------------------------
-# Deletion wrappers
-# ---------------------------------------------------------------------------
-
-
 def install_deletion_wrappers(controller: Any, eb: Any, ev: Any) -> None:
     def delete_char_backward() -> None:
         if controller._destroyed:
@@ -273,11 +264,6 @@ def install_deletion_wrappers(controller: Any, eb: Any, ev: Any) -> None:
     eb.delete_line = delete_line
 
 
-# ---------------------------------------------------------------------------
-# Insertion wrappers
-# ---------------------------------------------------------------------------
-
-
 def install_insertion_wrappers(controller: Any, eb: Any, ev: Any) -> None:
     # Guard against re-entry: insert_char/new_line may internally call
     # insert_text (e.g. MockEditBuffer.insert_char delegates to insert_text).
@@ -360,11 +346,6 @@ def install_insertion_wrappers(controller: Any, eb: Any, ev: Any) -> None:
     eb.new_line = new_line
 
 
-# ---------------------------------------------------------------------------
-# Editor-view delete-selected-text wrapper
-# ---------------------------------------------------------------------------
-
-
 def install_delete_selected_text_wrapper(controller: Any, ev: Any) -> None:
     def delete_selected_text() -> None:
         if controller._destroyed:
@@ -387,11 +368,6 @@ def install_delete_selected_text_wrapper(controller: Any, ev: Any) -> None:
             controller.adjust_extmarks_after_deletion(delete_offset, delete_length)
 
     ev.delete_selected_text = delete_selected_text
-
-
-# ---------------------------------------------------------------------------
-# Undo / Redo wrappers
-# ---------------------------------------------------------------------------
 
 
 def install_undo_redo_wrappers(controller: Any, eb: Any) -> None:

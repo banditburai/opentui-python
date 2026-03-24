@@ -19,7 +19,7 @@ from opentui.palette import (
     MockPaletteStdin,
     MockPaletteStdout,
     TerminalColors,
-    TerminalPaletteDetector,
+    TerminalPalette,
 )
 from opentui.renderer import CliRenderer, CliRendererConfig, RendererControlState, RootRenderable
 
@@ -149,7 +149,7 @@ def _attach_palette_detector(
     stdout: MockPaletteStdout,
 ) -> None:
     """Attach a palette detector wired to mock streams to a renderer."""
-    detector = TerminalPaletteDetector(stdin, stdout)
+    detector = TerminalPalette(stdin, stdout)
     renderer._palette_detector = detector
 
 
@@ -345,7 +345,7 @@ class TestPaletteDetectionWithOSCResponses:
         mock_stdout = MockPaletteStdout(is_tty=True, responder=_responder)
 
         renderer = _make_renderer()
-        detector = TerminalPaletteDetector(mock_stdin, mock_stdout)
+        detector = TerminalPalette(mock_stdin, mock_stdout)
         renderer._palette_detector = detector
 
         palette = await renderer.get_palette(timeout=300, size=256)
@@ -386,7 +386,7 @@ class TestPaletteDetectionWithOSCResponses:
         mock_stdout = MockPaletteStdout(is_tty=True, responder=_responder)
 
         renderer = _make_renderer()
-        detector = TerminalPaletteDetector(mock_stdin, mock_stdout)
+        detector = TerminalPalette(mock_stdin, mock_stdout)
         renderer._palette_detector = detector
 
         palette = await renderer.get_palette(timeout=300, size=256)
@@ -679,7 +679,7 @@ class TestPaletteDetectionErrorHandling:
         mock_stdout = MockPaletteStdout(is_tty=True)
 
         renderer = _make_renderer()
-        detector = TerminalPaletteDetector(mock_stdin, mock_stdout)
+        detector = TerminalPalette(mock_stdin, mock_stdout)
         renderer._palette_detector = detector
 
         palette = await renderer.get_palette(timeout=100)
@@ -772,7 +772,7 @@ class TestPaletteCacheWithDifferentSizes:
         mock_stdout = MockPaletteStdout(is_tty=True, responder=_responder)
 
         renderer = _make_renderer()
-        detector = TerminalPaletteDetector(mock_stdin, mock_stdout)
+        detector = TerminalPalette(mock_stdin, mock_stdout)
         renderer._palette_detector = detector
 
         palette1 = await renderer.get_palette(size=16, timeout=300)

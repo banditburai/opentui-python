@@ -400,6 +400,75 @@ class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixi
     ]:
         return prepare_buffer(self, needs_layout, layout_failed, layout_repaint_facts, timings)
 
+    def _render_tree_to_buffer(
+        self,
+        buffer: Buffer,
+        reused_current_buffer: bool,
+        repainted_dirty_common_tree: bool,
+        repainted_layout_common_tree: bool,
+        layout_common_plan: list | None,
+        layout_failed: bool,
+        delta_time: float,
+        timings: FrameTimingBuckets,
+    ) -> None:
+        """Dispatch tree rendering to the fastest available strategy."""
+        if not self._root:
+            return
+        try:
+            t_render = _time.perf_counter_ns()
+            if repainted_dirty_common_tree:
+                self._render_dirty_common_subtrees_fast(self._root, buffer, delta_time)
+            elif repainted_layout_common_tree and layout_common_plan is not None:
+                self._render_common_plan_fast(layout_common_plan, buffer, delta_time)
+            elif (
+                not reused_current_buffer
+                and not self._render_common_tree_fast(self._root, buffer)
+                and not self._render_hybrid_tree_fast(self._root, buffer, delta_time)
+            ):
+                self._root.render(buffer, delta_time)
+            timings.render_tree_ns = _time.perf_counter_ns() - t_render
+            if not layout_failed:
+                clear_all_dirty(self._root)
+        except Exception:
+            _log.exception("Error rendering root")
+            self._force_next_render = True
+            if self._root is not None:
+                self._root.mark_dirty()
+
+    def _run_post_render_phase(self, buffer: Buffer, timings: FrameTimingBuckets) -> bool:
+        """Run post-process functions and selection overlay. Returns False if destroyed."""
+        t_post = _time.perf_counter_ns()
+        for fn in self._post_process_fns:
+            fn(buffer)
+            if self._ptr is None:
+                return False
+        self._apply_selection_overlay(buffer)
+        if self._ptr is None:
+            return False
+        timings.post_render_ns = _time.perf_counter_ns() - t_post
+        return True
+
+    def _flush_native_output(
+        self, hover_recheck_needed: bool, timings: FrameTimingBuckets,
+    ) -> None:
+        """Native render, graphics cleanup, cursor, and hover recheck."""
+        force = self._force_next_render
+        self._force_next_render = False
+        t_flush = _time.perf_counter_ns()
+        self.render(force=force)
+        timings.flush_ns = _time.perf_counter_ns() - t_flush
+
+        if self._ptr is None:
+            return
+
+        t_finish = _time.perf_counter_ns()
+        self._clear_stale_graphics()
+        self._apply_cursor()
+        if hover_recheck_needed:
+            self._recheck_hover_state()
+            self.request_selection_update()
+        timings.frame_finish_ns = _time.perf_counter_ns() - t_finish
+
     def _render_frame(self, delta_time: float) -> None:
         self._rendering = True
         self._update_scheduled = False
@@ -422,7 +491,6 @@ class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixi
             if signal_triggered_hover:
                 hover_recheck_needed = True
 
-            # Guard: a frame callback or RAF callback may have destroyed the renderer.
             if self._ptr is None:
                 return
 
@@ -438,77 +506,19 @@ class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixi
                 layout_common_plan,
             ) = self._prepare_buffer(needs_layout, layout_failed, layout_repaint_facts, timings)
 
-            if self._root:
-                try:
-                    t_render = _time.perf_counter_ns()
-                    if repainted_dirty_common_tree:
-                        self._render_dirty_common_subtrees_fast(self._root, buffer, delta_time)
-                    elif repainted_layout_common_tree and layout_common_plan is not None:
-                        self._render_common_plan_fast(layout_common_plan, buffer, delta_time)
-                    elif (
-                        not reused_current_buffer
-                        and not self._render_common_tree_fast(self._root, buffer)
-                        and not self._render_hybrid_tree_fast(self._root, buffer, delta_time)
-                    ):
-                        self._root.render(buffer, delta_time)
-                    timings.render_tree_ns = _time.perf_counter_ns() - t_render
-                    # Successful frames clear dirty state after rendering.
-                    # Layout apply clears layout dirtiness in native code, but
-                    # paint dirtiness may still have been propagated by size
-                    # change callbacks or component-local invalidation.
-                    if not layout_failed:
-                        clear_all_dirty(self._root)
-                except Exception:
-                    _log.exception("Error rendering root")
-                    # Ensure yoga state is re-evaluated on the next frame.
-                    self._force_next_render = True
-                    if self._root is not None:
-                        self._root.mark_dirty()
+            self._render_tree_to_buffer(
+                buffer, reused_current_buffer,
+                repainted_dirty_common_tree, repainted_layout_common_tree,
+                layout_common_plan, layout_failed, delta_time, timings,
+            )
 
-            t_post = _time.perf_counter_ns()
-            for fn in self._post_process_fns:
-                fn(buffer)
-                # Guard: post-process may have destroyed the renderer.
-                if self._ptr is None:
-                    return
-            # Selection overlay runs after all rendering and post-process but
-            # is NOT registered as a post-process fn to avoid defeating the
-            # buffer-reuse optimisation (which rejects non-empty _post_process_fns).
-            self._apply_selection_overlay(buffer)
-            if self._ptr is None:
+            if not self._run_post_render_phase(buffer, timings):
                 return
-            timings.post_render_ns = _time.perf_counter_ns() - t_post
 
-            # Guard: if the renderer was destroyed during one of the callbacks
-            # above, skip the native render/flush calls to avoid use-after-free.
             if self._ptr is None:
                 return
 
-            force = self._force_next_render
-            self._force_next_render = False
-            t_flush = _time.perf_counter_ns()
-            self.render(force=force)
-            timings.flush_ns = _time.perf_counter_ns() - t_flush
-
-            # Guard again: destroy() may have been called inside post_process or
-            # root.render(), and render() above would then use a live ptr, so we
-            # only proceed with cursor/graphics if still alive.
-            if self._ptr is None:
-                return
-
-            t_finish = _time.perf_counter_ns()
-            self._clear_stale_graphics()
-            self._apply_cursor()
-
-            # Recheck hover state when the hit-grid is dirty after render.
-            # If the pointer hasn't moved but the tree changed (e.g. scroll
-            # offset changed), fire synthetic over/out.  The guard is
-            # _has_pointer (not _mouse_enabled) so hover recheck fires even
-            # when mouse tracking is auto-disabled.
-            if hover_recheck_needed:
-                self._recheck_hover_state()
-                self.request_selection_update()
-            timings.frame_finish_ns = _time.perf_counter_ns() - t_finish
+            self._flush_native_output(hover_recheck_needed, timings)
         finally:
             if not layout_failed:
                 self._pending_structural_clear_rects.clear()
@@ -523,11 +533,11 @@ class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixi
             return
         self._pending_structural_clear_rects.append((x, y, width, height))
 
-    def evaluate_component(self, component_fn: Callable) -> tuple[Any, set, str]:
+    def evaluate_component(self, component_fn: Callable) -> Any:
         from .._signals_runtime import _tracking_context
 
         if getattr(component_fn, "__opentui_component__", False):
-            return component_fn(), set(), "template"
+            return component_fn()
 
         tracked: set = set()
         token = _tracking_context.set(tracked)
@@ -552,7 +562,7 @@ class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixi
                 f"Alternatives: Show/Switch/For for control flow."
             )
 
-        return component, set(), "template"
+        return component
 
     def _refresh_mouse_tracking(self) -> None:
         if not self._mouse_tracking_dirty:

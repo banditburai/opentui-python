@@ -8,7 +8,7 @@ import pytest
 
 from opentui import test_render as _test_render
 from opentui.components.box import Box
-from opentui.components.input import Textarea
+from opentui.components.textarea import Textarea
 from opentui.components.text import Span, Text
 from opentui.signals import Signal
 from opentui.structs import TEXT_ATTRIBUTE_BOLD

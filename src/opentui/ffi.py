@@ -131,31 +131,6 @@ def _try_load_nanobind() -> None:
 _try_load_nanobind()
 
 
-class NanobindLibrary:
-    def __init__(self) -> None:
-        if _native_module is None:
-            raise RuntimeError("Native nanobind bindings not available")
-        self._native = _native_module
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._native, name)
-
-
-_cached_library: NanobindLibrary | None = None
-
-
-def get_library() -> NanobindLibrary:
-    global _cached_library
-    if _cached_library is not None:
-        return _cached_library
-    if not _NATIVE_AVAILABLE or _native_module is None:
-        raise RuntimeError(
-            "OpenTUI native bindings not available. Please ensure nanobind bindings are installed."
-        )
-    _cached_library = NanobindLibrary()
-    return _cached_library
-
-
 def is_native_available() -> bool:
     return _NATIVE_AVAILABLE
 
@@ -165,8 +140,6 @@ def get_native() -> Any:
 
 
 __all__ = [
-    "NanobindLibrary",
-    "get_library",
     "is_native_available",
     "get_native",
 ]

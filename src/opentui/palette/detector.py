@@ -46,7 +46,7 @@ class MockStdout(Protocol):
     def write(self, data: str) -> bool: ...
 
 
-class TerminalPaletteDetector:
+class TerminalPalette:
     """Detects the terminal's colour palette via OSC escape sequences.
 
     In production, *stdin*/*stdout* are real TTY streams.  In test mode,
@@ -258,7 +258,7 @@ class TerminalPaletteDetector:
 class MockPaletteStdin:
     """Mock stdin for palette detection tests.
 
-    Supports the listener-based protocol that ``TerminalPaletteDetector``
+    Supports the listener-based protocol that ``TerminalPalette``
     uses.  Test code calls ``emit_data(data)`` to simulate terminal
     responses.
     """
@@ -313,7 +313,7 @@ class MockPaletteStdout:
 
 __all__ = [
     "TerminalColors",
-    "TerminalPaletteDetector",
+    "TerminalPalette",
     "MockPaletteStdin",
     "MockPaletteStdout",
 ]

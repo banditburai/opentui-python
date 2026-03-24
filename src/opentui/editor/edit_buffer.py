@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from ..ffi import NanobindLibrary
+from typing import Any
 
 
 class EditBuffer:
     """Wrapper around native EditBuffer for text editing with cursor."""
 
-    def __init__(self, ptr: Any, native: NanobindLibrary):
+    def __init__(self, ptr: Any, native: Any):
         self._ptr = ptr
         self._native = native
 

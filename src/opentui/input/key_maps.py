@@ -291,9 +291,6 @@ def _char_code_to_key(char_code: int) -> str:
     return f"unknown-{char_code}"
 
 
-# ---------------------------------------------------------------------------
-# Kitty keyboard protocol flags
-# ---------------------------------------------------------------------------
 
 KITTY_FLAG_DISAMBIGUATE = 0b1  # bit 0: disambiguated escape codes
 KITTY_FLAG_EVENT_TYPES = 0b10  # bit 1: press/repeat/release event types

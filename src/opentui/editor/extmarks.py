@@ -9,7 +9,7 @@ undo/redo history for extmark state.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 from ..structs import display_width as _string_width
 from .extmarks_wrappers import (
@@ -19,56 +19,6 @@ from .extmarks_wrappers import (
     install_insertion_wrappers,
     install_undo_redo_wrappers,
 )
-
-# ---------------------------------------------------------------------------
-# Protocols for the EditBuffer / EditorView objects we wrap.
-# Using protocols allows the controller to work with both real native objects
-# and lightweight test stubs.
-# ---------------------------------------------------------------------------
-
-
-class EditBufferLike(Protocol):
-    """Minimal interface an EditBuffer must satisfy."""
-
-    def move_cursor_left(self) -> None: ...
-    def move_cursor_right(self) -> None: ...
-    def set_cursor_by_offset(self, offset: int) -> None: ...
-    def delete_char_backward(self) -> None: ...
-    def delete_char(self) -> None: ...
-    def insert_text(self, text: str) -> None: ...
-    def insert_char(self, char: str) -> None: ...
-    def delete_range(
-        self, start_line: int, start_col: int, end_line: int, end_col: int
-    ) -> None: ...
-    def set_text(self, text: str) -> None: ...
-    def replace_text(self, text: str) -> None: ...
-    def clear(self) -> None: ...
-    def new_line(self) -> None: ...
-    def delete_line(self) -> None: ...
-    def undo(self) -> str | None: ...
-    def redo(self) -> str | None: ...
-    def get_text(self) -> str: ...
-    def offset_to_position(self, offset: int) -> dict[str, int] | None: ...
-    def position_to_offset(self, row: int, col: int) -> int: ...
-    def clear_all_highlights(self) -> None: ...
-    def add_highlight_by_char_range(self, spec: dict[str, Any]) -> None: ...
-
-
-class EditorViewLike(Protocol):
-    """Minimal interface an EditorView must satisfy."""
-
-    def get_visual_cursor(self) -> Any: ...
-    def has_selection(self) -> bool: ...
-    def get_selection(self) -> Any | None: ...
-    def move_up_visual(self) -> None: ...
-    def move_down_visual(self) -> None: ...
-    def delete_selected_text(self) -> None: ...
-    def set_cursor_by_offset(self, offset: int) -> None: ...
-
-
-# ---------------------------------------------------------------------------
-# Data classes
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -81,11 +31,6 @@ class Extmark:
     priority: int | None = None
     data: Any = None
     type_id: int = 0
-
-
-# ---------------------------------------------------------------------------
-# ExtmarksSnapshot & ExtmarksHistory
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -147,14 +92,8 @@ def _clone_extmark(em: Extmark) -> Extmark:
     )
 
 
-# ---------------------------------------------------------------------------
-# Sentinel for "metadata not provided"
 _SENTINEL = object()
 
-
-# ---------------------------------------------------------------------------
-# ExtmarksController
-# ---------------------------------------------------------------------------
 
 
 class ExtmarksController:
@@ -180,7 +119,6 @@ class ExtmarksController:
         self._type_id_to_name: dict[int, str] = {}
         self._next_type_id: int = 1
 
-        # -- Save originals --------------------------------------------------
         self._orig_move_cursor_left = edit_buffer.move_cursor_left
         self._orig_move_cursor_right = edit_buffer.move_cursor_right
         self._orig_set_cursor_by_offset = edit_buffer.set_cursor_by_offset
@@ -200,16 +138,11 @@ class ExtmarksController:
         self._orig_undo = edit_buffer.undo
         self._orig_redo = edit_buffer.redo
 
-        # -- Patch methods ----------------------------------------------------
         install_cursor_wrappers(self, edit_buffer, editor_view)
         install_deletion_wrappers(self, edit_buffer, editor_view)
         install_insertion_wrappers(self, edit_buffer, editor_view)
         install_delete_selected_text_wrapper(self, editor_view)
         install_undo_redo_wrappers(self, edit_buffer)
-
-    # -----------------------------------------------------------------------
-    # Undo / Redo helper (called by wrappers in extmarks_wrappers.py)
-    # -----------------------------------------------------------------------
 
     def _undo_or_redo(self, *, direction: str) -> str | None:
         if direction == "undo":
@@ -237,10 +170,6 @@ class ExtmarksController:
         self._restore_snapshot(snapshot)
 
         return orig_fn()
-
-    # -----------------------------------------------------------------------
-    # Internal helpers
-    # -----------------------------------------------------------------------
 
     def _delete_virtual_extmark_range(self, virtual_em: Extmark) -> None:
         start_cursor = self._offset_to_position(virtual_em.start)
@@ -284,23 +213,28 @@ class ExtmarksController:
         self._update_highlights()
 
     def adjust_extmarks_after_deletion(self, delete_offset: int, length: int) -> None:
-        """Adjust extmark positions after a deletion.  Public for use in tests."""
         to_delete: list[int] = []
+        end = delete_offset + length
 
         for em in self._extmarks.values():
             if em.end <= delete_offset:
                 continue
 
-            if em.start >= delete_offset + length:
+            if em.start >= end:
+                # Entirely after deletion — shift left
                 em.start -= length
                 em.end -= length
-            elif em.start >= delete_offset and em.end <= delete_offset + length:
+            elif em.start >= delete_offset and em.end <= end:
+                # Entirely within deletion — remove
                 to_delete.append(em.id)
-            elif em.start < delete_offset and em.end > delete_offset + length:
+            elif em.start < delete_offset and em.end > end:
+                # Deletion inside extmark — shrink
                 em.end -= length
             elif em.start < delete_offset and em.end > delete_offset:
-                em.end -= min(em.end, delete_offset + length) - delete_offset
-            elif em.start < delete_offset + length and em.end > delete_offset + length:
+                # Deletion overlaps extmark's end — truncate
+                em.end -= min(em.end, end) - delete_offset
+            elif em.start < end and em.end > end:
+                # Deletion overlaps extmark's start — collapse start
                 em.start = delete_offset
                 em.end -= length
 
@@ -378,10 +312,6 @@ class ExtmarksController:
         self._next_id = snapshot.next_id
         self._update_highlights()
 
-    # -----------------------------------------------------------------------
-    # Public API
-    # -----------------------------------------------------------------------
-
     def create(
         self,
         *,
@@ -428,7 +358,6 @@ class ExtmarksController:
         return eid
 
     def delete(self, eid: int) -> bool:
-        """Delete an extmark by id.  Returns True if it existed."""
         if self._destroyed:
             raise RuntimeError("ExtmarksController is destroyed")
 
@@ -441,31 +370,26 @@ class ExtmarksController:
         return True
 
     def get(self, eid: int) -> Extmark | None:
-        """Get an extmark by id."""
         if self._destroyed:
             return None
         return self._extmarks.get(eid)
 
     def get_all(self) -> list[Extmark]:
-        """Get all extmarks."""
         if self._destroyed:
             return []
         return list(self._extmarks.values())
 
     def get_virtual(self) -> list[Extmark]:
-        """Get all virtual extmarks."""
         if self._destroyed:
             return []
         return [em for em in self._extmarks.values() if em.virtual]
 
     def get_at_offset(self, offset: int) -> list[Extmark]:
-        """Get all extmarks containing the given offset."""
         if self._destroyed:
             return []
         return [em for em in self._extmarks.values() if em.start <= offset < em.end]
 
     def get_all_for_type_id(self, type_id: int) -> list[Extmark]:
-        """Get all extmarks with the given type_id."""
         if self._destroyed:
             return []
         ids = self._extmarks_by_type_id.get(type_id)
@@ -474,17 +398,12 @@ class ExtmarksController:
         return [self._extmarks[eid] for eid in ids if eid in self._extmarks]
 
     def clear(self) -> None:
-        """Remove all extmarks and metadata."""
         if self._destroyed:
             return
         self._extmarks.clear()
         self._extmarks_by_type_id.clear()
         self._metadata.clear()
         self._update_highlights()
-
-    # -----------------------------------------------------------------------
-    # Type registry
-    # -----------------------------------------------------------------------
 
     def register_type(self, type_name: str) -> int:
         """Register a type name and return a unique type_id.
@@ -514,19 +433,11 @@ class ExtmarksController:
             return None
         return self._type_id_to_name.get(type_id)
 
-    # -----------------------------------------------------------------------
-    # Metadata
-    # -----------------------------------------------------------------------
-
     def get_metadata_for(self, extmark_id: int) -> Any:
         """Return the metadata stored for *extmark_id*, or ``None``."""
         if self._destroyed:
             return None
         return self._metadata.get(extmark_id)
-
-    # -----------------------------------------------------------------------
-    # Destroy
-    # -----------------------------------------------------------------------
 
     def destroy(self) -> None:
         if self._destroyed:

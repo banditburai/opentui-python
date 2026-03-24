@@ -86,48 +86,6 @@ class NativeRenderer:
         return _nb.renderer.get_current_buffer(self._ptr)
 
 
-class NativeBuffer:
-    """Wrapper for native buffer using nanobind bindings."""
-
-    def __init__(self, ptr: Any):
-        self._ptr = ptr
-
-    @property
-    def ptr(self) -> Any:
-        return self._ptr
-
-    def clear(self) -> None:
-        _nb.buffer.buffer_clear(self._ptr, 0.0)
-
-    def resize(self, width: int, height: int) -> None:
-        _nb.buffer.buffer_resize(self._ptr, width, height)
-
-    def draw_text(self, text: str, x: int, y: int) -> None:
-        text_bytes = text.encode("utf-8") if isinstance(text, str) else text
-        _nb.buffer.buffer_draw_text(self._ptr, text_bytes, len(text_bytes), x, y)
-
-    def set_cell(self, x: int, y: int, ch: int) -> None:
-        _nb.buffer.buffer_set_cell(self._ptr, x, y, ch)
-
-    def fill_rect(self, x: int, y: int, width: int, height: int) -> None:
-        _nb.buffer.buffer_fill_rect(self._ptr, x, y, width, height)
-
-    def get_char_ptr(self) -> int:
-        return _nb.buffer.buffer_get_char_ptr(self._ptr)
-
-    def get_fg_ptr(self) -> int:
-        return _nb.buffer.buffer_get_fg_ptr(self._ptr)
-
-    def get_bg_ptr(self) -> int:
-        return _nb.buffer.buffer_get_bg_ptr(self._ptr)
-
-    def get_width(self) -> int:
-        return _nb.buffer.get_buffer_width(self._ptr)
-
-    def get_height(self) -> int:
-        return _nb.buffer.get_buffer_height(self._ptr)
-
-
 class NativeOptimizedBuffer:
     """Wrapper for native optimized buffer (frame buffer for rendering)."""
 
@@ -140,6 +98,8 @@ class NativeOptimizedBuffer:
         encoding: int = 0,
         buffer_id: str = "",
     ):
+        if not _NANOBIND_AVAILABLE:
+            raise RuntimeError("Nanobind bindings not available")
         self._ptr: Any = _nb.buffer.create_optimized_buffer(
             width, height, respect_alpha, encoding, buffer_id
         )
@@ -299,7 +259,6 @@ def is_available() -> bool:
 
 __all__ = [
     "NativeRenderer",
-    "NativeBuffer",
     "NativeOptimizedBuffer",
     "is_available",
     "encode_unicode",

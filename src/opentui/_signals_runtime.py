@@ -11,6 +11,7 @@ _tracking_context: contextvars.ContextVar[set[Any] | None] = contextvars.Context
     "_tracking_context", default=None
 )
 
+
 class _RuntimeState:
     __slots__ = (
         "batch_depth",
@@ -34,16 +35,10 @@ _runtime = _RuntimeState()
 
 
 class _SignalState:
-    _instance = None
+    __slots__ = ("_notified",)
 
     def __init__(self):
         self._notified: set[Any] = set()
-
-    @classmethod
-    def get_instance(cls) -> _SignalState:
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
 
     def has_changes(self) -> bool:
         return bool(self._notified)
@@ -52,7 +47,7 @@ class _SignalState:
         self._notified.clear()
 
 
-_signal_state: _SignalState = _SignalState.get_instance()
+_signal_state: _SignalState = _SignalState()
 _signal_state_notified: set[Any] = _signal_state._notified
 
 
@@ -88,7 +83,4 @@ class Batch:
 
             _flush_batch()
 
-_owner_stack = _runtime.owner_stack
-
-
-__all__ = ["Batch", "_SignalState", "_owner_stack", "_runtime", "_signal_state", "_tracking_context"]
+__all__ = ["Batch", "_SignalState", "_runtime", "_signal_state", "_tracking_context"]

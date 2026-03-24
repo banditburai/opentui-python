@@ -7,7 +7,7 @@ Tests ported: 48/48 (48 real)
 import pytest
 
 from opentui import create_test_renderer
-from opentui.components.input import SelectOption
+from opentui.components.select import SelectOption
 from opentui.components.select_renderable import SelectRenderable
 from opentui.events import KeyEvent
 from opentui.input.keymapping import KeyBinding

@@ -117,6 +117,12 @@ class Inserted(Renderable):
             self._apply_region(mode, payload)
             self._subscribe_data(tracked)
             self.mark_dirty()
+            # Mark parent dirty so the renderer's local-subtree layout
+            # optimization doesn't use stale parent dimensions as constraints.
+            # Without this, Yoga runs with the old parent height, producing
+            # incorrect child positions on the first layout pass.
+            if self._parent is not None:
+                self._parent.mark_dirty()
         finally:
             self._updating = False
 
@@ -361,7 +367,7 @@ class Dynamic(Renderable):
         for cached in self._branch_cache.values():
             for child in cached:
                 if not child._destroyed:
-                    child.destroy_recursively()
+                    child.destroy()
         self._branch_cache.clear()
         super().destroy()
 

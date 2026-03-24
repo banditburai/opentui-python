@@ -138,7 +138,6 @@ class Mount(Renderable):
         tracked: set[Signal] = set()
         token = _tracking_context.set(tracked)
         try:
-            # Compute the invalidation key
             if self._auto_invalidate:
                 next_key = self._compute_auto_key()
             elif self._invalidate_when is not None:
@@ -164,7 +163,6 @@ class Mount(Renderable):
                         _tracking_context.reset(build_token)
                     tracked.update(build_tracked)
                     self._auto_tracked_deps = tuple(build_tracked)
-                    # Recompute key from newly discovered deps
                     next_key = self._snapshot_auto_key()
                 else:
                     rebuilt_children = normalize_render_result(self._build_fn())

@@ -160,18 +160,18 @@ class _ConfigMixin:
             return await self._palette_detection_promise
 
         if self._palette_detector is None:
-            from ..palette import TerminalPaletteDetector
+            from ..palette import TerminalPalette
 
             if self._config.testing:
                 from ..palette import MockPaletteStdin, MockPaletteStdout
 
                 stdin = MockPaletteStdin(is_tty=False)
                 stdout = MockPaletteStdout(is_tty=False)
-                self._palette_detector = TerminalPaletteDetector(stdin, stdout)
+                self._palette_detector = TerminalPalette(stdin, stdout)
             else:
                 import sys
 
-                self._palette_detector = TerminalPaletteDetector(
+                self._palette_detector = TerminalPalette(
                     sys.stdin,
                     sys.stdout,
                     write_fn=lambda data: self.write_out(

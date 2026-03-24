@@ -7,7 +7,7 @@ import pytest
 from opentui.editor.edit_buffer_native import NativeEditBuffer
 from opentui.editor.editor_view_native import NativeEditorView
 from opentui.editor.text_buffer_native import NativeTextBuffer
-from opentui.native import NativeBuffer, NativeRenderer, is_available
+from opentui.native import NativeRenderer, is_available
 
 pytestmark = pytest.mark.skipif(not is_available(), reason="Native bindings not available")
 
@@ -26,19 +26,23 @@ class TestRendererLifecycle:
         r.__del__()  # second destroy should be safe
 
     def test_get_buffer_dimensions(self):
+        from opentui.ffi import get_native
+
+        nb = get_native()
         r = NativeRenderer(120, 40, testing=True)
         buf_ptr = r.get_next_buffer()
-        buf = NativeBuffer(buf_ptr)
-        assert buf.get_width() == 120
-        assert buf.get_height() == 40
+        assert nb.buffer.get_buffer_width(buf_ptr) == 120
+        assert nb.buffer.get_buffer_height(buf_ptr) == 40
 
     def test_resize(self):
+        from opentui.ffi import get_native
+
+        nb = get_native()
         r = NativeRenderer(80, 24, testing=True)
         r.resize(160, 48)
         buf_ptr = r.get_next_buffer()
-        buf = NativeBuffer(buf_ptr)
-        assert buf.get_width() == 160
-        assert buf.get_height() == 48
+        assert nb.buffer.get_buffer_width(buf_ptr) == 160
+        assert nb.buffer.get_buffer_height(buf_ptr) == 48
 
     def test_render_no_crash(self):
         r = NativeRenderer(80, 24, testing=True)
@@ -46,59 +50,65 @@ class TestRendererLifecycle:
 
 
 class TestBufferOperations:
-    """clear, draw_text, fill_rect, resize, set_cell."""
+    """clear, draw_text, fill_rect, resize, set_cell via raw native API."""
 
     def setup_method(self):
+        from opentui.ffi import get_native
+
+        self._nb = get_native()
         self.renderer = NativeRenderer(80, 24, testing=True)
-        self.buf = NativeBuffer(self.renderer.get_next_buffer())
+        self.buf_ptr = self.renderer.get_next_buffer()
 
     def test_clear(self):
-        self.buf.clear()  # should not crash
+        self._nb.buffer.buffer_clear(self.buf_ptr, 0.0)
 
     def test_draw_text(self):
-        self.buf.draw_text("Hello", 0, 0)  # should not crash
+        text = b"Hello"
+        self._nb.buffer.buffer_draw_text(self.buf_ptr, text, len(text), 0, 0)
 
     def test_draw_text_at_position(self):
-        self.buf.draw_text("World", 10, 5)  # should not crash
+        text = b"World"
+        self._nb.buffer.buffer_draw_text(self.buf_ptr, text, len(text), 10, 5)
 
     def test_fill_rect(self):
-        self.buf.fill_rect(0, 0, 10, 5)  # should not crash
+        self._nb.buffer.buffer_fill_rect(self.buf_ptr, 0, 0, 10, 5)
 
     def test_set_cell(self):
-        self.buf.set_cell(0, 0, ord("X"))  # should not crash
+        self._nb.buffer.buffer_set_cell(self.buf_ptr, 0, 0, ord("X"))
 
     def test_resize(self):
-        self.buf.resize(40, 12)
-        assert self.buf.get_width() == 40
-        assert self.buf.get_height() == 12
+        self._nb.buffer.buffer_resize(self.buf_ptr, 40, 12)
+        assert self._nb.buffer.get_buffer_width(self.buf_ptr) == 40
+        assert self._nb.buffer.get_buffer_height(self.buf_ptr) == 12
 
     def test_draw_text_out_of_bounds(self):
         """Drawing out of bounds should not crash."""
-        self.buf.draw_text("test", 1000, 1000)
+        text = b"test"
+        self._nb.buffer.buffer_draw_text(self.buf_ptr, text, len(text), 1000, 1000)
 
     def test_fill_rect_out_of_bounds(self):
         """Fill rect out of bounds should not crash."""
-        self.buf.fill_rect(1000, 1000, 10, 10)
+        self._nb.buffer.buffer_fill_rect(self.buf_ptr, 1000, 1000, 10, 10)
 
 
 class TestMemoryPointers:
-    """buffer_get_char_ptr returns nonzero, fg/bg/attr ptrs valid."""
+    """buffer_get_char_ptr returns nonzero, fg/bg ptrs valid."""
 
     def setup_method(self):
+        from opentui.ffi import get_native
+
+        self._nb = get_native()
         self.renderer = NativeRenderer(80, 24, testing=True)
-        self.buf = NativeBuffer(self.renderer.get_next_buffer())
+        self.buf_ptr = self.renderer.get_next_buffer()
 
     def test_char_ptr_nonzero(self):
-        ptr = self.buf.get_char_ptr()
-        assert ptr != 0
+        assert self._nb.buffer.buffer_get_char_ptr(self.buf_ptr) != 0
 
     def test_fg_ptr_nonzero(self):
-        ptr = self.buf.get_fg_ptr()
-        assert ptr != 0
+        assert self._nb.buffer.buffer_get_fg_ptr(self.buf_ptr) != 0
 
     def test_bg_ptr_nonzero(self):
-        ptr = self.buf.get_bg_ptr()
-        assert ptr != 0
+        assert self._nb.buffer.buffer_get_bg_ptr(self.buf_ptr) != 0
 
 
 class TestTextBuffer:

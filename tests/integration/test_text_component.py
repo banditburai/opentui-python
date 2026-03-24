@@ -331,7 +331,7 @@ async def test_layout_common_tree_reuses_current_buffer_for_direct_overlay_remov
         monkeypatch.setattr(native_buffer, "buffer_clear", counting_clear)
 
         root.remove(overlay)
-        overlay.destroy_recursively()
+        overlay.destroy()
         setup.render_frame()
 
         assert calls["copy"] == 1

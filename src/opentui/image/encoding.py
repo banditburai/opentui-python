@@ -330,16 +330,7 @@ class _EmptyCapabilities:
 
 
 def _convert_to_grayscale(data: bytes, width: int, height: int) -> bytes:
-    """Convert RGBA image data to 16-bit grayscale.
-
-    Args:
-        data: Raw RGBA image data
-        width: Image width in pixels
-        height: Image height in pixels
-
-    Returns:
-        16-bit grayscale image data (2 bytes per pixel)
-    """
+    """Convert RGBA image data to 16-bit grayscale."""
     if len(data) < 4:
         return b""
 
@@ -371,20 +362,7 @@ def _encode_sixel(
     height: int,
     bg_color: tuple[int, int, int] = (0, 0, 0),
 ) -> bytes:
-    """Encode RGBA image data as SIXEL graphics escape sequence.
-
-    SIXEL encodes 6 vertical pixels as 6 bits (0-63 values).
-    Each group of 6 pixels becomes one character in range 63-126.
-
-    Args:
-        data: Raw RGBA image data
-        width: Image width in pixels
-        height: Image height in pixels
-        bg_color: Background color as (r, g, b) tuple 0-255
-
-    Returns:
-        Complete SIXEL escape sequence bytes
-    """
+    """Encode RGBA image data as SIXEL graphics escape sequence."""
     if len(data) < 4:
         return b""
 
@@ -483,23 +461,7 @@ def _encode_kitty(
     y: int = 0,
     transmission: str = "direct",
 ) -> list[bytes]:
-    """Encode image data as Kitty graphics protocol chunks.
-
-    Kitty protocol uses base64-encoded data with escape sequences.
-    Large images are split into multiple chunks.
-
-    Args:
-        data: Raw image data (PNG/JPEG or RGBA)
-        chunk_id: Unique identifier for this image
-        width: Image width in pixels
-        height: Image height in pixels
-        x: X position in cells
-        y: Y position in cells
-        transmission: "direct" or "file"
-
-    Returns:
-        List of escape sequence chunks to send
-    """
+    """Encode image data as Kitty graphics protocol chunks."""
     import base64
 
     # Recompressing payloads requires protocol flags we weren't sending,
@@ -534,14 +496,7 @@ def _encode_kitty(
 
 
 def _clear_kitty_graphics(graphics_id: int | None = None) -> bytes:
-    """Generate escape sequence to clear Kitty graphics.
-
-    Args:
-        graphics_id: Specific ID to clear, or None to clear all
-
-    Returns:
-        Escape sequence bytes
-    """
+    """Generate escape sequence to clear Kitty graphics."""
     if graphics_id is not None:
         return f"\x1b_Ga=d,d=I,i={graphics_id}\x1b\\".encode()
     return b"\x1b_Ga=d,d=A\x1b\\"
@@ -621,14 +576,7 @@ class ClipboardHandler:
             return None
 
     def _decode_image(self, data: bytes) -> tuple[bytes, int, int]:
-        """Decode image data to RGBA.
-
-        Args:
-            data: PNG or JPEG image data
-
-        Returns:
-            Tuple of (RGBA_data, width, height)
-        """
+        """Decode image data to RGBA."""
         try:
             from PIL import Image
         except ImportError:
@@ -641,17 +589,7 @@ class ClipboardHandler:
         return img.tobytes(), width, height
 
     def _decode_image_fallback(self, data: bytes) -> tuple[bytes, int, int]:
-        """Fallback image decode without Pillow.
-
-        Args:
-            data: Image data
-
-        Returns:
-            Tuple of (RGBA_data, width, height)
-
-        Raises:
-            ImportError: If Pillow is not installed
-        """
+        """Fallback image decode without Pillow."""
         if data[:8] == self.PNG_MAGIC:
             raise ImportError("Pillow required for PNG: pip install pillow")
         elif data[:2] == self.JPEG_MAGIC:

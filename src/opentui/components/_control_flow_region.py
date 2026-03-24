@@ -46,7 +46,7 @@ def evict_lru_branches(cache: dict[Any, list[BaseRenderable]], max_size: int) ->
         evicted = cache.pop(oldest_key)
         for child in evicted:
             if not child._destroyed:
-                child.destroy_recursively()
+                child.destroy()
 
 
 def normalize_inserted_children(
@@ -125,7 +125,7 @@ def replace_region_children(
 
     for child in old_children:
         child._parent = None
-        child.destroy_recursively()
+        child.destroy()
 
 
 def can_fast_patch_plain_text(old: BaseRenderable, new: BaseRenderable) -> bool:

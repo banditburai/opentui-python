@@ -450,22 +450,10 @@ def Spacer(**kwargs) -> Box:
     return Box(**kwargs)
 
 
-# Re-export for downstream consumers (talaria-tui imports ScrollBox from box)
-from .scrollbox import (  # noqa: E402, F401
-    LinearScrollAccel,
-    MacOSScrollAccel,
-    ScrollBox,
-    ScrollContent,
-)
-
 __all__ = [
     "Box",
     "Row",
     "Column",
     "FlexFill",
     "Spacer",
-    "LinearScrollAccel",
-    "MacOSScrollAccel",
-    "ScrollBox",
-    "ScrollContent",
 ]

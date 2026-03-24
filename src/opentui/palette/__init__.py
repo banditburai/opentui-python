@@ -1,8 +1,7 @@
 """Palette package — terminal colour detection and palette parsing."""
 
 from .common import OSC4_RE, OSC_SPECIAL_RE, Hex, TerminalColors
-from .detector import MockPaletteStdin, MockPaletteStdout, TerminalPaletteDetector
-from .terminal import TerminalPalette
+from .detector import MockPaletteStdin, MockPaletteStdout, TerminalPalette
 
 __all__ = [
     "Hex",
@@ -12,5 +11,4 @@ __all__ = [
     "OSC_SPECIAL_RE",
     "TerminalColors",
     "TerminalPalette",
-    "TerminalPaletteDetector",
 ]

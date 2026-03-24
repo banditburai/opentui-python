@@ -333,7 +333,6 @@ __all__ = [
     "UnaryOp",
     "Conditional",
     "MappedExpr",
-    "_ensure_expr",
     "all_",
     "any_",
     "match",

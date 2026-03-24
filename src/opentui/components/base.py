@@ -11,8 +11,10 @@ from . import _renderable_base
 from ._renderable_base import (
     BaseRenderable,
     LayoutRect,
-    _get_configure_node_fast,
+    _Prop,
     _PropBinding,
+    _RenderableBehaviorMixin,
+    _get_configure_node_fast,
 )
 from ._renderable_constants import (
     _COLUMN,
@@ -25,7 +27,6 @@ from ._renderable_constants import (
     _UNSET_FLEX_SHRINK,
     _VISIBLE,
 )
-from ._renderable_props import _Prop
 
 is_renderable = _renderable_base.is_renderable
 
@@ -33,6 +34,7 @@ is_renderable = _renderable_base.is_renderable
 if TYPE_CHECKING:
     from ..events import KeyEvent, MouseEvent, PasteEvent
     from ..renderer import Buffer
+
 
 def _clamp_opacity(v: float) -> float:
     return max(0.0, min(1.0, v))
@@ -42,7 +44,6 @@ _parse_color_static = s.parse_color_opt
 
 
 from ._reactive_binding import _ReactiveBindingMixin
-from ._renderable_behavior import _RenderableBehaviorMixin
 from ._renderable_init import initialize_renderable
 from ._renderable_layout import (
     apply_renderable_layout,

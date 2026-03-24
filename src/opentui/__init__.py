@@ -20,7 +20,6 @@ Example:
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from importlib.metadata import version as _pkg_version
 
 try:
@@ -46,10 +45,13 @@ from .enums import (
 )
 
 from .components import (
+    BaseRenderable,
+    Bold,
     Box,
     Code,
     Column,
     Diff,
+    DiffRenderable,
     Dynamic,
     ErrorBoundary,
     FlexFill,
@@ -57,12 +59,18 @@ from .components import (
     FrameBuffer,
     Image,
     Input,
+    InputRenderable,
+    Inserted,
     Italic,
     Lazy,
+    LayoutRect,
     LineBreak,
+    LineColorConfig,
     LineNumber,
-    Link,
+    LineNumberRenderable,
+    LineSign,
     LinearScrollAccel,
+    Link,
     MacOSScrollAccel,
     Markdown,
     Match,
@@ -76,6 +84,7 @@ from .components import (
     ScrollContent,
     Select,
     SelectOption,
+    SelectRenderable,
     Show,
     Slider,
     Spacer,
@@ -84,24 +93,21 @@ from .components import (
     Switch,
     TabSelect,
     Text,
-    Textarea,
+    TextModifier,
+    TextRenderable,
     TextTable,
+    Textarea,
+    TextareaRenderable,
     Underline,
+    VRenderable,
     component,
 )
-from .components.base import BaseRenderable, LayoutRect, VRenderable
-from .components.line_types import LineColorConfig, LineSign
-from .components.diff_renderable import DiffRenderable
-from .components.input_renderable import InputRenderable
-from .components.line_number_renderable import LineNumberRenderable
-from .components.select_renderable import SelectRenderable
-from .components.text import Bold, TextModifier
-from .components.text_renderable import TextRenderable
-from .components.textarea_renderable import TextareaRenderable
 
-from .editor.edit_buffer import (
+from .editor import (
     EditBuffer,
     EditorView,
+    StyleDefinition,
+    SyntaxStyle,
     create_edit_buffer,
 )
 
@@ -118,30 +124,25 @@ from .events import (
     handler,
 )
 
-from .helpers import panel, pick
 
-from .image.encoding import (
-    ClipboardHandler,
-    ImageRenderer,
-)
-from .image.filters import (
+from .image import (
     BlurFilter,
     BrightnessFilter,
+    ClipboardHandler,
     ContrastFilter,
+    DecodedImage,
     Filter,
     FilterChain,
     GrayscaleFilter,
-    InvertFilter,
-    SepiaFilter,
-)
-
-from .image.types import (
-    DecodedImage,
     ImageFit,
     ImageProtocol,
+    ImageRenderer,
     ImageSource,
+    InvertFilter,
+    SepiaFilter,
+    load_image,
+    load_svg,
 )
-from .image.loader import load_image, load_svg
 from .attachments import detect_dropped_paths, normalize_paste_payload
 
 from .selection import (
@@ -205,69 +206,10 @@ from .expr import (
     match,
 )
 
-from .editor.syntax_style import StyleDefinition, SyntaxStyle as NativeSyntaxStyle
 from .tree_sitter_client import PyTreeSitterClient
 
 
-async def render(
-    component_fn: Callable,
-    config: CliRendererConfig | dict | None = None,
-) -> None:
-    """Render a component to the terminal.
-
-    This is the main entry point for OpenTUI Python, matching @opentui/solid's API.
-
-    Args:
-        component_fn: A callable that returns a component tree
-        config: Optional renderer configuration
-
-    Example:
-        @component
-        def App():
-            return Box(
-                Text("Hello, World!"),
-                padding=1,
-            )
-
-        await render(App)
-    """
-    if isinstance(config, dict):
-        config = CliRendererConfig(**config)
-    if config is None:
-        config = CliRendererConfig()
-
-    if not config.testing:
-        import shutil
-
-        term_size = shutil.get_terminal_size((80, 24))
-        if term_size.columns > 0 and term_size.lines > 0:
-            from dataclasses import replace
-
-            config = replace(config, width=term_size.columns, height=term_size.lines)
-
-    renderer = await create_cli_renderer(config)
-
-    from .hooks import set_renderer
-
-    set_renderer(renderer)
-
-    from ._signals_runtime import _signal_state
-
-    _signal_state.reset()
-
-    component, _, _ = renderer.evaluate_component(component_fn)
-
-    renderer.root.add(component)
-
-    renderer._component_fn = component_fn
-    renderer._signal_state = _signal_state
-
-    try:
-        renderer.run()
-    finally:
-        renderer.destroy()
-
-
+from .app import render
 from .diagnostics import enable_diagnostics, disable_diagnostics, get_log_file_path
 
 from .testing import TestSetup, create_test_renderer, test_render
@@ -313,6 +255,7 @@ __all__ = [
     "Link",
     "MacOSScrollAccel",
     "Input",
+    "Inserted",
     "Textarea",
     "Select",
     "SelectOption",
@@ -365,9 +308,10 @@ __all__ = [
     "all_",
     "any_",
     "match",
-    "NativeSyntaxStyle",
+    "SyntaxStyle",
     "StyleDefinition",
     "PyTreeSitterClient",
+    "hooks",
     "signals",
     "Context",
     "create_context",
@@ -417,8 +361,6 @@ __all__ = [
     "SepiaFilter",
     "InvertFilter",
     "FilterChain",
-    "panel",
-    "pick",
     "enable_diagnostics",
     "disable_diagnostics",
     "get_log_file_path",

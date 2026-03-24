@@ -106,6 +106,9 @@ def teardown_terminal_session(renderer: Any, *, os_module: Any, select_module: A
 
 
 def destroy_terminal_session(renderer: Any) -> None:
+    if renderer._root is not None:
+        renderer._root.destroy()
+        renderer._root = None
     renderer._current_mouse_pointer_style = "default"
     renderer._last_over_renderable = None
     if renderer._palette_detector is not None:

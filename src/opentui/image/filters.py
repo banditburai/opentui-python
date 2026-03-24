@@ -24,15 +24,17 @@ class Filter:
     ``apply`` dispatches to the numpy path when available.
     """
 
-    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
+    def apply(
+        self, data: bytes, format: str = "RGBA", *, width: int = 0, height: int = 0
+    ) -> bytes:
         if _HAS_NUMPY:
-            return self._apply_numpy(data, format)
-        return self._apply_pure(data, format)
+            return self._apply_numpy(data, format, width=width, height=height)
+        return self._apply_pure(data, format, width=width, height=height)
 
-    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_pure(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         return data
 
-    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_numpy(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         return data
 
     def _prepare_pure(self, data: bytes, format: str) -> tuple[bytearray, int, bool] | None:
@@ -59,7 +61,7 @@ class Filter:
 class GrayscaleFilter(Filter):
     """Convert image to grayscale using luminance formula Y = 0.299*R + 0.587*G + 0.114*B."""
 
-    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_pure(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         prep = self._prepare_pure(data, format)
         if prep is None:
             return data
@@ -78,7 +80,7 @@ class GrayscaleFilter(Filter):
 
         return bytes(result)
 
-    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_numpy(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         prep = self._prepare_numpy(data, format)
         if prep is None:
             return data
@@ -106,24 +108,17 @@ class BlurFilter(Filter):
         """
         self._radius = radius
 
-    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
-        """Apply Gaussian blur to image data."""
-        if _HAS_NUMPY:
-            return self._apply_numpy(data, format)
-        return self._apply_pure(data, format)
-
-    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_pure(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         """Apply Gaussian blur using pure Python."""
         if len(data) < 4:
             return data
 
         is_rgba = format.upper() == "RGBA"
         bytes_per_pixel = 4 if is_rgba else 3
-
-        # Derive dimensions from data length (assume square if ambiguous)
         total_pixels = len(data) // bytes_per_pixel
-        width = int(total_pixels**0.5)
-        height = total_pixels // width if width > 0 else 0
+
+        width = kwargs.get("width", 0) or int(total_pixels**0.5)
+        height = kwargs.get("height", 0) or (total_pixels // width if width > 0 else 0)
 
         expected_size = width * height * bytes_per_pixel
         if len(data) != expected_size:
@@ -171,18 +166,17 @@ class BlurFilter(Filter):
 
         return bytes(result)
 
-    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_numpy(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         """Apply Gaussian blur using NumPy with separable convolution."""
         if len(data) < 4:
             return data
 
         is_rgba = format.upper() == "RGBA"
         bytes_per_pixel = 4 if is_rgba else 3
-
-        # Derive dimensions from data length (assume square if ambiguous)
         total_pixels = len(data) // bytes_per_pixel
-        width = int(total_pixels**0.5)
-        height = total_pixels // width if width > 0 else 0
+
+        width = kwargs.get("width", 0) or int(total_pixels**0.5)
+        height = kwargs.get("height", 0) or (total_pixels // width if width > 0 else 0)
 
         expected_size = width * height * bytes_per_pixel
         if len(data) != expected_size:
@@ -254,7 +248,7 @@ class BrightnessFilter(Filter):
         """
         self._factor = factor
 
-    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_pure(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         """Apply brightness adjustment using pure Python."""
         prep = self._prepare_pure(data, format)
         if prep is None:
@@ -269,7 +263,7 @@ class BrightnessFilter(Filter):
 
         return bytes(result)
 
-    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_numpy(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         """Apply brightness adjustment using NumPy."""
         prep = self._prepare_numpy(data, format)
         if prep is None:
@@ -291,7 +285,7 @@ class ContrastFilter(Filter):
         """
         self._factor = factor
 
-    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_pure(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         """Apply contrast adjustment using pure Python."""
         prep = self._prepare_pure(data, format)
         if prep is None:
@@ -307,7 +301,7 @@ class ContrastFilter(Filter):
 
         return bytes(result)
 
-    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_numpy(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         """Apply contrast adjustment using NumPy."""
         prep = self._prepare_numpy(data, format)
         if prep is None:
@@ -324,7 +318,7 @@ class ContrastFilter(Filter):
 class SepiaFilter(Filter):
     """Apply sepia tone to image using the standard sepia transformation matrix."""
 
-    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_pure(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         """Apply sepia effect using pure Python."""
         prep = self._prepare_pure(data, format)
         if prep is None:
@@ -346,7 +340,7 @@ class SepiaFilter(Filter):
 
         return bytes(result)
 
-    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_numpy(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         """Apply sepia effect using NumPy."""
         prep = self._prepare_numpy(data, format)
         if prep is None:
@@ -373,7 +367,7 @@ class SepiaFilter(Filter):
 class InvertFilter(Filter):
     """Invert image colors to create a photo-negative effect."""
 
-    def _apply_pure(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_pure(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         """Apply color inversion using pure Python."""
         prep = self._prepare_pure(data, format)
         if prep is None:
@@ -387,7 +381,7 @@ class InvertFilter(Filter):
 
         return bytes(result)
 
-    def _apply_numpy(self, data: bytes, format: str = "RGBA") -> bytes:
+    def _apply_numpy(self, data: bytes, format: str = "RGBA", **kwargs: int) -> bytes:
         """Apply color inversion using NumPy."""
         prep = self._prepare_numpy(data, format)
         if prep is None:
@@ -431,19 +425,23 @@ class FilterChain:
         self._filters.append(filter_)
         return self
 
-    def apply(self, data: bytes, format: str = "RGBA") -> bytes:
+    def apply(
+        self, data: bytes, format: str = "RGBA", *, width: int = 0, height: int = 0
+    ) -> bytes:
         """Apply all filters in sequence.
 
         Args:
             data: Raw image data
             format: Image format - "RGBA" or "RGB"
+            width: Image width in pixels (required for spatial filters like BlurFilter)
+            height: Image height in pixels (required for spatial filters like BlurFilter)
 
         Returns:
             Processed image data
         """
         result = data
         for filter_ in self._filters:
-            result = filter_.apply(result, format=format)
+            result = filter_.apply(result, format=format, width=width, height=height)
         return result
 
     def clear(self) -> None:

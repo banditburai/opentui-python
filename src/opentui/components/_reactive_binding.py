@@ -29,10 +29,6 @@ class _ReactiveBindingMixin:
     """
 
     def _set_or_bind(self, attr: str, value: object, *, transform: Callable | None = None) -> None:
-        """If value is a Signal, ComputedSignal, or callable (not str/type):
-        wraps with optional transform and creates a reactive binding.
-        Otherwise: applies transform (if any) and sets directly.
-        """
         if isinstance(value, Signal | _ComputedSignal):
             source = value.map(transform) if transform else value
             self._bind_reactive_prop(attr, source)
@@ -191,7 +187,7 @@ class _ReactiveBindingMixin:
             self._cleanups[id(cleanup)] = cleanup
             return True
 
-        elif callable(source) and not isinstance(source, type):
+        if callable(source) and not isinstance(source, type):
             tracked: set[Signal] = set()
             token = _tracking_context.set(tracked)
             try:

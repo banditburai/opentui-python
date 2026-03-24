@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import itertools
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -47,19 +48,8 @@ class LayoutRect(NamedTuple):
         return max(0, self.height - self.padding_top - self.padding_bottom)
 
 
-_NATIVE_CACHE: dict[str, Any] = {
-    "create_prop_binding": None,
-    "yoga_configurator": None,
-    "yoga_configurator_loaded": False,
-    "configure_node_fast": None,
-    "configure_node_fast_loaded": False,
-}
-
-
+@functools.cache
 def _get_yoga_configurator() -> Any:
-    if _NATIVE_CACHE["yoga_configurator_loaded"]:
-        return _NATIVE_CACHE["yoga_configurator"]
-    _NATIVE_CACHE["yoga_configurator_loaded"] = True
     if not _HAS_NATIVE:
         return None
     from .. import ffi
@@ -67,17 +57,14 @@ def _get_yoga_configurator() -> Any:
     nb = ffi.get_native()
     if nb is not None:
         try:
-            _NATIVE_CACHE["yoga_configurator"] = nb.yoga_configure.YogaConfigurator()
-            return _NATIVE_CACHE["yoga_configurator"]
+            return nb.yoga_configure.YogaConfigurator()
         except AttributeError:
             pass
     return None
 
 
+@functools.cache
 def _get_create_prop_binding() -> Any:
-    create_prop_binding = _NATIVE_CACHE["create_prop_binding"]
-    if create_prop_binding is not None:
-        return create_prop_binding
     if not _HAS_NATIVE:
         return None
     from .. import ffi
@@ -85,20 +72,15 @@ def _get_create_prop_binding() -> Any:
     nb = ffi.get_native()
     if nb is not None:
         try:
-            _NATIVE_CACHE["create_prop_binding"] = nb.native_signals.create_prop_binding
-            return _NATIVE_CACHE["create_prop_binding"]
+            return nb.native_signals.create_prop_binding
         except AttributeError:
             pass
     return None
 
 
+@functools.cache
 def _get_configure_node_fast() -> Any:
-    if _NATIVE_CACHE["configure_node_fast_loaded"]:
-        return _NATIVE_CACHE["configure_node_fast"]
-    configure_node_fast = getattr(yoga, "configure_node_fast", None)
-    _NATIVE_CACHE["configure_node_fast"] = configure_node_fast
-    _NATIVE_CACHE["configure_node_fast_loaded"] = True
-    return configure_node_fast
+    return getattr(yoga, "configure_node_fast", None)
 
 
 class _PropBinding(NamedTuple):
@@ -107,11 +89,75 @@ class _PropBinding(NamedTuple):
     unsub_only: Callable
 
 
+# ── Property descriptor and dirty-level plumbing ──────────────────────
+
+_DIRTY_NONE = 0
+_DIRTY_LAYOUT = 1
+_DIRTY_PAINT = 2
+_DIRTY_HIT_PAINT = 3
+
+_MOUSE_TRACKING_CACHE_SLOTS = frozenset(
+    {
+        "_visible",
+        "_on_mouse_down",
+        "_on_mouse_up",
+        "_on_mouse_move",
+        "_on_mouse_drag",
+        "_on_mouse_drag_end",
+        "_on_mouse_drop",
+        "_on_mouse_over",
+        "_on_mouse_out",
+        "_on_mouse_scroll",
+    }
+)
+
+
+class _Prop:
+    """Descriptor for slot access with optional transform and dirty marking."""
+
+    __slots__ = ("_slot", "_transform", "_dirty")
+
+    def __init__(
+        self,
+        slot: str,
+        transform: Callable | None = None,
+        *,
+        paint_only: bool = False,
+        hit_paint: bool = False,
+        dirty: bool = True,
+    ):
+        self._slot = slot
+        self._transform = transform
+        if not dirty:
+            self._dirty = _DIRTY_NONE
+        elif hit_paint:
+            self._dirty = _DIRTY_HIT_PAINT
+        elif paint_only:
+            self._dirty = _DIRTY_PAINT
+        else:
+            self._dirty = _DIRTY_LAYOUT
+
+    def __get__(self, obj, objtype=None):
+        return getattr(obj, self._slot) if obj is not None else self
+
+    def __set__(self, obj, value):
+        if self._transform is not None:
+            value = self._transform(value)
+        setattr(obj, self._slot, value)
+        if self._slot in _MOUSE_TRACKING_CACHE_SLOTS:
+            obj._invalidate_mouse_tracking_cache()
+        d = self._dirty
+        if d == _DIRTY_LAYOUT:
+            obj.mark_dirty()
+        elif d == _DIRTY_HIT_PAINT:
+            obj.mark_hit_paint_dirty()
+        elif d == _DIRTY_PAINT:
+            obj.mark_paint_dirty()
+
+
+# ── Counter and helpers ───────────────────────────────────────────────
+
 _renderable_id_counter = itertools.count(1)
-
-
-def _next_id() -> int:
-    return next(_renderable_id_counter)
 
 
 def _sync_yoga_children(
@@ -162,7 +208,7 @@ class BaseRenderable:
     )
 
     def __init__(self, *, key: str | int | None = None, id: str | None = None):
-        self._num = _next_id()
+        self._num = next(_renderable_id_counter)
         self._id: str = id if id is not None else f"renderable-{self._num}"
         BaseRenderable.renderables_by_number[self._num] = self
         self.key = key
@@ -305,10 +351,10 @@ class BaseRenderable:
             child._configure_yoga_properties()
 
     def _pre_configure_yoga(self) -> None:
-        """Called before yoga configure."""
+        pass
 
     def _post_configure_yoga(self, node: Any) -> None:
-        """Called after yoga configure."""
+        pass
 
     def _configure_yoga_node(self, node: Any) -> None:
         pass
@@ -546,11 +592,82 @@ class BaseRenderable:
         self._yoga_node = None
         self._parent = None
 
-    def destroy_recursively(self) -> None:
-        self.destroy()
-
     def get_render_strategy(self) -> RenderStrategy:
         return RenderStrategy.PYTHON_FALLBACK
+
+
+class _RenderableBehaviorMixin:
+    @property
+    def display(self) -> str:
+        return "flex" if self._visible else "none"
+
+    @display.setter
+    def display(self, value: str) -> None:
+        self.visible = value != "none"
+
+    @BaseRenderable.visible.setter
+    def visible(self, value: bool) -> None:
+        old = self._visible
+        if old == value:
+            return
+        self._visible = value
+        self._invalidate_mouse_tracking_cache()
+        self._sync_yoga_display()
+        self.mark_dirty()
+        if self._live:
+            self._propagate_live_count(1 if value else -1)
+
+    @property
+    def live(self) -> bool:
+        return self._live
+
+    @live.setter
+    def live(self, value: bool) -> None:
+        if self._live == value:
+            return
+        self._live = value
+        if self._visible:
+            self._propagate_live_count(1 if value else -1)
+
+    @property
+    def live_count(self) -> int:
+        return self._live_count
+
+    def _propagate_live_count(self, delta: int) -> None:
+        self._live_count += delta
+        parent = self._parent
+        if parent is not None and hasattr(parent, "_propagate_live_count"):
+            parent._propagate_live_count(delta)
+
+    def focus(self) -> None:
+        self.focused = True
+
+    def blur(self) -> None:
+        self.focused = False
+
+    def handle_key_press(self, key: Any) -> bool:
+        return False
+
+    def should_start_selection(self, x: int, y: int) -> bool:
+        return False
+
+    def has_selection(self) -> bool:
+        return False
+
+    def on_selection_changed(self, selection: Any) -> bool:
+        return False
+
+    def get_selected_text(self) -> str:
+        return ""
+
+    def dispatch_paste(self, event: Any) -> None:
+        if self._on_paste is not None:
+            self._on_paste(event)
+        if self._destroyed:
+            return
+        prevented = getattr(event, "default_prevented", False)
+        if not prevented and self._handle_paste is not None:
+            self._handle_paste(event)
 
 
 def is_renderable(obj: Any) -> bool:
@@ -560,7 +677,9 @@ def is_renderable(obj: Any) -> bool:
 __all__ = [
     "BaseRenderable",
     "LayoutRect",
+    "_Prop",
     "_PropBinding",
+    "_RenderableBehaviorMixin",
     "_get_configure_node_fast",
     "_get_create_prop_binding",
     "_get_yoga_configurator",

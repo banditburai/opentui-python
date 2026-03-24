@@ -57,27 +57,6 @@ class AttachmentPayload:
 
 @dataclass
 class KeyEvent(_EventPropagationMixin):
-    """Keyboard event.
-
-    Attributes:
-        key: Key name (e.g., "return", "escape", "a", "space")
-        code: Key code (e.g., "KeyA", "Enter", "Escape")
-        ctrl: Whether Ctrl key is pressed
-        shift: Whether Shift key is pressed
-        alt: Whether Alt key is pressed
-        meta: Whether Meta (Cmd/Windows) key is pressed
-        hyper: Whether Hyper modifier is pressed (kitty bit 4)
-        caps_lock: Whether CapsLock is active (kitty bit 6)
-        num_lock: Whether NumLock is active (kitty bit 7)
-        repeated: Whether the key is being held down (auto-repeat)
-        event_type: "press" or "release"
-        sequence: Associated text from the key event (kitty CSI-u field 3
-            or raw character). Used for text insertion — may differ from
-            ``key`` when IME composition is active.
-        source: Parser source — ``"raw"`` for legacy or ``"kitty"`` for
-            kitty keyboard protocol.
-        number: Whether the key is a digit (0-9).
-    """
 
     key: str
     code: str = ""

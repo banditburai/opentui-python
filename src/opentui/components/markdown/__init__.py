@@ -11,6 +11,4 @@ __all__ = [
     "MarkdownRenderable",
     "MarkdownTableOptions",
     "RenderNodeContext",
-    "_MarkdownCodeBlock",
-    "_MarkdownTableBlock",
 ]

@@ -52,29 +52,24 @@ def _load_native_patch() -> None:
 # computed values that the layout engine will overwrite each frame.
 _SKIP_ATTRS: frozenset[str] = frozenset(
     {
-        # Identity & tree structure (managed by reconciler)
         "_id",
         "_num",
         "key",
         "_parent",
         "_children",
-        # Internal state (preserved from old node)
         "_event_handlers",
         "_cleanups",
         "_dirty",
         "_subtree_dirty",
         "_destroyed",
-        # Layout engine state (recomputed by yoga each frame)
         "_yoga_node",
         "_x",
         "_y",
         "_layout_width",
         "_layout_height",
-        # Image render state (preserved from old node)
         "_graphics_id",
         "_last_draw_signature",
         "_was_suppressed",
-        # Scroll position (render-time state, not a tree property)
         "_scroll_offset_y",
         "_scroll_offset_x",
         "_scroll_accumulator_x",
@@ -90,38 +85,28 @@ _SKIP_ATTRS: frozenset[str] = frozenset(
         "_sticky_scroll_left",
         "_sticky_scroll_right",
         "_scroll_acceleration",
-        # desired_scroll_y tracking (preserved from old node)
         "_last_applied_desired_y",
-        # Portal runtime state (preserved from old node).
-        # Note: _mount_source and _ref_fn are intentionally NOT skipped —
-        # they should update on reconciliation so Portal picks up new mount
-        # targets and ref callbacks from the latest render output.
+        # Portal: _mount_source/_ref_fn intentionally NOT skipped — must update on reconciliation
         "_container",
         "_scroll_content",
         "_current_mount",
         "_host",
         "_content_children",
-        # Reactive subscription state (Show/Switch/For fine-grained reactivity)
         "_prop_bindings",
         "_condition_cleanup",
         "_data_cleanup",
         "_current_branch",
         "_current_branch_key",
         "_is_active",
-        # Reentrancy guards (Show/Switch/For reactive updates)
         "_updating",
         "_reconciling",
         "_computing",
-        # Branch cache (Show/Switch) + For item cache
         "_render_cache",
         "_fallback_cache",
         "_branch_cache",
         "_last_items",
-        # ErrorBoundary internal state
         "_error",
         "_has_error",
-        # Cross-renderable selection state (preserved across reconciliation;
-        # synced to _selection_start/_selection_end via Text.mark_dirty)
         "_sel_start",
         "_sel_end",
     }
@@ -351,8 +336,8 @@ def reconcile(
 
     # Sync yoga tree BEFORE destroying unmatched old nodes.
     #
-    # This ordering is critical: destroy_recursively() sets _yoga_node=None
-    # on destroyed nodes, which releases the Python reference to the C++
+    # This ordering is critical: destroy() sets _yoga_node=None on
+    # destroyed nodes, which releases the Python reference to the C++
     # yoga node.  If the GC collects that node while it's still in the
     # parent's yoga child list, remove_all_children() would dereference
     # freed memory.  By syncing first, we detach all old yoga children
@@ -370,7 +355,7 @@ def reconcile(
     for child in old_children:
         if id(child) not in matched_old:
             child._parent = None
-            child.destroy_recursively()
+            child.destroy()
 
 
 def _patch_node(old: BaseRenderable, new: BaseRenderable) -> None:

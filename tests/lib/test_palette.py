@@ -9,7 +9,7 @@ exercise palette detection via the renderer; these tests focus on:
 - ``_OSC4_RE`` / ``_OSC_SPECIAL_RE`` regex matching
 - ``TerminalColors`` dataclass
 - ``MockPaletteStdin`` / ``MockPaletteStdout`` mock streams
-- ``TerminalPaletteDetector`` async methods directly
+- ``TerminalPalette`` async methods directly
 - Edge cases: malformed data, buffer overflow, partial chunks, timeouts
 """
 
@@ -24,7 +24,7 @@ from opentui.palette import (
     MockPaletteStdin,
     MockPaletteStdout,
     TerminalColors,
-    TerminalPaletteDetector,
+    TerminalPalette,
 )
 from opentui.palette.common import (
     OSC4_RE as _OSC4_RE,
@@ -463,18 +463,18 @@ class TestMockPaletteStdout:
 
 
 # ===================================================================
-# TerminalPaletteDetector - detect_osc_support
+# TerminalPalette - detect_osc_support
 # ===================================================================
 
 
 class TestDetectOSCSupport:
-    """TerminalPaletteDetector.detect_osc_support."""
+    """TerminalPalette.detect_osc_support."""
 
     @pytest.mark.asyncio
     async def test_returns_true_on_valid_response(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -489,7 +489,7 @@ class TestDetectOSCSupport:
     async def test_returns_false_on_timeout(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         result = await detector.detect_osc_support(timeout_ms=50)
         assert result is False
@@ -498,7 +498,7 @@ class TestDetectOSCSupport:
     async def test_returns_false_for_non_tty_stdin(self):
         stdin = MockPaletteStdin(is_tty=False)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         result = await detector.detect_osc_support(timeout_ms=50)
         assert result is False
@@ -507,7 +507,7 @@ class TestDetectOSCSupport:
     async def test_returns_false_for_non_tty_stdout(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=False)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         result = await detector.detect_osc_support(timeout_ms=50)
         assert result is False
@@ -516,7 +516,7 @@ class TestDetectOSCSupport:
     async def test_sends_osc_query(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -531,7 +531,7 @@ class TestDetectOSCSupport:
     async def test_ignores_non_osc_data(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -550,7 +550,7 @@ class TestDetectOSCSupport:
     async def test_hex_format_response(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -565,7 +565,7 @@ class TestDetectOSCSupport:
     async def test_st_terminator_response(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -578,18 +578,18 @@ class TestDetectOSCSupport:
 
 
 # ===================================================================
-# TerminalPaletteDetector - _query_palette
+# TerminalPalette - _query_palette
 # ===================================================================
 
 
 class TestQueryPalette:
-    """TerminalPaletteDetector._query_palette."""
+    """TerminalPalette._query_palette."""
 
     @pytest.mark.asyncio
     async def test_queries_specified_indices(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -609,7 +609,7 @@ class TestQueryPalette:
     async def test_returns_none_for_missing_indices(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -628,7 +628,7 @@ class TestQueryPalette:
     async def test_returns_all_none_for_non_tty(self):
         stdin = MockPaletteStdin(is_tty=False)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         results = await detector._query_palette([0, 1], timeout_ms=100)
         assert results[0] is None
@@ -638,7 +638,7 @@ class TestQueryPalette:
     async def test_rgb_format_responses(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -656,7 +656,7 @@ class TestQueryPalette:
     async def test_sends_correct_osc_queries(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -675,7 +675,7 @@ class TestQueryPalette:
     async def test_multiple_responses_in_one_chunk(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -698,7 +698,7 @@ class TestQueryPalette:
     async def test_chunked_response(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -718,18 +718,18 @@ class TestQueryPalette:
 
 
 # ===================================================================
-# TerminalPaletteDetector - _query_special_colors
+# TerminalPalette - _query_special_colors
 # ===================================================================
 
 
 class TestQuerySpecialColors:
-    """TerminalPaletteDetector._query_special_colors."""
+    """TerminalPalette._query_special_colors."""
 
     @pytest.mark.asyncio
     async def test_parses_all_special_colors(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         special_map = {
             10: "#ff0001",
@@ -759,7 +759,7 @@ class TestQuerySpecialColors:
     async def test_returns_none_for_missing_special_colors(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -781,7 +781,7 @@ class TestQuerySpecialColors:
     async def test_returns_all_none_for_non_tty(self):
         stdin = MockPaletteStdin(is_tty=False)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         results = await detector._query_special_colors(timeout_ms=100)
         for idx in [10, 11, 12, 13, 14, 15, 16, 17, 19]:
@@ -791,7 +791,7 @@ class TestQuerySpecialColors:
     async def test_rgb_format_special_colors(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -811,7 +811,7 @@ class TestQuerySpecialColors:
     async def test_sends_osc_queries_for_all_special_indices(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         # Let it timeout -- we only care about what was written
         await detector._query_special_colors(timeout_ms=50)
@@ -822,12 +822,12 @@ class TestQuerySpecialColors:
 
 
 # ===================================================================
-# TerminalPaletteDetector - detect (full flow)
+# TerminalPalette - detect (full flow)
 # ===================================================================
 
 
 class TestDetectFullFlow:
-    """TerminalPaletteDetector.detect full palette detection."""
+    """TerminalPalette.detect full palette detection."""
 
     @pytest.mark.asyncio
     async def test_full_detection_with_responding_terminal(self):
@@ -856,7 +856,7 @@ class TestDetectFullFlow:
                 loop.call_soon(emit_special)
 
         stdout = MockPaletteStdout(is_tty=True, responder=responder)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         result = await detector.detect(timeout=500, size=16)
 
@@ -872,7 +872,7 @@ class TestDetectFullFlow:
     async def test_returns_all_none_when_osc_not_supported(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)  # no responder
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         result = await detector.detect(timeout=100, size=8)
 
@@ -886,7 +886,7 @@ class TestDetectFullFlow:
     async def test_returns_all_none_for_non_tty(self):
         stdin = MockPaletteStdin(is_tty=False)
         stdout = MockPaletteStdout(is_tty=False)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         result = await detector.detect(timeout=100, size=4)
 
@@ -917,7 +917,7 @@ class TestDetectFullFlow:
                 loop.call_soon(emit_special)
 
         stdout = MockPaletteStdout(is_tty=True, responder=responder)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         result = await detector.detect(timeout=2000, size=256)
 
@@ -926,18 +926,18 @@ class TestDetectFullFlow:
 
 
 # ===================================================================
-# TerminalPaletteDetector - cleanup and listener management
+# TerminalPalette - cleanup and listener management
 # ===================================================================
 
 
 class TestDetectorCleanupAndListeners:
-    """TerminalPaletteDetector cleanup and listener management."""
+    """TerminalPalette cleanup and listener management."""
 
     @pytest.mark.asyncio
     async def test_cleanup_removes_all_listeners(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         assert stdin.listener_count() == 0
 
@@ -955,7 +955,7 @@ class TestDetectorCleanupAndListeners:
     async def test_cleanup_method(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         # Manually add a listener through the detector
         dummy = lambda _data: None
@@ -970,7 +970,7 @@ class TestDetectorCleanupAndListeners:
     async def test_listeners_cleaned_up_after_successful_detection(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         initial_count = stdin.listener_count()
 
@@ -989,7 +989,7 @@ class TestDetectorCleanupAndListeners:
     async def test_listeners_cleaned_up_after_timeout(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         initial_count = stdin.listener_count()
 
@@ -1006,7 +1006,7 @@ class TestDetectorCleanupAndListeners:
             written.append(data)
             return True
 
-        detector = TerminalPaletteDetector(stdin, stdout, write_fn=custom_write)
+        detector = TerminalPalette(stdin, stdout, write_fn=custom_write)
         detector._write_osc("test_data")
 
         assert written == ["test_data"]
@@ -1015,7 +1015,7 @@ class TestDetectorCleanupAndListeners:
     def test_default_write_fn_uses_stdout(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
         detector._write_osc("test_data")
 
         assert stdout.writes == ["test_data"]
@@ -1034,7 +1034,7 @@ class TestEdgeCases:
         """When buffer exceeds 8192 chars it should be trimmed."""
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -1057,7 +1057,7 @@ class TestEdgeCases:
         """Malformed OSC responses should be ignored; valid ones still parse."""
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -1083,7 +1083,7 @@ class TestEdgeCases:
     async def test_interleaved_non_osc_data(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -1103,7 +1103,7 @@ class TestEdgeCases:
     async def test_response_with_st_terminator(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -1121,7 +1121,7 @@ class TestEdgeCases:
     async def test_response_split_across_chunks(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -1143,7 +1143,7 @@ class TestEdgeCases:
         """Responses for indices not in the query should be ignored."""
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -1163,7 +1163,7 @@ class TestEdgeCases:
     async def test_empty_query_indices(self):
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         results = await detector._query_palette([], timeout_ms=100)
         assert results == {}
@@ -1173,7 +1173,7 @@ class TestEdgeCases:
         """OSC special color query should not be confused by OSC 4 responses."""
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -1199,7 +1199,7 @@ class TestEdgeCases:
         """Palette and special queries can run concurrently."""
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)
@@ -1227,7 +1227,7 @@ class TestEdgeCases:
         """The on_data callback should handle non-string chunks via str()."""
         stdin = MockPaletteStdin(is_tty=True)
         stdout = MockPaletteStdout(is_tty=True)
-        detector = TerminalPaletteDetector(stdin, stdout)
+        detector = TerminalPalette(stdin, stdout)
 
         async def respond():
             await asyncio.sleep(0)

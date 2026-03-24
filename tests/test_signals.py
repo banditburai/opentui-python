@@ -4,7 +4,7 @@ Upstream: N/A (Python-specific)
 """
 
 from opentui.expr import BinaryOp, Conditional, Expr, MappedExpr, UnaryOp
-from opentui._signals_runtime import _SignalState
+from opentui._signals_runtime import _signal_state
 from opentui.signals import (
     Batch,
     ReadableSignal,
@@ -25,7 +25,7 @@ def _sub_count(signal: Signal) -> int:
 
 class TestSignal:
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_create_and_get(self):
         s = Signal(0, name="count")
@@ -212,7 +212,7 @@ class TestSignal:
 
 class TestComputed:
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_initial_value(self):
         a = Signal(2, name="a")
@@ -331,7 +331,7 @@ class TestComputed:
 
 class TestEffect:
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_runs_immediately(self):
         s = Signal(0, name="x")
@@ -403,38 +403,38 @@ class TestEffect:
 
 class TestSignalState:
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_notified_and_has_changes(self):
-        state = _SignalState.get_instance()
+        state = _signal_state
         s = Signal(0, name="dedup")
         state._notified.add(s)
         assert state.has_changes() is True
 
     def test_has_changes_false_initially(self):
-        state = _SignalState.get_instance()
+        state = _signal_state
         assert state.has_changes() is False
 
     def test_has_changes_after_set(self):
-        state = _SignalState.get_instance()
+        state = _signal_state
         s = Signal(0, name="ch")
         s.set(1)
         assert state.has_changes() is True
 
     def test_has_changes_after_add(self):
-        state = _SignalState.get_instance()
+        state = _signal_state
         s = Signal(0, name="ch")
         s.add(1)
         assert state.has_changes() is True
 
     def test_has_changes_after_toggle(self):
-        state = _SignalState.get_instance()
+        state = _signal_state
         s = Signal(False, name="ch")
         s.toggle()
         assert state.has_changes() is True
 
     def test_reset_clears_notified(self):
-        state = _SignalState.get_instance()
+        state = _signal_state
         s = Signal(0, name="rst")
         s.set(1)
         assert state.has_changes() is True
@@ -444,7 +444,7 @@ class TestSignalState:
 
     def test_no_change_on_same_value(self):
         """set() with same value doesn't mark signal as changed."""
-        state = _SignalState.get_instance()
+        state = _signal_state
         s = Signal(5, name="x")
         s.set(5)  # Same value
         assert state.has_changes() is False
@@ -452,7 +452,7 @@ class TestSignalState:
 
 class TestBatch:
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_defers_subscribers(self):
         """Subscribers don't fire until batch exits."""
@@ -521,7 +521,7 @@ class TestBatch:
 
     def test_marks_signal_state(self):
         """_SignalState.has_changes() is True even during batch."""
-        state = _SignalState.get_instance()
+        state = _signal_state
         s = Signal(0, name="x")
         with Batch():
             s.set(1)
@@ -567,7 +567,7 @@ class TestBatch:
 
 class TestUntrack:
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_untrack_prevents_dependency(self):
         """Signal read inside untrack() within computed() does NOT create dep."""
@@ -618,7 +618,7 @@ class TestUntrack:
 
 class TestComputedRetrack:
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_computed_auto_retrack_conditional_deps(self):
         """Conditional signal reads are re-discovered on recomputation."""
@@ -695,7 +695,7 @@ class TestComputedRetrack:
 
 class TestEffectRetrack:
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_effect_auto_retrack_conditional_deps(self):
         """Effect with conditional signal reads re-tracks correctly."""
@@ -823,7 +823,7 @@ class TestDiamondDependency:
     """Diamond dependency resolution: computeds sharing upstream deps fire once."""
 
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_diamond_fires_once_explicit_deps(self):
         """Diamond with explicit deps: combined fires exactly once."""
@@ -945,7 +945,7 @@ class TestVal:
     """Tests for the val() unwrapper function."""
 
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_val_plain_signal(self):
         s = Signal(42, name="x")
@@ -1007,7 +1007,7 @@ class TestExprOperators:
     """Tests for Expr-based operators on Signal — lazy callable expressions."""
 
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     # --- Type checks: operators return Expr subclasses ---
 
@@ -1239,7 +1239,7 @@ class TestSignalEagerDunders:
     """Eager-eval dunders inherited from Expr work on Signal."""
 
     def setup_method(self):
-        _SignalState.get_instance().reset()
+        _signal_state.reset()
 
     def test_int(self):
         assert int(Signal(3.7, name="x")) == 3

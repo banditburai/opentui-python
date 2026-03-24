@@ -8,10 +8,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-# ---------------------------------------------------------------------------
-# BufferDiff
-# ---------------------------------------------------------------------------
-
 DiffType = Literal["line_count", "text", "width"]
 
 
@@ -106,10 +102,6 @@ def assert_buffer_equal(expected: list[dict], actual: list[dict]) -> None:
     if differences:
         raise AssertionError(diff.summary())
 
-
-# ---------------------------------------------------------------------------
-# TestRecorder — captures frames from the render pipeline
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -233,10 +225,6 @@ class TestRecorder:
 
         self._frames.append(recorded)
 
-
-# ---------------------------------------------------------------------------
-# capture_spans — reads buffer and groups cells into styled spans
-# ---------------------------------------------------------------------------
 
 
 @dataclass

@@ -113,7 +113,7 @@ class Show(Renderable):
                 self._fallback_cache = reusable or None
         _detach_children(self)
         for child in disposed_children:
-            child.destroy_recursively()
+            child.destroy()
 
         self._current_branch = new_branch
         self._is_active = new_branch != "none"
@@ -183,7 +183,7 @@ class Show(Renderable):
             if cache is not None:
                 for child in cache:
                     if not child._destroyed:
-                        child.destroy_recursively()
+                        child.destroy()
         self._render_cache = None
         self._fallback_cache = None
         super().destroy()
@@ -309,7 +309,7 @@ class Switch(Renderable):
                 _evict_lru_branches(self._branch_cache, self._max_cached_branches)
         _detach_children(self)
         for child in disposed_children:
-            child.destroy_recursively()
+            child.destroy()
 
         self._current_branch_key = branch_key
         self._is_active = render_fn is not None
@@ -371,7 +371,7 @@ class Switch(Renderable):
         for cached in self._branch_cache.values():
             for child in cached:
                 if not child._destroyed:
-                    child.destroy_recursively()
+                    child.destroy()
         self._branch_cache.clear()
         super().destroy()
 

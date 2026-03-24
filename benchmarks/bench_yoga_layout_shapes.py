@@ -149,7 +149,7 @@ async def _run() -> None:
             current = state["overlay"]
             if current is not None:
                 root.remove(current)
-                current.destroy_recursively()
+                current.destroy()
                 state["overlay"] = None
                 return
             modal = Box(

@@ -5,10 +5,6 @@ from __future__ import annotations
 import re as _re
 from typing import Any
 
-# ---------------------------------------------------------------------------
-# SGR mouse button constants
-# ---------------------------------------------------------------------------
-
 
 class _SGRMouseButtons:
     LEFT = 0
@@ -22,10 +18,6 @@ class _SGRMouseButtons:
 
 SGRMouseButtons = _SGRMouseButtons()
 
-
-# ---------------------------------------------------------------------------
-# SGRMockRenderer
-# ---------------------------------------------------------------------------
 
 
 class SGRMockRenderer:
@@ -44,10 +36,6 @@ class SGRMockRenderer:
         return self.emitted_data[-1] if self.emitted_data else ""
 
 
-# ---------------------------------------------------------------------------
-# SGRMockMouse
-# ---------------------------------------------------------------------------
-
 
 class SGRMockMouse:
     """Generates SGR mouse escape sequences and writes them to an
@@ -59,8 +47,6 @@ class SGRMockMouse:
         self._x = 0
         self._y = 0
         self._buttons_pressed: set[int] = set()
-
-    # -- SGR encoding --------------------------------------------------------
 
     def _generate(
         self,
@@ -122,8 +108,6 @@ class SGRMockMouse:
             self._buttons_pressed.add(button)
         elif event_type == "up":
             self._buttons_pressed.discard(button)
-
-    # -- public API ----------------------------------------------------------
 
     def move_to(
         self, x: int, y: int, *, shift: bool = False, alt: bool = False, ctrl: bool = False
@@ -244,9 +228,6 @@ def create_mock_mouse(
     return SGRMockMouse(renderer), renderer
 
 
-# ---------------------------------------------------------------------------
-# SGR / X10 mouse sequence regexes and parser
-# ---------------------------------------------------------------------------
 
 _SGR_SEQ_RE = _re.compile(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
 # X10/normal mouse: ESC [ M <cb> <cx> <cy> — three raw bytes after "M"
@@ -410,10 +391,6 @@ class SGRMouseParser:
                     }
                 )
 
-
-# ---------------------------------------------------------------------------
-# _TestStdinBridge
-# ---------------------------------------------------------------------------
 
 
 class _TestStdinBridge:

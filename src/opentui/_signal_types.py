@@ -77,21 +77,24 @@ class Signal(Expr):
     def peek(self) -> Any:
         return self._value
 
+    def _dispatch_native(self, batched_method, direct_method, *args):
+        if _rt._runtime.batch_depth > 0:
+            if batched_method(*args) is not False:
+                self._value = self._native.get()
+                _rt._signal_state_notified.add(self)
+                _rt._runtime.batch_pending.add(self)
+            return
+        is_root = _rt._begin_micro_flush()
+        try:
+            if direct_method(*args) is not False:
+                self._value = self._native.get()
+                _rt._signal_state_notified.add(self)
+        finally:
+            _rt._end_micro_flush(_drain_stale_computeds, is_root)
+
     def set(self, value: Any) -> None:
         if self._native is not None and value is not None:
-            if _rt._runtime.batch_depth > 0:
-                if self._native.set_batched(value):
-                    self._value = self._native.get()
-                    _rt._signal_state_notified.add(self)
-                    _rt._runtime.batch_pending.add(self)
-                return
-            is_root = _rt._begin_micro_flush()
-            try:
-                if self._native.set(value):
-                    self._value = self._native.get()
-                    _rt._signal_state_notified.add(self)
-            finally:
-                _rt._end_micro_flush(_drain_stale_computeds, is_root)
+            self._dispatch_native(self._native.set_batched, self._native.set, value)
             return
         if self._value is value or self._value == value:
             return
@@ -104,19 +107,7 @@ class Signal(Expr):
 
     def add(self, delta: Any) -> None:
         if self._native is not None:
-            if _rt._runtime.batch_depth > 0:
-                if self._native.add_batched(delta):
-                    self._value = self._native.get()
-                    _rt._signal_state_notified.add(self)
-                    _rt._runtime.batch_pending.add(self)
-                return
-            is_root = _rt._begin_micro_flush()
-            try:
-                if self._native.add(delta):
-                    self._value = self._native.get()
-                    _rt._signal_state_notified.add(self)
-            finally:
-                _rt._end_micro_flush(_drain_stale_computeds, is_root)
+            self._dispatch_native(self._native.add_batched, self._native.add, delta)
             return
         new_value = self._value + delta
         if new_value == self._value:
@@ -134,19 +125,7 @@ class Signal(Expr):
             self.set(values[0])
             return
         if self._native is not None:
-            if _rt._runtime.batch_depth > 0:
-                self._native.toggle_batched()
-                self._value = self._native.get()
-                _rt._signal_state_notified.add(self)
-                _rt._runtime.batch_pending.add(self)
-                return
-            is_root = _rt._begin_micro_flush()
-            try:
-                self._native.toggle()
-                self._value = self._native.get()
-                _rt._signal_state_notified.add(self)
-            finally:
-                _rt._end_micro_flush(_drain_stale_computeds, is_root)
+            self._dispatch_native(self._native.toggle_batched, self._native.toggle)
             return
         self._value = not self._value
         self._notify()

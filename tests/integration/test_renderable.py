@@ -379,8 +379,8 @@ class TestRenderableChildManagement:
         assert parent.find_descendant_by_id("leaf") is child
         assert parent.find_descendant_by_id("nonexistent") is None
 
-    def test_destroy_recursively_destroys_nested_children_recursively(self):
-        """destroy_recursively marks all descendants as destroyed."""
+    def test_destroy_destroys_nested_children_recursively(self):
+        """destroy marks all descendants as destroyed."""
         parent = Renderable(id="parent")
         child = Renderable(id="child")
         grandchild = Renderable(id="grandchild")
@@ -389,27 +389,27 @@ class TestRenderableChildManagement:
         child.add(grandchild)
         grandchild.add(great_grandchild)
 
-        parent.destroy_recursively()
+        parent.destroy()
 
         assert parent.is_destroyed is True
         assert child.is_destroyed is True
         assert grandchild.is_destroyed is True
         assert great_grandchild.is_destroyed is True
 
-    def test_destroy_recursively_handles_empty_renderable_without_errors(self):
-        """destroy_recursively on an empty renderable does not throw."""
+    def test_destroy_handles_empty_renderable_without_errors(self):
+        """destroy on an empty renderable does not throw."""
         parent = Renderable()
-        parent.destroy_recursively()
+        parent.destroy()
         assert parent.is_destroyed is True
 
-    def test_destroy_recursively_destroys_all_children_correctly_with_multiple_children(self):
-        """destroy_recursively marks all children as destroyed."""
+    def test_destroy_destroys_all_children_correctly_with_multiple_children(self):
+        """destroy marks all children as destroyed."""
         parent = Renderable()
         children = [Renderable(id=f"child-{i}") for i in range(5)]
         for c in children:
             parent.add(c)
 
-        parent.destroy_recursively()
+        parent.destroy()
         assert parent.is_destroyed is True
         for c in children:
             assert c.is_destroyed is True

@@ -34,6 +34,8 @@ _MOUSE_HANDLER_MAP = {
     "drag": "_on_mouse_drag",
     "scroll": "_on_mouse_scroll",
 }
+
+
 class MouseHandlingMixin:
     """Mixin providing mouse dispatch, hit testing, hover, and selection."""
 
@@ -282,37 +284,10 @@ class MouseHandlingMixin:
 
         notify_selectables_of_selection_change(self)
 
-    def _walk_selectable_renderables(
-        self,
-        container,
-        selection_bounds: dict,
-        selected_renderables: list,
-        touched_renderables: list,
-        scroll_adjust_x: int = 0,
-        scroll_adjust_y: int = 0,
-    ) -> None:
-        from ._mouse_selection import walk_selectable_renderables
-
-        walk_selectable_renderables(
-            self,
-            container,
-            selection_bounds,
-            selected_renderables,
-            touched_renderables,
-            scroll_adjust_x,
-            scroll_adjust_y,
-        )
-
     def request_selection_update(self) -> None:
         request_selection_update(self)
 
     # -- Hit testing & hover ---------------------------------------------------
-
-    @staticmethod
-    def _iter_children_front_to_back(children) -> list:
-        from ._mouse_hit_testing import iter_children_front_to_back
-
-        return iter_children_front_to_back(children)
 
     def _recheck_hover_state(self) -> None:
         recheck_hover_state(self)
