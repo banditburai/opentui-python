@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import time
 from typing import Any
 
 from ..events import MouseEvent
-from .buffer import Buffer
 from ._mouse_hit_testing import accumulate_scroll_offsets, find_deepest_hit
+from .buffer import Buffer
 
 _log = logging.getLogger(__name__)
+
+_DOUBLE_CLICK_THRESHOLD = 0.4  # seconds
 
 
 def handle_selection_mouse(
@@ -28,6 +31,21 @@ def handle_selection_mouse(
         )
         and not is_ctrl
     ):
+        # Double-click detection
+        now = time.monotonic()
+        last_time = getattr(renderer, "_last_click_time", 0.0)
+        last_pos = getattr(renderer, "_last_click_pos", (0, 0))
+        is_double = (
+            now - last_time < _DOUBLE_CLICK_THRESHOLD
+            and abs(event.x - last_pos[0]) <= 1
+            and abs(event.y - last_pos[1]) <= 1
+        )
+        renderer._last_click_time = now
+        renderer._last_click_pos = (event.x, event.y)
+
+        if is_double and hit_renderable is not None and _try_word_select(renderer, hit_renderable, event.x, event.y):
+            return True
+
         if hit_renderable is not None and not getattr(hit_renderable, "_destroyed", False):
             is_selectable = getattr(hit_renderable, "selectable", False)
             has_drag_handler = getattr(hit_renderable, "_on_mouse_drag", None) is not None
@@ -112,6 +130,67 @@ def handle_selection_mouse(
         return True
 
     return False
+
+
+def _total_scroll_offset(renderable: Any) -> tuple[int, int]:
+    """Walk up the parent chain to accumulate scroll offsets."""
+    sx, sy = 0, 0
+    parent = getattr(renderable, "_parent", None)
+    while parent is not None:
+        sx, sy = accumulate_scroll_offsets(parent, sx, sy)
+        parent = getattr(parent, "_parent", None)
+    return sx, sy
+
+
+def _try_word_select(renderer: Any, renderable: Any, x: int, y: int) -> bool:
+    """Attempt word-selection on a TextRenderable at the given screen position.
+
+    Returns True if a word was selected, False otherwise.
+    """
+    from ..components.textarea.textarea_text_utils import char_class, offset_to_line_col
+
+    coord_fn = getattr(renderable, "coord_to_offset", None)
+    if coord_fn is None:
+        return False
+    text = getattr(renderable, "plain_text", None)
+    if not text:
+        return False
+
+    # Account for scroll offsets: screen coords → layout coords
+    scroll_x, scroll_y = _total_scroll_offset(renderable)
+    local_x = x + scroll_x - getattr(renderable, "_x", 0)
+    local_y = y + scroll_y - getattr(renderable, "_y", 0)
+    offset = coord_fn(local_x, local_y)
+
+    if offset < 0 or offset >= len(text):
+        return False
+    if char_class(text[offset]) == 0:  # whitespace
+        return False
+
+    # Find word boundaries using char_class
+    cls = char_class(text[offset])
+    word_start = offset
+    while word_start > 0 and char_class(text[word_start - 1]) == cls:
+        word_start -= 1
+    word_end = offset
+    while word_end < len(text) - 1 and char_class(text[word_end + 1]) == cls:
+        word_end += 1
+    # word_end is inclusive — the last character of the word
+
+    # Convert offsets back to screen coordinates (layout → screen)
+    start_line, start_col = offset_to_line_col(text, word_start)
+    end_line, end_col = offset_to_line_col(text, word_end + 1)
+
+    rx = getattr(renderable, "_x", 0)
+    ry = getattr(renderable, "_y", 0)
+    start_sx = rx + start_col - scroll_x
+    start_sy = ry + start_line - scroll_y
+    end_sx = rx + end_col - scroll_x
+    end_sy = ry + end_line - scroll_y
+
+    start_selection(renderer, renderable, start_sx, start_sy)
+    update_selection(renderer, renderable, end_sx, end_sy, finish_dragging=True)
+    return True
 
 
 def has_selection(renderer: Any) -> bool:

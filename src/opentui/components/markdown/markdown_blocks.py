@@ -6,12 +6,12 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from ..structs import display_width as _display_width
-from .base import Renderable
-from .text_renderable import TextRenderable
+from ...structs import display_width as _display_width
+from ..base import Renderable
+from ..text_renderable import TextRenderable
 
 if TYPE_CHECKING:
-    from ..renderer import Buffer
+    from ...renderer import Buffer
 
 _RE_BOLD = re.compile(r"\*\*(.+?)\*\*")
 _RE_ITALIC = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
@@ -66,11 +66,13 @@ def _render_table(
     header: list[dict[str, Any]],
     rows: list[list[dict[str, Any]]],
     conceal: bool = True,
+    cell_padding: int = 0,
 ) -> list[str]:
     if not header:
         return []
 
     num_cols = len(header)
+    pad = " " * cell_padding
     header_texts = [_strip_table_cell(h.get("text", ""), conceal) for h in header]
     row_texts = [
         [
@@ -86,26 +88,26 @@ def _render_table(
             if i < len(col_widths):
                 col_widths[i] = max(col_widths[i], _display_width(cell))
 
-    col_widths = [max(w, 1) for w in col_widths]
+    col_widths = [max(w, 1) + 2 * cell_padding for w in col_widths]
 
     lines: list[str] = []
     lines.append("\u250c" + "\u252c".join("\u2500" * w for w in col_widths) + "\u2510")
 
     header_line = "\u2502"
     for i, text in enumerate(header_texts):
-        w = col_widths[i]
+        w = col_widths[i] - 2 * cell_padding
         padding = w - _display_width(text)
-        header_line += text + " " * padding + "\u2502"
+        header_line += pad + text + " " * padding + pad + "\u2502"
     lines.append(header_line)
 
     for row_cells in row_texts:
         lines.append("\u251c" + "\u253c".join("\u2500" * w for w in col_widths) + "\u2524")
         row_line = "\u2502"
         for i in range(num_cols):
-            w = col_widths[i]
+            w = col_widths[i] - 2 * cell_padding
             text = row_cells[i] if i < len(row_cells) else ""
             padding = w - _display_width(text)
-            row_line += text + " " * padding + "\u2502"
+            row_line += pad + text + " " * padding + pad + "\u2502"
         lines.append(row_line)
 
     lines.append("\u2514" + "\u2534".join("\u2500" * w for w in col_widths) + "\u2518")
@@ -262,7 +264,9 @@ class _MarkdownTableBlock(_MarkdownCodeBlock):
 
     @wrap_mode.setter
     def wrap_mode(self, value: str) -> None:
-        self._wrap_mode_str = value
+        # Propagate to the native text buffer view (TextRenderable.wrap_mode
+        # setter handles set_wrap_mode + yoga mark_dirty + _update_text_info).
+        TextRenderable.wrap_mode.fset(self, value)
 
     @property
     def cell_padding(self) -> int:

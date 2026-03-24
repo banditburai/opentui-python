@@ -28,7 +28,7 @@ from opentui.components.control_flow import (
 )
 from opentui.components.scrollbox import ScrollBox, ScrollContent
 from opentui.components.text import Text
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.reconciler import reconcile
 from opentui.signals import Signal, _SignalState, _tracking_context, computed
 

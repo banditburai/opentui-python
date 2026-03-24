@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..structs import char_width as char_display_width
+from ...structs import char_width as char_display_width
 
 
 def str_display_width(text: str) -> int:

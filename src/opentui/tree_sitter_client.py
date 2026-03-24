@@ -21,10 +21,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Language registry: filetype → (module_name, function_name)
-# ---------------------------------------------------------------------------
-
 _LANG_REGISTRY: dict[str, tuple[str, str]] = {
     "python": ("tree_sitter_python", "language"),
     "javascript": ("tree_sitter_javascript", "language"),
@@ -57,10 +53,6 @@ _QUERY_DIR_MAP: dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Byte-to-char offset conversion
-# ---------------------------------------------------------------------------
-
 
 def _byte_to_char_map(text: str) -> list[int]:
     """Build byte-offset → char-offset lookup table.
@@ -76,10 +68,6 @@ def _byte_to_char_map(text: str) -> list[int]:
     mapping.append(len(text))  # sentinel for end positions
     return mapping
 
-
-# ---------------------------------------------------------------------------
-# Query loading
-# ---------------------------------------------------------------------------
 
 
 def _load_bundled_query(filetype: str) -> str | None:
@@ -117,10 +105,6 @@ def _load_query_for_filetype(filetype: str) -> str | None:
 
     return None
 
-
-# ---------------------------------------------------------------------------
-# PyTreeSitterClient
-# ---------------------------------------------------------------------------
 
 
 class PyTreeSitterClient:
@@ -173,7 +157,7 @@ class PyTreeSitterClient:
             self._cache[filetype] = result
             return result
 
-        except (ImportError, OSError, Exception) as exc:
+        except Exception as exc:
             logger.debug("Failed to initialize tree-sitter for %s: %s", filetype, exc)
             self._unavailable.add(filetype)
             return None

@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from opentui.components.markdown_parser import ParseState, parse_markdown_incremental
-import opentui.components.markdown_parser as mp
+from opentui.components.markdown.markdown_parser import ParseState, parse_markdown_incremental
+import opentui.components.markdown.markdown_parser as mp
 
 
 class TestMarkdownParser:

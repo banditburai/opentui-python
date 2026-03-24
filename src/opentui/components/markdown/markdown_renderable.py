@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from ..enums import RenderStrategy
-from .base import Renderable
+from ...enums import RenderStrategy
+from ..base import Renderable
 from .markdown_blocks import (
     BlockState,
     _ExternalBlockRenderable,
@@ -30,7 +30,7 @@ from .markdown_renderable_planning import (
 )
 
 if TYPE_CHECKING:
-    from ..renderer import Buffer
+    from ...renderer import Buffer
 
 
 class MarkdownRenderable(Renderable):
@@ -171,7 +171,7 @@ class MarkdownRenderable(Renderable):
 
     def _clear_block_states(self) -> None:
         for state in self._block_states:
-            state.renderable.destroy_recursively()
+            state.renderable.destroy()
         self._block_states = []
 
     def _update_blocks(self, force_table_refresh: bool = False) -> None:
@@ -240,7 +240,7 @@ class MarkdownRenderable(Renderable):
 
             # Different type or new block
             if existing:
-                existing.renderable.destroy_recursively()
+                existing.renderable.destroy()
 
             renderable = self._create_block_renderable(token, block_index, has_next)
             if renderable:
@@ -264,7 +264,7 @@ class MarkdownRenderable(Renderable):
 
         while len(self._block_states) > block_index:
             removed = self._block_states.pop()
-            removed.renderable.destroy_recursively()
+            removed.renderable.destroy()
 
     def _create_block_renderable(
         self,

@@ -5,7 +5,7 @@ Tests ported: 2/2
 """
 
 from opentui import create_test_renderer
-from opentui.components.diff_renderable import DiffRenderable
+from opentui.components.diff import DiffRenderable
 
 
 # ── Diff fixtures ──────────────────────────────────────────────────────

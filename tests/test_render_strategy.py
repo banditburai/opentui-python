@@ -4,11 +4,11 @@ import pytest
 
 from opentui import Box, FrameBuffer, Text, create_test_renderer
 from opentui.components.code_renderable import CodeRenderable
-from opentui.components.diff_renderable import DiffRenderable
-from opentui.components.markdown_renderable import MarkdownRenderable
+from opentui.components.diff import DiffRenderable
+from opentui.components.markdown import MarkdownRenderable
 from opentui.components.select_renderable import SelectRenderable
-from opentui.components.text_table_renderable import TextTableRenderable
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.text_table import TextTableRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.enums import RenderStrategy
 from opentui.renderer.layout import supports_common_tree_strategy
 

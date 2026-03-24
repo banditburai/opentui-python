@@ -4,7 +4,7 @@ Upstream: packages/core/src/renderables/__tests__/Textarea.visual-lines.test.ts
 Tests ported: 13/13 (13 real implementations)
 """
 
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────

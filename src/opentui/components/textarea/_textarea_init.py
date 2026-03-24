@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from ..editor.edit_buffer_native import NativeEditBuffer
-from ..editor.editor_view_native import NativeEditorView
+from ...editor.edit_buffer_native import NativeEditBuffer
+from ...editor.editor_view_native import NativeEditorView
 
 if TYPE_CHECKING:
     from .textarea_keymap import TextareaColorConfig

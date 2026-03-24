@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .. import structs as s
-from ..input.keymapping import (
+from ... import structs as s
+from ...input.keymapping import (
     KeyAliasMap,
     KeyBinding,
     build_key_bindings_map,
@@ -12,7 +12,7 @@ from ..input.keymapping import (
     merge_key_aliases,
     merge_key_bindings,
 )
-from ..structs import MUTED_GRAY
+from ...structs import MUTED_GRAY
 
 ColorLike = s.RGBA | str | None
 ColorParser = Callable[[ColorLike], s.RGBA | None]

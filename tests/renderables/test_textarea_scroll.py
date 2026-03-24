@@ -7,7 +7,7 @@ Tests: 21
 import pytest
 
 from opentui import TestSetup, create_test_renderer
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.events import KeyEvent
 
 

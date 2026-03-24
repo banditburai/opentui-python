@@ -15,7 +15,7 @@ from ..structs import MUTED_GRAY
 from ..structs import display_width as _string_width
 from .base import Renderable
 from .line_types import LineColorConfig, LineSign
-from .raster_cache import RasterCache
+from ._raster_cache import RasterCache
 
 if TYPE_CHECKING:
     from ..renderer import Buffer

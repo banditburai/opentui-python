@@ -4,7 +4,7 @@ Upstream: packages/core/src/renderables/__tests__/Textarea.error-handling.test.t
 Tests ported: 1/1 (1 real)
 """
 
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 
 
 class TestTextareaErrorHandling:

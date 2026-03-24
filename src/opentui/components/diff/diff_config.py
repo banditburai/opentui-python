@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .. import structs as s
+from ... import structs as s
 
 
 @dataclass(frozen=True, slots=True)

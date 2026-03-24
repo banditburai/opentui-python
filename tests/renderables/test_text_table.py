@@ -10,7 +10,7 @@ import unicodedata
 import pytest
 
 from opentui import create_test_renderer
-from opentui.components.text_table_renderable import TextTableRenderable
+from opentui.components.text_table import TextTableRenderable
 
 # Vertical border codepoint
 VERTICAL_BORDER_CP = ord("\u2502")  # │

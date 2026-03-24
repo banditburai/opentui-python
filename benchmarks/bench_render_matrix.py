@@ -32,10 +32,10 @@ from opentui import (
     create_test_renderer,
 )
 from opentui.components.control_flow import Portal
-from opentui.components.diff_renderable import DiffRenderable
-from opentui.components.markdown_renderable import MarkdownRenderable
+from opentui.components.diff import DiffRenderable
+from opentui.components.markdown import MarkdownRenderable
 from opentui.components.select_renderable import SelectRenderable
-from opentui.components.text_table_renderable import TextTableRenderable
+from opentui.components.text_table import TextTableRenderable
 
 try:
     from benchmarks.harness import FRAME_BUCKETS, collect_frame_medians
@@ -486,7 +486,7 @@ async def _overlay_direct_mount_toggle():
         overlay = state["overlay"]
         if state["mounted"]:
             root.remove(overlay)
-            overlay.destroy_recursively()
+            overlay.destroy()
             state["overlay"] = None
             state["mounted"] = False
             return

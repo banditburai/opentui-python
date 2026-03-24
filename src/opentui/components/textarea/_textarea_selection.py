@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 
-from .text_renderable_utils import get_scroll_adjusted_position
+from ..text_renderable_utils import get_scroll_adjusted_position
 from .textarea_text_utils import (
     offset_to_line_col,
 )
@@ -93,7 +93,7 @@ class _SelectionMixin:
         if self._is_dragging_selection:
             return self.has_selection
 
-        from ..selection import convert_global_to_local_selection
+        from ...selection import convert_global_to_local_selection
 
         screen_x, screen_y = get_scroll_adjusted_position(self)
         local_sel = convert_global_to_local_selection(selection, screen_x, screen_y)

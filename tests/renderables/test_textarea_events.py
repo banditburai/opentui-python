@@ -4,7 +4,7 @@ Upstream: packages/core/src/renderables/__tests__/Textarea.events.test.ts
 Tests: 29 (29 real, 0 skipped)
 """
 
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.events import KeyEvent, PasteEvent
 from opentui.input.keymapping import KeyBinding
 

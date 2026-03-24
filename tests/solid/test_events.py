@@ -15,8 +15,10 @@ from opentui import component
 from opentui import test_render as _test_render
 from opentui.components.box import Box
 from opentui.components.control_flow import For
-from opentui.components.input import Input, Select, SelectOption, Textarea
-from opentui.components.simple import TabSelect
+from opentui.components.input import Input
+from opentui.components.select import Select, SelectOption
+from opentui.components.textarea import Textarea
+from opentui.components._simple_variants import TabSelect
 from opentui.components.text import Text
 from opentui.signals import Signal
 from opentui.hooks import use_keyboard, use_paste

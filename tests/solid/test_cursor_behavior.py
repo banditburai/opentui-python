@@ -291,7 +291,7 @@ class TestTextareaCursorBehavior:
             at the end of the last line.
             """
 
-            from opentui.components.input import Textarea
+            from opentui.components.textarea import Textarea
 
             setup = await _strict_render(
                 lambda: Textarea(
@@ -488,7 +488,7 @@ class TestTextareaCursorBehavior:
             "Line 1\\nLine 2\\nLine 3" via bracketed paste, then checks that
             viewport offsetY transitions <= 1 across multiple render frames.
             """
-            from opentui.components.textarea_renderable import TextareaRenderable
+            from opentui.components.textarea import TextareaRenderable
 
             # Create textarea inside a box hierarchy (matching upstream layout)
             outer = Box(width=50, height=12, padding_left=2, padding_right=2, gap=1)
@@ -545,7 +545,7 @@ class TestTextareaCursorBehavior:
         async def test_keeps_viewport_offsets_steady_after_multiline_paste(self):
             """Same as above but with height=1 — single-line textarea that receives
             multiline paste. Viewport offsets should remain steady."""
-            from opentui.components.textarea_renderable import TextareaRenderable
+            from opentui.components.textarea import TextareaRenderable
 
             outer = Box(width=50, height=12, padding_left=2, padding_right=2, gap=1)
             inner = Box(padding_left=1, gap=1)
@@ -597,7 +597,7 @@ class TestTextareaCursorBehavior:
         async def test_expands_height_after_multiline_paste_when_max_height_allows(self):
             """Textarea with minHeight=1, maxHeight=6 should expand height after
             pasting multiline content."""
-            from opentui.components.textarea_renderable import TextareaRenderable
+            from opentui.components.textarea import TextareaRenderable
 
             outer = Box(width=50, height=12, padding_left=2, padding_right=2, gap=1)
             inner = Box(padding_left=1, gap=1)

@@ -60,7 +60,6 @@ ALIGN_MAP = {
 
 
 def _make_parser(mapping: dict[str, Any], default: Any):
-    """None -> default, else dict lookup with default fallback."""
 
     def parse(value: str | None) -> Any:
         return default if value is None else mapping.get(value.lower(), default)
@@ -155,7 +154,6 @@ def configure_node(
     set_yoga_prop(node, "width", width)
     set_yoga_prop(node, "height", height)
 
-    # All other props: delegate to table-driven set_yoga_prop, skip if None.
     _props: dict[str, Any] = {
         "min_width": min_width,
         "min_height": min_height,
@@ -418,10 +416,6 @@ def set_yoga_prop(node: Any, prop_name: str, value: Any) -> None:
         return
 
 
-# ---------------------------------------------------------------------------
-# Viewport culling (SolidJS parity — used for virtualized scroll containers)
-# ---------------------------------------------------------------------------
-
 
 class ViewportBounds:
     """Axis-aligned rectangle describing a viewport region."""
@@ -562,15 +556,6 @@ def get_objects_in_viewport(
     return visible
 
 
-def validate_options(name: str, options: dict[str, Any]) -> None:
-    """Validate renderable options — raises ValueError for negative width/height."""
-    width = options.get("width")
-    height = options.get("height")
-    if isinstance(width, int | float) and width < 0:
-        raise ValueError(f"{name}: width must be non-negative, got {width}")
-    if isinstance(height, int | float) and height < 0:
-        raise ValueError(f"{name}: height must be non-negative, got {height}")
-
 
 __all__ = [
     "create_node",
@@ -580,7 +565,6 @@ __all__ = [
     "ViewportBounds",
     "ViewportObject",
     "get_objects_in_viewport",
-    "validate_options",
     "parse_align",
     "parse_align_items",
     "parse_display",

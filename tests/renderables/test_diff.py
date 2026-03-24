@@ -9,7 +9,7 @@ import re
 import pytest
 
 from opentui import TestSetup, create_test_renderer
-from opentui.components.diff_renderable import DiffRenderable
+from opentui.components.diff import DiffRenderable
 from opentui.structs import RGBA
 
 # ── Diff fixtures ──────────────────────────────────────────────────────
@@ -1476,7 +1476,7 @@ class TestDiffRenderable:
         assert right_count >= 0
 
         # Destroy the diff
-        dr.destroy_recursively()
+        dr.destroy()
 
         # The DiffRenderable should be destroyed
         assert dr.is_destroyed is True
@@ -1738,7 +1738,7 @@ Index: packages/core/src/examples/index.ts
             correct_frame = setup.capture_char_frame()
 
             # Clean up
-            parent1.destroy_recursively()
+            parent1.destroy()
             setup.renderer.root.remove(parent1)
             await asyncio.sleep(0.1)
 

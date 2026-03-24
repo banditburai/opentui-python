@@ -18,7 +18,9 @@ def create_table_renderable(
     margin_bottom: int,
     table_options: MarkdownTableOptions,
 ) -> _MarkdownTableBlock:
-    table_lines = _render_table(token.header, token.rows, conceal)
+    table_lines = _render_table(
+        token.header, token.rows, conceal, cell_padding=table_options.cell_padding,
+    )
 
     num_cols = len(token.header)
     table_content: list[list[list[dict[str, str]]]] = []
@@ -107,8 +109,6 @@ def update_table_renderable(
     margin_bottom: int,
     table_options: MarkdownTableOptions,
 ) -> None:
-    table_lines = _render_table(token.header, token.rows, conceal)
-
     old_content = renderable.content if renderable.content else []
     num_cols = len(token.header)
     table_content: list[list[list[dict[str, str]]]] = []
@@ -147,6 +147,9 @@ def update_table_renderable(
         table_content.append(data_row)
 
     renderable.content = table_content
+    table_lines = _render_table(
+        token.header, token.rows, conceal, cell_padding=table_options.cell_padding,
+    )
     renderable.update_lines(table_lines, margin_bottom)
     apply_table_options(renderable, table_options)
 

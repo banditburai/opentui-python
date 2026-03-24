@@ -13,7 +13,7 @@ the correct plain text and link associations.  The last 5 tests ("Link Chunk
 Verification") exercise more detailed style inheritance scenarios.
 """
 
-from opentui.components.textnode import TextNode
+from opentui.components._textnode import TextNode
 from opentui import structs as s
 
 

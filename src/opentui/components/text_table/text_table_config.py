@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .. import structs as s
-from ..editor.text_buffer_native import NativeTextBuffer
-from ..editor.text_view_native import NativeTextBufferView
+from ... import structs as s
+from ...editor.text_buffer_native import NativeTextBuffer
+from ...editor.text_view_native import NativeTextBufferView
 
 
 @dataclass(frozen=True, slots=True)

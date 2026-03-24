@@ -43,7 +43,7 @@ from .text_renderable_utils import (
 from .text_renderable_utils import (
     update_viewport_offset as _update_viewport_offset,
 )
-from .textnode import StyledText, TextNode
+from ._textnode import StyledText, TextNode
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -415,7 +415,7 @@ class TextRenderable(Renderable):
             else:
                 self._root_text_node.add(child)
             self._sync_text_from_nodes()
-            return self._root_text_node.get_children_count() - 1
+            return len(self._root_text_node._children) - 1
         return super().insert_before(child, anchor)
 
     def clear(self) -> None:

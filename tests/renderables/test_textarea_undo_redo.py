@@ -4,7 +4,7 @@ Upstream: packages/core/src/renderables/__tests__/Textarea.undo-redo.test.ts
 Tests ported: 14/14 (14 real)
 """
 
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.events import KeyEvent
 
 

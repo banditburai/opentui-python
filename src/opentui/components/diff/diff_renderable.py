@@ -4,21 +4,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .. import structs as s
-from ..enums import RenderStrategy
-from ..text_utils import wrap_text as _tu_wrap_text
-from .base import Renderable
+from ... import structs as s
+from ...enums import RenderStrategy
+from ...text_utils import wrap_text as _tu_wrap_text
+from ..base import Renderable
 from .diff_config import DiffCodeAdapter, DiffLineNumberAdapter, resolve_diff_render_config
 from .diff_parser import (
     StructuredPatch,
     parse_patch,
 )
-from .line_types import LineColorConfig, LineSign
+from ..line_types import LineColorConfig, LineSign
 from .diff_views import build_error_view_lines, build_split_view_data, build_unified_view_data
-from .raster_cache import RasterCache
+from .._raster_cache import RasterCache
 
 if TYPE_CHECKING:
-    from ..renderer import Buffer
+    from ...renderer import Buffer
 
 
 class DiffRenderable(Renderable):
@@ -640,6 +640,108 @@ class DiffRenderable(Renderable):
             self._unified_line_numbers,
         )
 
+    def _compute_content_width(
+        self, available: int, line_numbers: dict[int, int]
+    ) -> int:
+        """Compute the text content width after subtracting gutter/sign columns."""
+        gw = 0
+        sw = 0
+        if self._show_line_numbers:
+            max_n = max(line_numbers.values()) if line_numbers else 0
+            nd = max(len(str(max_n)), 1)
+            gw = nd + 1
+            sw = 2
+        return available - gw - sw - (1 if self._show_line_numbers else 0)
+
+    def _compute_gutter_metrics(
+        self, line_numbers: dict[int, int], x_offset: int
+    ) -> tuple[int, int, int]:
+        """Return ``(gutter_width, sign_width, content_x)`` for a split panel.
+
+        *x_offset* is the absolute x position where the panel starts.
+        """
+        gw = 0
+        sw = 0
+        if self._show_line_numbers:
+            max_n = max(line_numbers.values()) if line_numbers else 0
+            nd = max(len(str(max_n)), 1)
+            gw = nd + 1
+            sw = 2
+        cx = x_offset + gw + sw + (1 if self._show_line_numbers else 0)
+        return gw, sw, cx
+
+    def _pre_wrap_split_lines(
+        self, left_cw: int, right_cw: int
+    ) -> tuple[list[list[str]], list[list[str]]]:
+        """Pre-compute wrapped visual rows for each logical line on both sides."""
+        num_logical = max(len(self._left_lines), len(self._right_lines))
+        left_wrapped: list[list[str]] = []
+        right_wrapped: list[list[str]] = []
+
+        for i in range(num_logical):
+            if i < len(self._left_lines):
+                lt = self._left_lines[i]
+                if left_cw > 0 and len(lt) > left_cw:
+                    left_wrapped.append(self._wrap_text(lt, left_cw, self._wrap_mode_str))
+                else:
+                    left_wrapped.append([lt[:left_cw] if left_cw > 0 else ""])
+            else:
+                left_wrapped.append([""])
+
+            if i < len(self._right_lines):
+                rt = self._right_lines[i]
+                if right_cw > 0 and len(rt) > right_cw:
+                    right_wrapped.append(self._wrap_text(rt, right_cw, self._wrap_mode_str))
+                else:
+                    right_wrapped.append([rt[:right_cw] if right_cw > 0 else ""])
+            else:
+                right_wrapped.append([""])
+
+        return left_wrapped, right_wrapped
+
+    def _draw_split_side(
+        self,
+        buf: Buffer,
+        vr: int,
+        i: int,
+        ly: int,
+        rows: list[str],
+        sx: int,
+        cx: int,
+        cw: int,
+        gw: int,
+        sw: int,
+        cc: Any,
+        line_nums: dict[int, int],
+        signs: dict[int, Any],
+        hide: set[int],
+    ) -> None:
+        """Draw one visual row of one side in the split diff view."""
+        if vr >= len(rows):
+            return
+        if cc and cc.gutter and self._show_line_numbers:
+            buf.fill_rect(sx, ly, gw + sw + 1, 1, cc.gutter)
+        if cc and cc.content:
+            buf.fill_rect(cx, ly, cw, 1, cc.content)
+        if vr == 0 and self._show_line_numbers and i not in hide:
+            ln = line_nums.get(i)
+            if ln is not None:
+                buf.draw_text(
+                    str(ln).rjust(gw),
+                    sx,
+                    ly,
+                    self._line_number_fg_color,
+                    cc.gutter if cc else None,
+                )
+        if vr == 0 and self._show_line_numbers:
+            sign = signs.get(i)
+            if sign and sign.after:
+                buf.draw_text(sign.after, sx + gw, ly, sign.after_color, cc.gutter if cc else None)
+        if cw > 0:
+            buf.draw_text(
+                rows[vr], cx, ly, self._diff_fg, cc.content if cc else self._background_color
+            )
+
     def _render_split(self, buffer: Buffer, x: int, y: int, width: int, height: int) -> None:
         """Render split view (side by side) with aligned wrapping."""
         half_width = width // 2
@@ -674,113 +776,23 @@ class DiffRenderable(Renderable):
             )
             return
 
-        # With wrapping, we need to compute visual row counts for each
-        # logical line on both sides and align them.
-        def _content_width(w: int, line_nums: dict[int, int], show_ln: bool) -> int:
-            gw = 0
-            sw = 0
-            if show_ln:
-                max_n = max(line_nums.values()) if line_nums else 0
-                nd = max(len(str(max_n)), 1)
-                gw = nd + 1
-                sw = 2
-            return w - gw - sw - (1 if show_ln else 0)
+        # With wrapping, compute visual row counts for each logical line
+        # on both sides and align them.
+        left_cw = self._compute_content_width(half_width, self._left_line_numbers)
+        right_cw = self._compute_content_width(right_width, self._right_line_numbers)
 
-        left_cw = _content_width(half_width, self._left_line_numbers, self._show_line_numbers)
-        right_cw = _content_width(right_width, self._right_line_numbers, self._show_line_numbers)
+        left_wrapped, right_wrapped = self._pre_wrap_split_lines(left_cw, right_cw)
+        num_logical = len(left_wrapped)
 
-        num_logical = max(len(self._left_lines), len(self._right_lines))
-
-        # Pre-compute wrapped visual rows per logical line
-        left_wrapped: list[list[str]] = []
-        right_wrapped: list[list[str]] = []
-
-        for i in range(num_logical):
-            if i < len(self._left_lines):
-                lt = self._left_lines[i]
-                if left_cw > 0 and len(lt) > left_cw:
-                    left_wrapped.append(self._wrap_text(lt, left_cw, self._wrap_mode_str))
-                else:
-                    left_wrapped.append([lt[:left_cw] if left_cw > 0 else ""])
-            else:
-                left_wrapped.append([""])
-
-            if i < len(self._right_lines):
-                rt = self._right_lines[i]
-                if right_cw > 0 and len(rt) > right_cw:
-                    right_wrapped.append(self._wrap_text(rt, right_cw, self._wrap_mode_str))
-                else:
-                    right_wrapped.append([rt[:right_cw] if right_cw > 0 else ""])
-            else:
-                right_wrapped.append([""])
-
-        # Now render both sides aligned
-        visual_row = 0
-
-        # Left gutter metrics
-        l_gw = 0
-        l_sw = 0
-        if self._show_line_numbers:
-            l_max = max(self._left_line_numbers.values()) if self._left_line_numbers else 0
-            l_nd = max(len(str(l_max)), 1)
-            l_gw = l_nd + 1
-            l_sw = 2
-        l_cx = x + l_gw + l_sw + (1 if self._show_line_numbers else 0)
-
-        # Right gutter metrics
-        r_gw = 0
-        r_sw = 0
-        if self._show_line_numbers:
-            r_max = max(self._right_line_numbers.values()) if self._right_line_numbers else 0
-            r_nd = max(len(str(r_max)), 1)
-            r_gw = r_nd + 1
-            r_sw = 2
-        r_cx = x + half_width + r_gw + r_sw + (1 if self._show_line_numbers else 0)
+        l_gw, l_sw, l_cx = self._compute_gutter_metrics(self._left_line_numbers, x)
+        r_gw, r_sw, r_cx = self._compute_gutter_metrics(
+            self._right_line_numbers, x + half_width
+        )
 
         l_hide = self._left_hide_line_numbers
         r_hide = self._right_hide_line_numbers
 
-        def _draw_side(
-            buf: Buffer,
-            vr: int,
-            i: int,
-            ly: int,
-            rows: list[str],
-            sx: int,
-            cx: int,
-            cw: int,
-            gw: int,
-            sw: int,
-            cc: Any,
-            line_nums: dict[int, int],
-            signs: dict[int, Any],
-            hide: set[int],
-        ) -> None:
-            if vr >= len(rows):
-                return
-            if cc and cc.gutter and self._show_line_numbers:
-                buf.fill_rect(sx, ly, gw + sw + 1, 1, cc.gutter)
-            if cc and cc.content:
-                buf.fill_rect(cx, ly, cw, 1, cc.content)
-            if vr == 0 and self._show_line_numbers and i not in hide:
-                ln = line_nums.get(i)
-                if ln is not None:
-                    buf.draw_text(
-                        str(ln).rjust(gw),
-                        sx,
-                        ly,
-                        self._line_number_fg_color,
-                        cc.gutter if cc else None,
-                    )
-            if vr == 0 and self._show_line_numbers:
-                s = signs.get(i)
-                if s and s.after:
-                    buf.draw_text(s.after, sx + gw, ly, s.after_color, cc.gutter if cc else None)
-            if cw > 0:
-                buf.draw_text(
-                    rows[vr], cx, ly, self._diff_fg, cc.content if cc else self._background_color
-                )
-
+        visual_row = 0
         for i in range(num_logical):
             if visual_row >= height:
                 break
@@ -795,37 +807,15 @@ class DiffRenderable(Renderable):
                 if visual_row >= height:
                     break
                 ly = y + visual_row
-                _draw_side(
-                    buffer,
-                    vr,
-                    i,
-                    ly,
-                    lw,
-                    x,
-                    l_cx,
-                    left_cw,
-                    l_gw,
-                    l_sw,
-                    l_cc,
-                    self._left_line_numbers,
-                    self._left_line_signs,
-                    l_hide,
+                self._draw_split_side(
+                    buffer, vr, i, ly, lw, x, l_cx, left_cw,
+                    l_gw, l_sw, l_cc, self._left_line_numbers,
+                    self._left_line_signs, l_hide,
                 )
-                _draw_side(
-                    buffer,
-                    vr,
-                    i,
-                    ly,
-                    rw,
-                    x + half_width,
-                    r_cx,
-                    right_cw,
-                    r_gw,
-                    r_sw,
-                    r_cc,
-                    self._right_line_numbers,
-                    self._right_line_signs,
-                    r_hide,
+                self._draw_split_side(
+                    buffer, vr, i, ly, rw, x + half_width, r_cx, right_cw,
+                    r_gw, r_sw, r_cc, self._right_line_numbers,
+                    self._right_line_signs, r_hide,
                 )
                 visual_row += 1
 

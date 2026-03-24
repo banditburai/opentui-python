@@ -4,7 +4,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from ..enums import RenderStrategy
-from .syntax_highlight import (
+from ._syntax_highlight import (
     ChunkRenderContext,
     HighlightContext,
     LineHighlight,

@@ -8,7 +8,7 @@ import pytest
 
 from opentui import Box, TestSetup, create_test_renderer
 from opentui.components.text_renderable import TextRenderable
-from opentui.components.textnode import (
+from opentui.components._textnode import (
     StyledText,
     TextChunk,
     TextNode,
@@ -738,7 +738,7 @@ class TestTextRenderableStyledTextIntegration:
     async def test_should_handle_styledtext_with_multiple_chunks(self):
         """Maps to test("should handle StyledText with multiple chunks")."""
 
-        from opentui.components.textnode import styled_red, styled_green, styled_blue
+        from opentui.components._textnode import styled_red, styled_green, styled_blue
 
         st = styled_text(styled_red("Red"), " ", styled_green("Green"), " ", styled_blue("Blue"))
         setup, text = await _make(selectable=True, width=40, height=5)

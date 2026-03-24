@@ -7,7 +7,7 @@ Tests ported: 94/94
 import pytest
 
 from opentui import ScrollBox, create_test_renderer
-from opentui.components.markdown_renderable import (
+from opentui.components.markdown import (
     _MarkdownCodeBlock,
     MarkdownRenderable,
     MarkdownTableOptions,
@@ -1164,7 +1164,7 @@ class TestMarkdownRenderable:
         md.content = "| Name | Score |\n|---|---|\n| Alpha | 10 |\n"
         setup.render_frame()
 
-        md.destroy_recursively()
+        md.destroy()
         assert md.is_destroyed is True
 
         # Should not throw

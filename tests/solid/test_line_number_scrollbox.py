@@ -21,7 +21,7 @@ Notes on Python adaptation:
 import re
 
 from opentui import test_render as _test_render
-from opentui.components.simple import Code
+from opentui.components._simple_variants import Code
 from opentui.components.box import Box
 from opentui.components.scrollbox import ScrollBox, ScrollContent
 from opentui.components.control_flow import For, Show

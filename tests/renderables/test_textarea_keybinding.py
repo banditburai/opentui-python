@@ -6,7 +6,7 @@ Tests ported: 143/143 (all implemented)
 
 import pytest
 
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.events import KeyEvent
 from opentui.input.keymapping import KeyBinding
 

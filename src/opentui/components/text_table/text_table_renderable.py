@@ -5,13 +5,13 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any
 
-from .. import structs as s
-from ..editor.text_buffer_native import NativeTextBuffer
-from ..editor.text_view_native import NativeTextBufferView
-from ..enums import RenderStrategy
-from ..native import _nb
-from .base import Renderable
-from .raster_cache import RasterCache
+from ... import structs as s
+from ...editor.text_buffer_native import NativeTextBuffer
+from ...editor.text_view_native import NativeTextBufferView
+from ...enums import RenderStrategy
+from ...native import _nb
+from ..base import Renderable
+from .._raster_cache import RasterCache
 from .text_table_borders import (
     _BorderLayout,
     draw_borders,
@@ -45,7 +45,7 @@ from .text_table_selection import (
 from .text_table_config import CellState, TableLayoutState
 
 if TYPE_CHECKING:
-    from ..renderer import Buffer
+    from ...renderer import Buffer
 
 # Large sentinel height for text measurement.
 MEASURE_HEIGHT = 10_000
@@ -467,6 +467,13 @@ class TextTableRenderable(Renderable):
         text = self._cell_content_to_text(content)
         text_buffer = NativeTextBuffer()
         text_buffer.set_text(text)
+
+        if self._default_fg is not None:
+            text_buffer.set_default_fg(self._default_fg)
+        if self._default_bg is not None:
+            text_buffer.set_default_bg(self._default_bg)
+        if self._default_attributes:
+            text_buffer.set_default_attributes(self._default_attributes)
 
         text_buffer_view = NativeTextBufferView(text_buffer.ptr, text_buffer)
         text_buffer_view.set_wrap_mode(self._wrap_mode_str)

@@ -9,8 +9,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .. import structs as s
-from .line_types import LineColorConfig, LineSign
+from ... import structs as s
+from ..line_types import LineColorConfig, LineSign
 
 
 @dataclass

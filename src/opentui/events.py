@@ -99,7 +99,6 @@ class KeyEvent(_EventPropagationMixin):
 
     @property
     def name(self) -> str:
-        """Alias for key."""
         return self.key
 
     def __str__(self) -> str:
@@ -153,7 +152,6 @@ class MouseEvent(_EventPropagationMixin):
 
     @property
     def name(self) -> str:
-        """Alias for type."""
         return self.type
 
     def __str__(self) -> str:

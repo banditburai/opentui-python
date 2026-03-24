@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .diff_parser import LogicalLine
-from .line_types import LineColorConfig, LineSign
+from ..line_types import LineColorConfig, LineSign
 
 
 def build_error_view_lines(parse_error, diff_text: str) -> list[str]:

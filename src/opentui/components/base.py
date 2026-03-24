@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -28,10 +27,6 @@ from ._renderable_constants import (
 )
 from ._renderable_props import _Prop
 
-log = logging.getLogger(__name__)
-
-_get_create_prop_binding = _renderable_base._get_create_prop_binding
-_sync_yoga_children = _renderable_base._sync_yoga_children
 is_renderable = _renderable_base.is_renderable
 
 
@@ -523,7 +518,38 @@ class Renderable(_ReactiveBindingMixin, _RenderableBehaviorMixin, BaseRenderable
         render_renderable_children(self, buffer, delta_time)
 
 
-from ._v_renderable import VRenderable  # isort: skip
+class VRenderable(Renderable):
+    """Renderable with a custom render function callback."""
+
+    def __init__(
+        self,
+        *,
+        render_fn: Callable[[Buffer, float, "VRenderable"], None] | None = None,
+        **kwargs: Any,
+    ):
+        super().__init__(**kwargs)
+        self._render_fn = render_fn
+
+    @property
+    def render_fn(self) -> Callable | None:
+        return self._render_fn
+
+    @render_fn.setter
+    def render_fn(self, value: Callable | None) -> None:
+        self._render_fn = value
+        self.mark_paint_dirty()
+
+    def render(self, buffer: Buffer, delta_time: float = 0) -> None:
+        if not self._visible:
+            return
+        if self._render_before:
+            self._render_before(buffer, delta_time, self)
+        if self._render_fn:
+            self._render_fn(buffer, delta_time, self)
+        for child in self._children:
+            child.render(buffer, delta_time)
+        if self._render_after:
+            self._render_after(buffer, delta_time, self)
 
 
 __all__ = [

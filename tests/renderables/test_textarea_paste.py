@@ -4,7 +4,7 @@ Upstream: packages/core/src/renderables/__tests__/Textarea.paste.test.ts
 Tests ported: 16/16 (16 real)
 """
 
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.events import KeyEvent, PasteEvent
 
 

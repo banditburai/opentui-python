@@ -18,8 +18,8 @@ from ..input.keymapping import (
     merge_key_bindings,
 )
 from .base import Renderable, _parse_color_static, _Prop
-from .input import SelectOption
-from .raster_cache import RasterCache
+from .select import SelectOption
+from ._raster_cache import RasterCache
 
 if TYPE_CHECKING:
     from ..renderer import Buffer

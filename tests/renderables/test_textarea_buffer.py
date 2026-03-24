@@ -9,7 +9,7 @@ are not available in the Python implementation.
 
 import pytest
 
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.events import KeyEvent
 
 

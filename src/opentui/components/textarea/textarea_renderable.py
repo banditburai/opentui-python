@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from .. import hooks
-from .. import structs as s
-from ..enums import RenderStrategy
-from ..events import KeyEvent, PasteEvent
-from ..input.keymapping import (
+from ... import hooks
+from ... import structs as s
+from ...enums import RenderStrategy
+from ...events import KeyEvent, PasteEvent
+from ...input.keymapping import (
     DEFAULT_KEY_ALIASES,
     KeyAliasMap,
     KeyBinding,
@@ -17,7 +17,7 @@ from ._textarea_init import (
     init_textarea_runtime_state,
     wire_textarea_runtime_handlers,
 )
-from .base import Renderable, _parse_color_static, _Prop
+from ..base import Renderable, _parse_color_static, _Prop
 from .textarea_keymap import resolve_textarea_colors
 from .textarea_keymap import (
     init_textarea_key_bindings,
@@ -33,9 +33,9 @@ from .textarea_text_utils import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..editor.edit_buffer_native import NativeEditBuffer
-    from ..editor.editor_view_native import NativeEditorView
-    from ..renderer import Buffer
+    from ...editor.edit_buffer_native import NativeEditBuffer
+    from ...editor.editor_view_native import NativeEditorView
+    from ...renderer import Buffer
 
 
 from typing import NamedTuple as _NamedTuple
@@ -308,7 +308,7 @@ class TextareaRenderable(_SelectionMixin, _NavigationMixin, _MouseMixin, Rendera
 
     @syntax_style.setter
     def syntax_style(self, style) -> None:
-        from ..native import _nb
+        from ...native import _nb
 
         self._syntax_style = style
         text_buf_ptr = self._edit_buffer.get_text_buffer_ptr()
@@ -324,7 +324,7 @@ class TextareaRenderable(_SelectionMixin, _NavigationMixin, _MouseMixin, Rendera
             line_idx: Zero-based line index.
             spec: Dict with keys: start, end, styleId, priority, hlRef (optional).
         """
-        from ..native import _nb
+        from ...native import _nb
 
         start = spec.get("start", spec.get("startCol", 0))
         end = spec.get("end", spec.get("endCol", 0))
@@ -344,7 +344,7 @@ class TextareaRenderable(_SelectionMixin, _NavigationMixin, _MouseMixin, Rendera
         Args:
             spec: Dict with keys: start, end, styleId, priority, hlRef (optional).
         """
-        from ..native import _nb
+        from ...native import _nb
 
         start = spec.get("start", 0)
         end = spec.get("end", 0)
@@ -362,25 +362,25 @@ class TextareaRenderable(_SelectionMixin, _NavigationMixin, _MouseMixin, Rendera
         Returns:
             List of dicts with keys: start, end, styleId, priority, hlRef.
         """
-        from ..native import _nb
+        from ...native import _nb
 
         text_buf_ptr = self._edit_buffer.get_text_buffer_ptr()
         return _nb.text_buffer.text_buffer_get_line_highlights(text_buf_ptr, line_idx)
 
     def remove_highlights_by_ref(self, hl_ref: int) -> None:
-        from ..native import _nb
+        from ...native import _nb
 
         text_buf_ptr = self._edit_buffer.get_text_buffer_ptr()
         _nb.text_buffer.text_buffer_remove_highlights_by_ref(text_buf_ptr, hl_ref)
 
     def clear_line_highlights(self, line_idx: int) -> None:
-        from ..native import _nb
+        from ...native import _nb
 
         text_buf_ptr = self._edit_buffer.get_text_buffer_ptr()
         _nb.text_buffer.text_buffer_clear_line_highlights(text_buf_ptr, line_idx)
 
     def clear_all_highlights(self) -> None:
-        from ..native import _nb
+        from ...native import _nb
 
         text_buf_ptr = self._edit_buffer.get_text_buffer_ptr()
         _nb.text_buffer.text_buffer_clear_all_highlights(text_buf_ptr)
@@ -410,7 +410,7 @@ class TextareaRenderable(_SelectionMixin, _NavigationMixin, _MouseMixin, Rendera
 
     @property
     def line_info(self):
-        from .line_number_gutter import LineInfo
+        from ..line_number_gutter import LineInfo
 
         try:
             return LineInfo.from_native_dict(self._editor_view.get_line_info())

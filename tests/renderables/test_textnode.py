@@ -6,7 +6,7 @@ Tests ported: 51/51 (0 skipped)
 
 import pytest
 
-from opentui.components.textnode import (
+from opentui.components._textnode import (
     TextNode,
     TextStyle,
     TextChunk,

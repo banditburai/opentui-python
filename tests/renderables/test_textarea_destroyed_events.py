@@ -4,7 +4,7 @@ Upstream: packages/core/src/renderables/__tests__/Textarea.destroyed-events.test
 Tests: 21 (21 real, 0 skipped)
 """
 
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.events import KeyEvent, PasteEvent
 
 

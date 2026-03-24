@@ -20,7 +20,7 @@ from ._scrollbox_state import (
 )
 from .base import BaseRenderable
 from .box import Box, _normalize_box_child
-from .scrollbox_acceleration import LinearScrollAccel, MacOSScrollAccel
+from ._scrollbox_state import LinearScrollAccel, MacOSScrollAccel
 
 if TYPE_CHECKING:
     from ..renderer import Buffer
@@ -185,7 +185,7 @@ class ScrollBox(Box):
         return self._scroll_content.get_children()
 
     def get_children_count(self) -> int:
-        return self._scroll_content.get_children_count()
+        return len(self._scroll_content._children)
 
     def get_renderable(self, id: str) -> BaseRenderable | None:
         return self._scroll_content.get_renderable(id)
@@ -295,13 +295,6 @@ class ScrollBox(Box):
 
     def _viewport_inner_size(self) -> tuple[int, int]:
         return viewport_inner_size(self)
-
-    def _measure_content(self) -> tuple[int, int]:
-        content = self._scroll_content
-        return (
-            int(getattr(content, "_layout_width", 0) or 0),
-            int(getattr(content, "_layout_height", 0) or 0),
-        )
 
     def _max_scroll_x(self) -> int:
         return max_scroll_x(self)

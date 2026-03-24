@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .. import structs as s
+from ... import structs as s
 
 if TYPE_CHECKING:
-    from ..renderer import Buffer
+    from ...renderer import Buffer
 
 _BORDER_CHARS = {
     "single": {

@@ -186,7 +186,6 @@ class Selection:
 
 @dataclass
 class LocalSelectionBounds:
-    """Local selection bounds relative to a renderable."""
 
     anchor_x: int
     anchor_y: int

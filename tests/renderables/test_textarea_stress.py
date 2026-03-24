@@ -14,7 +14,7 @@ and never contains escape sequences or raw mouse bytes.
 
 import re
 
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.events import KeyEvent, PasteEvent
 
 

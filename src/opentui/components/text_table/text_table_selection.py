@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .text_renderable_utils import get_scroll_adjusted_position
+from ..text_renderable_utils import get_scroll_adjusted_position
 
 
 def should_start_selection(table, x: int, y: int) -> bool:

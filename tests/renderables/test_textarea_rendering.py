@@ -7,7 +7,7 @@ Tests ported: 71/71
 import pytest
 
 from opentui import Box, TestSetup, create_test_renderer
-from opentui.components.textarea_renderable import TextareaRenderable
+from opentui.components.textarea import TextareaRenderable
 from opentui.components.text_renderable import TextRenderable
 from opentui.native import NativeOptimizedBuffer
 

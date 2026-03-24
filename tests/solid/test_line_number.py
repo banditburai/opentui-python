@@ -17,7 +17,7 @@ Notes on Python adaptation:
 """
 
 from opentui import test_render as _test_render
-from opentui.components.simple import Code
+from opentui.components._simple_variants import Code
 from opentui.components.box import Box
 from opentui.components.control_flow import Show
 from opentui.signals import Signal
