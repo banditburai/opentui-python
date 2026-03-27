@@ -8,8 +8,6 @@ mouse hit-testing, resize, destroy).
 Upstream: packages/core/src/console.ts
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 import pytest

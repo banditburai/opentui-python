@@ -1,7 +1,5 @@
 """OSC response regexes and hex conversion shared by palette detector and terminal palette."""
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field
 
@@ -39,6 +37,29 @@ def _to_hex(
     if r and g and b:
         return f"#{_scale_component(r)}{_scale_component(g)}{_scale_component(b)}"
     return "#000000"
+
+
+def parse_osc4_responses(data: str) -> dict[int, str]:
+    """Parse all OSC 4 colour responses from *data* and return {index: hex}."""
+    results: dict[int, str] = {}
+    for m in OSC4_RE.finditer(data):
+        idx = int(m.group(1))
+        results[idx] = _to_hex(m.group(2), m.group(3), m.group(4), m.group(5))
+    return results
+
+
+def parse_osc_special_responses(data: str) -> dict[int, str]:
+    """Parse all OSC special colour responses from *data* and return {code: hex}."""
+    results: dict[int, str] = {}
+    for m in OSC_SPECIAL_RE.finditer(data):
+        idx = int(m.group(1))
+        results[idx] = _to_hex(m.group(2), m.group(3), m.group(4), m.group(5))
+    return results
+
+
+def has_osc4_response(data: str) -> bool:
+    """Return ``True`` if *data* contains at least one valid OSC 4 response."""
+    return bool(OSC4_RE.search(data))
 
 
 Hex = str | None  # "#rrggbb" or None

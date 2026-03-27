@@ -1,20 +1,18 @@
 """Image component."""
 
-from __future__ import annotations
-
 import hashlib
+import logging
 import math
 import os
-from typing import TYPE_CHECKING
 
 from ..image.encoding import ImageRenderer
+
+_log = logging.getLogger(__name__)
 from ..image.loader import load_image
 from ..image.types import DecodedImage, ImageFit, ImageProtocol, ImageSource, resize_rgba_nearest
 from ..renderer import TerminalCapabilities
+from ..renderer.buffer import Buffer
 from .base import Renderable
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
 
 
 def _env_protocol_override() -> ImageProtocol | None:
@@ -78,14 +76,16 @@ class ImageCache:
     def variant_count(self) -> int:
         return len(self._variants)
 
-    def get_decoded(self, source: ImageSource, loader) -> DecodedImage:
-        key = _source_key(source)
-        cached = self._decoded.get(key)
+    def get_decoded(self, source: ImageSource, loader, *, key: str | None = None) -> DecodedImage:
+        k = key if key is not None else _source_key(source)
+        cached = self._decoded.get(k)
         if cached is not None:
             return cached
         decoded = loader()
-        self._decoded[key] = decoded
+        self._decoded[k] = decoded
         return decoded
+
+    _VARIANT_MAX = 32
 
     def get_variant(self, decoded: DecodedImage, width: int, height: int, scaler) -> bytes:
         source = decoded.source or ImageSource(data=decoded.data, mime_type=decoded.mime_type)
@@ -94,6 +94,11 @@ class ImageCache:
         if cached is not None:
             return cached
         variant = scaler()
+        if len(self._variants) >= self._VARIANT_MAX:
+            # Evict oldest half when cache is full (dict preserves insertion order).
+            excess = len(self._variants) - self._VARIANT_MAX // 2
+            for k in list(self._variants.keys())[:excess]:
+                del self._variants[k]
         self._variants[key] = variant
         return variant
 
@@ -124,12 +129,16 @@ class Image(Renderable):
         self._fit = ImageFit(fit)
         self._protocol = ImageProtocol(protocol)
         self._decoded = None
-        self._last_draw_signature: tuple[ImageSource, int, int, int, int, ImageProtocol] | None = (
-            None
-        )
+        # Split draw cache into intrinsic params (data identity) and position
+        # so scroll-only changes skip the expensive clear+retransmit cycle.
+        self._last_intrinsic: tuple[ImageSource, int, int, ImageProtocol] | None = None
+        self._last_draw_pos: tuple[int, int] | None = None
         self._graphics_id: int | None = None
         self._was_suppressed: bool = False
         self._cache = ImageCache()
+        # Cache immutable per-instance lookups to avoid per-frame overhead.
+        self._cached_source_key = _source_key(self._source)
+        self._cached_capabilities: TerminalCapabilities | None = None
         self.on_cleanup(self._cache.clear)
         self.on_cleanup(self._clear_graphics_on_destroy)
 
@@ -151,7 +160,7 @@ class Image(Renderable):
                 sys.stdout.buffer.write(_clear_kitty_graphics(self._graphics_id))
                 sys.stdout.buffer.flush()
             except Exception:
-                pass
+                _log.debug("failed to clear kitty graphics id=%s", self._graphics_id, exc_info=True)
             self._graphics_id = None
 
     @property
@@ -213,17 +222,23 @@ class Image(Renderable):
         return min(box_width, width_cells), min(box_height, height_cells)
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        if not self._visible:
-            if self._graphics_id is not None and self._last_draw_signature is not None:
-                self._clear_graphics_on_destroy()
-                self._last_draw_signature = None
+        if not self._visible and self._graphics_id is not None and self._last_intrinsic is not None:
+            self._clear_graphics_on_destroy()
+            self._last_intrinsic = None
+            self._last_draw_pos = None
             return
 
         try:
-            self._decoded = self._cache.get_decoded(self._source, lambda: load_image(self._source))
+            self._decoded = self._cache.get_decoded(
+                self._source,
+                lambda: load_image(self._source),
+                key=self._cached_source_key,
+            )
             decoded = self._decoded
             box_width, box_height = self._resolve_box(decoded.width, decoded.height)
-            capabilities = _protocol_capabilities(self._protocol)
+            if self._cached_capabilities is None:
+                self._cached_capabilities = _protocol_capabilities(self._protocol)
+            capabilities = self._cached_capabilities
             renderer = ImageRenderer(buffer, capabilities)
             use_graphics_protocol = capabilities.kitty_graphics or capabilities.sixel
 
@@ -245,7 +260,8 @@ class Image(Renderable):
                 if self._was_suppressed:
                     # Transitioning from suppressed → active: force redraw
                     self._was_suppressed = False
-                    self._last_draw_signature = None
+                    self._last_intrinsic = None
+                    self._last_draw_pos = None
 
             if use_graphics_protocol:
                 width, height = self._fit_graphics_cells(
@@ -255,7 +271,56 @@ class Image(Renderable):
                 width, height = self._fit_size(decoded.width, decoded.height, box_width, box_height)
             x = self._x + max(0, (box_width - width) // 2)
             y = self._y + max(0, (box_height - height) // 2)
-            draw_signature = (self._source, x, y, width, height, self._protocol)
+
+            # For graphics protocols (Kitty/SIXEL), translate layout
+            # coordinates to screen coordinates using the buffer's drawing
+            # offset.  Kitty/SIXEL use absolute terminal cursor positioning
+            # so the image must stay within the visible viewport.
+            draw_x, draw_y = x, y
+            if use_graphics_protocol:
+                buf_offset = buffer.get_offset()
+                draw_x += buf_offset[0]
+                draw_y += buf_offset[1]
+
+                # Determine the visible rect: scissor if inside a scroll
+                # container, otherwise the full buffer.
+                scissor = buffer.get_scissor_rect()
+                if scissor is not None:
+                    vx, vy, vw, vh = scissor
+                else:
+                    vx, vy, vw, vh = 0, 0, buffer.width, buffer.height
+
+                # Clamp the layout box to the visible viewport and re-fit
+                # the image proportionally.  This ensures the image always
+                # renders at whatever size fits on screen (e.g. after a
+                # terminal resize) rather than disappearing entirely.
+                box_sx = self._x + buf_offset[0]
+                box_sy = self._y + buf_offset[1]
+                eff_left = max(vx, box_sx)
+                eff_top = max(vy, box_sy)
+                eff_w = min(box_sx + box_width, vx + vw) - eff_left
+                eff_h = min(box_sy + box_height, vy + vh) - eff_top
+
+                if eff_w <= 0 or eff_h <= 0:
+                    if self._graphics_id is not None and self._last_intrinsic is not None:
+                        renderer.clear_graphics(self._graphics_id)
+                        self._last_intrinsic = None
+                        self._last_draw_pos = None
+                    return
+
+                # Re-fit and re-center when the visible area is smaller
+                # than the layout box (terminal narrower than image).
+                if eff_w < box_width or eff_h < box_height:
+                    width, height = self._fit_graphics_cells(
+                        decoded.width,
+                        decoded.height,
+                        eff_w,
+                        eff_h,
+                    )
+                    draw_x = eff_left + max(0, (eff_w - width) // 2)
+                    draw_y = eff_top + max(0, (eff_h - height) // 2)
+
+            intrinsic = (self._source, width, height, self._protocol)
             if capabilities.kitty_graphics:
                 data = decoded.data
                 source_width = decoded.width
@@ -276,21 +341,31 @@ class Image(Renderable):
                 source_width = width
                 source_height = height
             if use_graphics_protocol:
-                if self._last_draw_signature == draw_signature:
+                draw_pos = (draw_x, draw_y)
+                if self._last_intrinsic == intrinsic and self._last_draw_pos == draw_pos:
+                    # Completely unchanged — skip draw entirely.
                     self._register_active_graphics()
                     return
-                if self._last_draw_signature is not None and self._graphics_id is not None:
+                if (
+                    (self._last_intrinsic != intrinsic or self._last_draw_pos != draw_pos)
+                    and self._graphics_id is not None
+                    and self._last_intrinsic is not None
+                ):
+                    # Image data/size/position changed — clear old placement
+                    # and retransmit.  We cannot use Kitty a=p (placement)
+                    # because Ghostty's d=I deletes image data, not just
+                    # placements, causing "ENOENT: image not found".
                     renderer.clear_graphics(self._graphics_id)
                 if self._graphics_id is None:
                     self._graphics_id = self._allocate_graphics_id()
             if self._protocol == ImageProtocol.GRAYSCALE and renderer.draw_grayscale(
-                data, x, y, width, height
+                data, draw_x, draw_y, width, height
             ):
                 return
             if renderer.draw_image(
                 data,
-                x,
-                y,
+                draw_x,
+                draw_y,
                 width,
                 height,
                 graphics_id=self._graphics_id,
@@ -298,11 +373,12 @@ class Image(Renderable):
                 source_height=source_height,
             ):
                 if use_graphics_protocol:
-                    self._last_draw_signature = draw_signature
+                    self._last_intrinsic = intrinsic
+                    self._last_draw_pos = (draw_x, draw_y)
                     self._register_active_graphics()
                 return
         except Exception:
-            pass
+            _log.debug("image render failed, falling back to alt text", exc_info=True)
 
         if self._alt and hasattr(buffer, "draw_text"):
             buffer.draw_text(self._alt, self._x, self._y)

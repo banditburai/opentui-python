@@ -1,9 +1,5 @@
 """SelectRenderable - keyboard-navigable option list renderable."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 from .. import structs as s
 from ..enums import RenderStrategy
 from ..events import KeyEvent
@@ -17,13 +13,10 @@ from ..input.keymapping import (
     merge_key_aliases,
     merge_key_bindings,
 )
+from ..renderer.buffer import Buffer
+from ._raster_cache import RasterCache
 from .base import Renderable, _parse_color_static, _Prop
 from .select import SelectOption
-from ._raster_cache import RasterCache
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
-
 
 _DEFAULT_SELECT_BINDINGS: list[KeyBinding] = [
     KeyBinding(name="up", action="move-up"),

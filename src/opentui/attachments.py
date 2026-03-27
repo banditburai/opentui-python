@@ -1,7 +1,5 @@
 """Attachment normalization utilities for paste and drop payloads."""
 
-from __future__ import annotations
-
 import shlex
 from pathlib import Path
 
@@ -35,6 +33,12 @@ def detect_dropped_paths(text: str) -> list[str]:
             path = Path(candidate).expanduser()
             if path.exists():
                 paths.append(str(path))
+            elif not path.is_absolute():
+                # Try as an absolute path — handles pastes that drop the
+                # leading '/' (e.g. "Users/x/foo" instead of "/Users/x/foo").
+                rooted = Path("/" + candidate).expanduser()
+                if rooted.exists():
+                    paths.append(str(rooted))
         except OSError:
             continue
     return paths
@@ -60,9 +64,10 @@ def normalize_paste_payload(raw: bytes | str) -> PasteEvent:
     paths = detect_dropped_paths(raw)
     if paths:
         return PasteEvent(
+            text=raw,
             attachments=[
                 AttachmentPayload(kind="file", path=path, name=Path(path).name) for path in paths
-            ]
+            ],
         )
 
     return PasteEvent(text=raw)

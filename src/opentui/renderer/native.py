@@ -1,7 +1,5 @@
 """Lazy-loaded native acceleration caches for yoga layout and common-tree rendering."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -188,7 +186,7 @@ def _load_common_render(root) -> None:
         _COMMON_RENDER_CACHE["text_type"] = Text
         _COMMON_RENDER_CACHE["portal_type"] = Portal
     except Exception:
-        pass
+        _log.debug("common render module init failed", exc_info=True)
 
 
 def _ensure_common_render_loaded(root) -> dict[str, Any]:

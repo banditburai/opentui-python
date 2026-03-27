@@ -1,10 +1,10 @@
-from __future__ import annotations
-
 from ..events import MouseEvent
 from .key_maps import _decode_wheel
 
 
-def build_mouse_event(button_code: int, x: int, y: int, is_release: bool = False) -> MouseEvent | None:
+def build_mouse_event(
+    button_code: int, x: int, y: int, is_release: bool = False
+) -> MouseEvent | None:
     shift = bool(button_code & 4)
     alt = bool(button_code & 8)
     ctrl = bool(button_code & 16)

@@ -7,11 +7,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from .animation import Timeline
+from .events import KeyEvent, MouseEvent, PasteEvent
 from .signals import Signal, on_cleanup
 from .structs import RGBA
 
 if TYPE_CHECKING:
-    from .events import KeyEvent, MouseEvent, PasteEvent
     from .renderer import CliRenderer
 
 
@@ -181,6 +181,9 @@ def use_keyboard(
     handler: Callable[[KeyEvent], None],
     options: dict | None = None,
 ) -> Callable[[], None]:
+    # Bespoke dedup: keys by original handler id, but registers a wrapper.
+    # Can't use _use_deduped_handler because it keys by id(handler) which
+    # would be the wrapper (new each call), breaking dedup.
     handler_id = id(handler)
     prev = _keyboard_handler_refs.pop(handler_id, None)
     if prev is not None and prev in _keyboard_handlers:

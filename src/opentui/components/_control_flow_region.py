@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import Any
 
@@ -63,10 +61,13 @@ def normalize_inserted_children(
             if mode == "text":
                 from .text import Text
 
+                assert isinstance(payload, str)
                 children.append(Text(payload))
             elif mode == "single_node":
+                assert isinstance(payload, BaseRenderable)
                 children.append(payload)
             else:
+                assert isinstance(payload, list)
                 children.extend(payload)
         return "children", children
     return "text", str(result)
@@ -241,6 +242,25 @@ def subscribe_signals(
     return cleanup
 
 
+def resubscribe_tracked(
+    owner: Any,
+    tracked: set[Signal],
+    callback: Callable[[], None],
+    *,
+    cleanup_attr: str = "_data_cleanup",
+    tracked_attr: str = "_tracked_signals",
+) -> None:
+    """Unsubscribe stale signals and subscribe new ones (skips if unchanged)."""
+    next_tracked = frozenset(tracked)
+    if next_tracked == getattr(owner, tracked_attr, frozenset()):
+        return
+    old_cleanup = getattr(owner, cleanup_attr, None)
+    if old_cleanup:
+        old_cleanup()
+    setattr(owner, cleanup_attr, subscribe_signals(tracked, callback))
+    setattr(owner, tracked_attr, next_tracked)
+
+
 __all__ = [
     "apply_region_children",
     "detach_children",
@@ -248,6 +268,7 @@ __all__ = [
     "normalize_inserted_children",
     "normalize_render_result",
     "replace_region_children",
+    "resubscribe_tracked",
     "split_cacheable_branch_children",
     "subscribe_signals",
     "track_signals",

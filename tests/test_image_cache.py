@@ -3,8 +3,6 @@
 Upstream: N/A (Python-specific)
 """
 
-from __future__ import annotations
-
 from opentui.image.types import DecodedImage, ImageSource
 
 

@@ -849,8 +849,8 @@ class TestTextTableRenderable:
         finally:
             setup.destroy()
 
-    async def test_starts_selection_only_on_table_cell_content(self):
-        """Maps to test("starts selection only on table cell content")."""
+    async def test_should_start_selection_returns_selectable_flag(self):
+        """should_start_selection trusts renderer hit test — returns _selectable_flag."""
         setup = await create_test_renderer(60, 16)
         try:
             table = await _create_table(
@@ -864,14 +864,13 @@ class TestTextTableRenderable:
                 ],
             )
 
-            # Top-left corner is a border character - should not start selection
-            assert table.should_start_selection(table.x, table.y) is False
-            # One right from top-left border corner - still on top border row
-            assert table.should_start_selection(table.x + 1, table.y) is False
-            # One down from top-left border corner - on left border column
-            assert table.should_start_selection(table.x, table.y + 1) is False
-            # (1,1) should be inside the first cell
+            # Selectable table always returns True — renderer hit test gates containment
+            assert table.should_start_selection(table.x, table.y) is True
             assert table.should_start_selection(table.x + 1, table.y + 1) is True
+
+            # Non-selectable table always returns False
+            table.selectable = False
+            assert table.should_start_selection(table.x + 1, table.y + 1) is False
         finally:
             setup.destroy()
 
@@ -1048,8 +1047,8 @@ class TestTextTableRenderable:
         finally:
             setup.destroy()
 
-    async def test_does_not_start_selection_when_drag_begins_on_border(self):
-        """Maps to test("does not start selection when drag begins on border")."""
+    async def test_drag_starting_on_border_selects_into_adjacent_cell(self):
+        """Drag starting on border resolves into adjacent cell content."""
         setup = await create_test_renderer(60, 16)
         try:
             table = await _create_table(
@@ -1063,12 +1062,13 @@ class TestTextTableRenderable:
                 ],
             )
 
-            # Drag starting on border corner (0,0)
+            # Drag from border corner (0,0) into cell area — selection starts
+            # because should_start_selection trusts the hit test, and
+            # apply_selection_to_cells resolves coordinates to cell content.
             setup.mock_mouse.drag(table.x, table.y, table.x + 4, table.y + 1)
             setup.render_frame()
 
-            assert table.has_selection() is False
-            assert table.get_selected_text() == ""
+            assert table.has_selection() is True
         finally:
             setup.destroy()
 
@@ -1301,6 +1301,93 @@ class TestTextTableRenderable:
             frame = setup.capture_char_frame()
             # The ENDCHAR marker should be visible or the table height should accommodate it
             assert "ENDCHAR" in frame or table.height > 0
+        finally:
+            setup.destroy()
+
+
+class TestTextTableHeaderStyling:
+    """Verify header_fg and header_attributes are applied to row 0 cells."""
+
+    async def test_header_fg_stored(self):
+        table = TextTableRenderable(
+            header_fg="#ff0000",
+            content=[[cell("H1"), cell("H2")], [cell("a"), cell("b")]],
+        )
+        assert table._header_fg is not None
+        assert table._header_fg.r == 1.0
+
+    async def test_header_attributes_stored(self):
+        from opentui.structs import TEXT_ATTRIBUTE_BOLD
+
+        table = TextTableRenderable(
+            header_attributes=TEXT_ATTRIBUTE_BOLD,
+            content=[[cell("H1"), cell("H2")], [cell("a"), cell("b")]],
+        )
+        assert table._header_attributes == TEXT_ATTRIBUTE_BOLD
+
+    async def test_header_text_visible_in_rendered_frame(self):
+        setup = await create_test_renderer(60, 10)
+        try:
+            table = await _create_table(
+                setup,
+                left=0,
+                top=0,
+                position="absolute",
+                header_fg="#00ff00",
+                header_attributes=1,
+                column_width_mode="content",
+                content=[[cell("Name"), cell("Age")], [cell("Alice"), cell("30")]],
+            )
+            frame = setup.capture_char_frame()
+            assert "Name" in frame
+            assert "Age" in frame
+            assert "Alice" in frame
+            assert "30" in frame
+        finally:
+            setup.destroy()
+
+
+class TestTextTableCellOffset:
+    """Verify _draw_cells applies buffer._offset_stack for correct rendering."""
+
+    async def test_cell_text_visible_when_table_has_nonzero_position(self):
+        """Cell text must be visible even when table is positioned away from origin."""
+        setup = await create_test_renderer(60, 16)
+        try:
+            table = await _create_table(
+                setup,
+                left=5,
+                top=3,
+                position="absolute",
+                column_width_mode="content",
+                content=[[cell("X"), cell("Y")], [cell("1"), cell("2")]],
+            )
+            frame = setup.capture_char_frame()
+            assert "X" in frame, f"Cell 'X' not visible at offset position:\n{frame}"
+            assert "Y" in frame, f"Cell 'Y' not visible at offset position:\n{frame}"
+            assert "1" in frame, f"Cell '1' not visible at offset position:\n{frame}"
+            assert "2" in frame, f"Cell '2' not visible at offset position:\n{frame}"
+        finally:
+            setup.destroy()
+
+    async def test_cell_text_visible_in_full_width_mode(self):
+        """Cell text in full-width mode must be visible (uses RasterCache)."""
+        setup = await create_test_renderer(80, 10)
+        try:
+            table = await _create_table(
+                setup,
+                left=0,
+                top=0,
+                position="absolute",
+                width=60,
+                column_width_mode="full",
+                content=[[cell("Header A"), cell("Header B")], [cell("data1"), cell("data2")]],
+            )
+            frame = setup.capture_char_frame()
+            assert "Header A" in frame
+            assert "Header B" in frame
+            assert "data1" in frame
+            assert "data2" in frame
         finally:
             setup.destroy()
 

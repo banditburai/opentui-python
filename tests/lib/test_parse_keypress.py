@@ -17,8 +17,6 @@ Mapping notes:
   (``number`` was added; ``option`` and ``raw`` do not exist).
 """
 
-from __future__ import annotations
-
 from unittest.mock import patch
 
 import pytest

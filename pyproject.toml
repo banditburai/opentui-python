@@ -137,15 +137,14 @@ invalid-method-override = "ignore"
 # Dynamic property setters, type reassignment patterns in control flow
 invalid-assignment = "ignore"
 # Optional deps (PIL, numpy) not always installed
-unresolved-import = "warn"
-# dict.get overload resolution false positives
-no-matching-overload = "warn"
-# Type narrowing limitations with __slots__-based types
-invalid-argument-type = "warn"
-# Buffer subtype return in framebuffer (RenderBuffer is-a Buffer)
-invalid-return-type = "warn"
+unresolved-import = "ignore"
 # Keep existing type: ignore comments as documentation
 unused-type-ignore-comment = "ignore"
+# Enforced — zero tolerance:
+no-matching-overload = "error"
+invalid-argument-type = "error"
+invalid-return-type = "error"
+possibly-missing-submodule = "error"
 
 [tool.pytest.ini_options]
 minversion = "7.0"

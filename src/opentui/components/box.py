@@ -1,19 +1,15 @@
 """Box component - container with borders and layout."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .. import structs as s
 from ..enums import RenderStrategy
+from ..renderer.buffer import Buffer
 from ..signals import is_reactive
 from ..structs import FOCUS_RING_BLUE
 from ..structs import display_width as _display_width
 from ._renderable_constants import _UNSET_FLEX_SHRINK
 from .base import BaseRenderable, Renderable
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
 
 
 def _normalize_box_child(child: Any) -> list[BaseRenderable]:
@@ -48,7 +44,7 @@ def _normalize_box_child(child: Any) -> list[BaseRenderable]:
 
 
 class Box(Renderable):
-    """Box component - container with optional border and layout.
+    """Flex container with optional border, padding, and layout control.
 
     ``None`` children are silently skipped, lists are flattened.
 

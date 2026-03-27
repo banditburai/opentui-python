@@ -1,7 +1,5 @@
 """Layout helpers for Renderable's Yoga integration."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import yoga
@@ -76,7 +74,9 @@ def configure_renderable_yoga(
         "flex_grow": float(renderable._flex_grow) if renderable._flex_grow else None,
         "flex_shrink": float(renderable._flex_shrink),
         "flex_basis": renderable._flex_basis,
-        "flex_direction": renderable._flex_direction if renderable._flex_direction is not column else None,
+        "flex_direction": renderable._flex_direction
+        if renderable._flex_direction is not column
+        else None,
         "flex_wrap": renderable._flex_wrap if renderable._flex_wrap is not nowrap else None,
         "justify_content": renderable._justify_content
         if renderable._justify_content is not flex_start
@@ -92,11 +92,15 @@ def configure_renderable_yoga(
         "padding_left": float(renderable._padding_left + bl),
         "margin": float(renderable._margin) if renderable._margin else None,
         "margin_top": float(renderable._margin_top) if renderable._margin_top is not None else None,
-        "margin_right": float(renderable._margin_right) if renderable._margin_right is not None else None,
+        "margin_right": float(renderable._margin_right)
+        if renderable._margin_right is not None
+        else None,
         "margin_bottom": float(renderable._margin_bottom)
         if renderable._margin_bottom is not None
         else None,
-        "margin_left": float(renderable._margin_left) if renderable._margin_left is not None else None,
+        "margin_left": float(renderable._margin_left)
+        if renderable._margin_left is not None
+        else None,
     }
     if callable(configure_node_fast):
         configure_node_fast(
@@ -131,8 +135,8 @@ def apply_renderable_layout(renderable: Any) -> None:
         return
     old_w = renderable._layout_width
     old_h = renderable._layout_height
-    renderable._x, renderable._y, renderable._layout_width, renderable._layout_height = yoga.get_layout_batch(
-        node
+    renderable._x, renderable._y, renderable._layout_width, renderable._layout_height = (
+        yoga.get_layout_batch(node)
     )
 
     if renderable._on_size_change and (

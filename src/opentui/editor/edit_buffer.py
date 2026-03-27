@@ -1,7 +1,5 @@
 """EditBuffer and EditorView classes for text editing using nanobind."""
 
-from __future__ import annotations
-
 from typing import Any
 
 

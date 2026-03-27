@@ -3,7 +3,23 @@
 Upstream: N/A (Python-specific)
 """
 
-from __future__ import annotations
+
+class _MockKittyBuffer:
+    """Minimal buffer mock for Kitty graphics tests.
+
+    Provides ``get_offset()``, ``get_scissor_rect()``, ``width``, and
+    ``height`` so the viewport-clamping code in ``Image.render()`` can
+    compute screen coordinates and visible area bounds.
+    """
+
+    width = 80
+    height = 24
+
+    def get_offset(self):
+        return (0, 0)
+
+    def get_scissor_rect(self):
+        return None
 
 
 def test_image_component_exported():
@@ -107,7 +123,7 @@ def test_image_component_auto_detects_kitty_from_env(monkeypatch):
     image = Image("logo.png", protocol="auto", width=4, height=4)
     image._layout_width = 4
     image._layout_height = 4
-    image.render(object())
+    image.render(_MockKittyBuffer())
 
     assert calls["caps"].kitty_graphics is True
     assert calls["caps"].sixel is False
@@ -363,8 +379,9 @@ def test_image_component_does_not_redraw_same_kitty_image_each_frame(monkeypatch
     image._layout_width = 6
     image._layout_height = 6
 
-    image.render(object())
-    image.render(object())
+    buf = _MockKittyBuffer()
+    image.render(buf)
+    image.render(buf)
 
     assert calls["draw"] == 1
 
@@ -412,7 +429,7 @@ def test_image_component_preserves_original_pixels_for_kitty(monkeypatch):
     image = Image("logo.png", width=10, height=10)
     image._layout_width = 10
     image._layout_height = 10
-    image.render(object())
+    image.render(_MockKittyBuffer())
 
     assert calls["caps"].kitty_graphics is True
     assert calls["draw"] == (100 * 50 * 4, 0, 4, 10, 2, 100, 50)
@@ -458,17 +475,21 @@ def test_image_component_clears_previous_graphics_when_geometry_changes(monkeypa
     image._y = 2
     image._layout_width = 6
     image._layout_height = 6
-    image.render(object())
+    buf = _MockKittyBuffer()
+    image.render(buf)
 
     image._x = 3
-    image.render(object())
+    image.render(buf)
 
-    first_draw, second_draw = calls["draw"]
+    # Both renders do a full draw_image (transmit + display).
+    # Position-only changes clear old placement then retransmit because
+    # Ghostty's d=I deletes image data, making a=p unusable.
+    assert len(calls["draw"]) == 2
+    first_draw = calls["draw"][0]
     assert first_draw[:4] == (1, 3, 6, 3)
-    assert second_draw[:4] == (3, 3, 6, 3)
     assert isinstance(first_draw[4], int)
-    assert second_draw[4] == first_draw[4]
-    assert calls["clear"] == [first_draw[4]]
+    assert calls["draw"][1][0:2] == (3, 3)  # new position
+    assert calls["clear"] == [first_draw[4]]  # old placement cleared before retransmit
 
 
 def test_image_destroy_clears_graphics(monkeypatch):
@@ -506,7 +527,7 @@ def test_image_destroy_clears_graphics(monkeypatch):
     image._y = 0
     image._layout_width = 6
     image._layout_height = 6
-    image.render(object())
+    image.render(_MockKittyBuffer())
     assert image._graphics_id is not None
 
     gid = image._graphics_id
@@ -562,9 +583,9 @@ def test_image_invisible_clears_graphics(monkeypatch):
     image._y = 0
     image._layout_width = 6
     image._layout_height = 6
-    image.render(object())
+    image.render(_MockKittyBuffer())
     assert image._graphics_id is not None
-    assert image._last_draw_signature is not None
+    assert image._last_intrinsic is not None
 
     fake_stdout = io.BytesIO()
     monkeypatch.setattr(
@@ -579,10 +600,72 @@ def test_image_invisible_clears_graphics(monkeypatch):
     image._visible = False
     image.render(object())
 
-    assert image._last_draw_signature is None
+    assert image._last_intrinsic is None
     assert image._graphics_id is None
     written = fake_stdout.getvalue()
     assert len(written) > 0  # clear escape was written
+
+
+# ---------------------------------------------------------------------------
+# Viewport clamping tests
+# ---------------------------------------------------------------------------
+
+
+def test_image_viewport_clamp_renders_when_wider_than_buffer(monkeypatch):
+    """An image wider than the viewport should render clamped, not disappear."""
+    from opentui.image.types import DecodedImage, ImageSource
+    from opentui.components.image import Image
+    import opentui.components.image as image_component
+
+    calls = {"draw": []}
+
+    class FakeImageRenderer:
+        def __init__(self, buffer, caps=None):
+            pass
+
+        def draw_image(
+            self, data, x, y, width, height, graphics_id=None, source_width=None, source_height=None
+        ):
+            calls["draw"].append((x, y, width, height))
+            return True
+
+    monkeypatch.setenv("OPENTUI_IMAGE_PROTOCOL", "kitty")
+    monkeypatch.setattr(
+        image_component,
+        "load_image",
+        lambda src, mime_type=None: DecodedImage(
+            data=b"\x00" * (100 * 50 * 4),
+            width=100,
+            height=50,
+            mime_type="image/png",
+            source=ImageSource.from_value(src, mime_type=mime_type),
+        ),
+    )
+    monkeypatch.setattr(image_component, "ImageRenderer", FakeImageRenderer)
+
+    # Image wants 60 cells but buffer is only 40 wide
+    image = Image("logo.png", width=60, height=20)
+    image._x = 0
+    image._y = 0
+    image._layout_width = 60
+    image._layout_height = 20
+
+    class NarrowBuffer:
+        width = 40
+        height = 24
+
+        def get_offset(self):
+            return (0, 0)
+
+        def get_scissor_rect(self):
+            return None
+
+    image.render(NarrowBuffer())
+
+    assert len(calls["draw"]) == 1, "Image should render even when wider than buffer"
+    _, _, draw_w, draw_h = calls["draw"][0]
+    assert draw_w <= 40, f"Image width {draw_w} should be clamped to buffer width 40"
+    assert draw_h > 0, "Image should have non-zero height"
 
 
 # ---------------------------------------------------------------------------
@@ -694,9 +777,10 @@ def test_image_unsuppressed_forces_redraw(monkeypatch):
     # First render: normal (active)
     renderer, registered = _make_fake_renderer(suppressed=False)
     monkeypatch.setattr("opentui.hooks.get_renderer", lambda: renderer)
-    image.render(object())
+    buf = _MockKittyBuffer()
+    image.render(buf)
     assert calls["draw"] == 1
-    assert image._last_draw_signature is not None
+    assert image._last_intrinsic is not None
 
     # Second render: suppressed — skip draw, set _was_suppressed
     renderer._graphics_suppressed = True
@@ -711,7 +795,7 @@ def test_image_unsuppressed_forces_redraw(monkeypatch):
 
     # Third render: unsuppressed — should force redraw (signature cleared)
     renderer._graphics_suppressed = False
-    image.render(object())
+    image.render(buf)
     assert calls["draw"] == 2, "Image should redraw after unsuppression"
     assert image._was_suppressed is False
 

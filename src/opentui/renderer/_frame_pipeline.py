@@ -1,7 +1,5 @@
 """Frame pipeline helpers for CliRenderer."""
 
-from __future__ import annotations
-
 import logging
 import time as _time
 from typing import Any
@@ -146,7 +144,11 @@ def prepare_buffer(
                 layout_common_plan = None
                 repainted_layout_common_tree = False
 
-    if not reused_current_buffer and not repainted_dirty_common_tree and not repainted_layout_common_tree:
+    if (
+        not reused_current_buffer
+        and not repainted_dirty_common_tree
+        and not repainted_layout_common_tree
+    ):
         buffer.clear()
         if renderer._clear_color:
             buffer.fill_rect(0, 0, renderer._width, renderer._height, renderer._clear_color)

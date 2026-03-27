@@ -1,7 +1,5 @@
 """Testing utilities — buffer capture, diff, and frame recording."""
 
-from __future__ import annotations
-
 import ctypes
 import time
 from collections.abc import Callable
@@ -101,7 +99,6 @@ def assert_buffer_equal(expected: list[dict], actual: list[dict]) -> None:
 
     if differences:
         raise AssertionError(diff.summary())
-
 
 
 @dataclass
@@ -224,7 +221,6 @@ class TestRecorder:
             recorded.buffers = buffers
 
         self._frames.append(recorded)
-
 
 
 @dataclass

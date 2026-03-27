@@ -1,13 +1,7 @@
 """Table border drawing utilities extracted from TextTableRenderable."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
 from ... import structs as s
-
-if TYPE_CHECKING:
-    from ...renderer import Buffer
+from ...renderer.buffer import Buffer
 
 _BORDER_CHARS = {
     "single": {

@@ -1,7 +1,5 @@
 """Key binding infrastructure for OpenTUI."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 

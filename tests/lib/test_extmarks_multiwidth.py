@@ -22,8 +22,6 @@ so we verify highlights by inspecting the raw ``_highlights`` list on the
 buffer where appropriate.
 """
 
-from __future__ import annotations
-
 import unicodedata
 from typing import Any, Dict, List, Optional
 

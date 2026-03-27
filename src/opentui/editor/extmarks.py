@@ -6,8 +6,6 @@ automatically adjusted as text is inserted or deleted.  It also provides
 undo/redo history for extmark state.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
 
@@ -93,7 +91,6 @@ def _clone_extmark(em: Extmark) -> Extmark:
 
 
 _SENTINEL = object()
-
 
 
 class ExtmarksController:

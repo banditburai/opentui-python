@@ -5,14 +5,16 @@ from __future__ import annotations
 import ctypes
 from typing import TYPE_CHECKING, Any
 
+from .ffi import get_native, is_native_available
+
 if TYPE_CHECKING:
     from .editor.editor_view_native import NativeEditorView
     from .editor.text_view_native import NativeTextBufferView
 
-from .ffi import get_native, is_native_available
-
 _nb: Any = get_native()
 _NANOBIND_AVAILABLE: bool = is_native_available()
+
+_RGBA_FLOATS_PER_CELL = 4
 
 
 def _decode(value: Any) -> str:
@@ -23,7 +25,7 @@ def _rgba_to_list(color: Any) -> list[float] | None:
     if color is None:
         return None
     if isinstance(color, list | tuple):
-        return [float(color[0]), float(color[1]), float(color[2]), float(color[3])]
+        return [float(c) for c in color[:_RGBA_FLOATS_PER_CELL]]
     return [float(color.r), float(color.g), float(color.b), float(color.a)]
 
 
@@ -222,15 +224,19 @@ class NativeOptimizedBuffer:
     def get_fg_color(self, x: int, y: int) -> tuple[float, float, float, float]:
         w = self._check_bounds(x, y)
         ptr_int = _nb.buffer.buffer_get_fg_ptr(self._ptr)
-        offset = (y * w + x) * 4  # 4 floats per cell
-        arr = (ctypes.c_float * 4).from_address(ptr_int + offset * ctypes.sizeof(ctypes.c_float))
+        offset = (y * w + x) * _RGBA_FLOATS_PER_CELL
+        arr = (ctypes.c_float * _RGBA_FLOATS_PER_CELL).from_address(
+            ptr_int + offset * ctypes.sizeof(ctypes.c_float)
+        )
         return (arr[0], arr[1], arr[2], arr[3])
 
     def get_bg_color(self, x: int, y: int) -> tuple[float, float, float, float]:
         w = self._check_bounds(x, y)
         ptr_int = _nb.buffer.buffer_get_bg_ptr(self._ptr)
-        offset = (y * w + x) * 4
-        arr = (ctypes.c_float * 4).from_address(ptr_int + offset * ctypes.sizeof(ctypes.c_float))
+        offset = (y * w + x) * _RGBA_FLOATS_PER_CELL
+        arr = (ctypes.c_float * _RGBA_FLOATS_PER_CELL).from_address(
+            ptr_int + offset * ctypes.sizeof(ctypes.c_float)
+        )
         return (arr[0], arr[1], arr[2], arr[3])
 
     def get_attributes(self, x: int, y: int) -> int:

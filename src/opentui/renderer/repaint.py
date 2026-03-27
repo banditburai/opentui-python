@@ -1,7 +1,5 @@
 """Geometry helpers that plan incremental repaint regions after yoga layout."""
 
-from __future__ import annotations
-
 import contextlib
 from typing import Any
 

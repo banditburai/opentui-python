@@ -4,8 +4,6 @@ Upstream: packages/core/src/tests/renderer.mouse.test.ts
 Tests ported: 35/35
 """
 
-from __future__ import annotations
-
 import pytest
 
 from opentui import Box, create_test_renderer

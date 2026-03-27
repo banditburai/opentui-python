@@ -1,17 +1,12 @@
 """Mouse selection bookkeeping and overlay rendering helpers."""
 
-from __future__ import annotations
-
 import contextlib
-import logging
 import time
 from typing import Any
 
 from ..events import MouseEvent
 from ._mouse_hit_testing import accumulate_scroll_offsets, find_deepest_hit
 from .buffer import Buffer
-
-_log = logging.getLogger(__name__)
 
 _DOUBLE_CLICK_THRESHOLD = 0.4  # seconds
 
@@ -23,6 +18,24 @@ def handle_selection_mouse(
     is_ctrl: bool,
     button: int,
 ) -> bool:
+    # --- Extend selection via right-click (button 2) ---
+    # Right-click is the primary extend mechanism because terminals pass it
+    # through in mouse tracking mode — unlike shift+click / alt+click which
+    # most terminals intercept for their own text selection.
+    if event.type == "down" and button == 2 and not is_ctrl:
+        if renderer._current_selection is not None:
+            update_selection(renderer, hit_renderable, event.x, event.y)
+            renderer._current_selection.is_dragging = True
+            return True
+        # No active selection — create one from last left-click pos to here
+        last_pos = getattr(renderer, "_last_click_pos", None)
+        last_rend = getattr(renderer, "_last_click_renderable", None)
+        if last_pos is not None and last_rend is not None:
+            start_selection(renderer, last_rend, last_pos[0], last_pos[1])
+            update_selection(renderer, hit_renderable, event.x, event.y)
+            renderer._current_selection.is_dragging = True
+            return True
+
     if (
         event.type == "down"
         and button == 0
@@ -31,6 +44,30 @@ def handle_selection_mouse(
         )
         and not is_ctrl
     ):
+        # Extend selection: shift+click OR alt/option+click.
+        # These work as secondary mechanisms for terminals that pass modifier
+        # bits through — but most terminals intercept them, so right-click
+        # (above) is the primary extend mechanism.
+        is_shift = getattr(event, "shift", False)
+        is_alt = getattr(event, "alt", False)
+        is_extend = is_shift or is_alt
+        if is_extend:
+            if renderer._current_selection is not None:
+                # Extend: keep anchor, move focus to shift-click point
+                update_selection(renderer, hit_renderable, event.x, event.y)
+                renderer._current_selection.is_dragging = True
+                return True
+            # No selection yet — create one from last click pos to here
+            last_pos = getattr(renderer, "_last_click_pos", None)
+            last_rend = getattr(renderer, "_last_click_renderable", None)
+            if last_pos is not None and last_rend is not None:
+                start_selection(renderer, last_rend, last_pos[0], last_pos[1])
+                if renderer._current_selection is None:
+                    return False
+                update_selection(renderer, hit_renderable, event.x, event.y)
+                renderer._current_selection.is_dragging = True
+                return True
+
         # Double-click detection
         now = time.monotonic()
         last_time = getattr(renderer, "_last_click_time", 0.0)
@@ -42,15 +79,23 @@ def handle_selection_mouse(
         )
         renderer._last_click_time = now
         renderer._last_click_pos = (event.x, event.y)
+        renderer._last_click_renderable = hit_renderable
 
-        if is_double and hit_renderable is not None and _try_word_select(renderer, hit_renderable, event.x, event.y):
+        if (
+            is_double
+            and hit_renderable is not None
+            and _try_word_select(renderer, hit_renderable, event.x, event.y)
+        ):
             return True
 
         if hit_renderable is not None and not getattr(hit_renderable, "_destroyed", False):
             is_selectable = getattr(hit_renderable, "selectable", False)
             has_drag_handler = getattr(hit_renderable, "_on_mouse_drag", None) is not None
             should_start = getattr(hit_renderable, "should_start_selection", None)
-            if should_start is not None and not should_start(event.x, event.y):
+            should_start_result = (
+                should_start(event.x, event.y) if should_start is not None else None
+            )
+            if should_start is not None and not should_start_result:
                 pass
             elif is_selectable or not has_drag_handler:
                 renderer._pending_selection_start = {
@@ -119,12 +164,7 @@ def handle_selection_mouse(
         finish_selection(renderer)
         return True
 
-    if (
-        event.type == "down"
-        and button == 0
-        and renderer._current_selection is not None
-        and is_ctrl
-    ):
+    if event.type == "down" and button == 0 and renderer._current_selection is not None and is_ctrl:
         renderer._current_selection.is_dragging = True
         update_selection(renderer, hit_renderable, event.x, event.y)
         return True
@@ -210,7 +250,8 @@ def start_selection(renderer: Any, renderable, x: int, y: int) -> None:
     from ..selection import Selection
 
     parent = getattr(renderable, "_parent", None)
-    renderer._selection_containers.append(parent if parent is not None else renderer._root)
+    container = parent if parent is not None else renderer._root
+    renderer._selection_containers.append(container)
     renderer._current_selection = Selection(renderable, {"x": x, "y": y}, {"x": x, "y": y})
     renderer._current_selection.is_start = True
 
@@ -237,7 +278,9 @@ def update_selection(
     if renderer._selection_containers:
         current_container = renderer._selection_containers[-1]
 
-        if current_renderable is None or not is_within_container(current_renderable, current_container):
+        if current_renderable is None or not is_within_container(
+            current_renderable, current_container
+        ):
             parent_container = getattr(current_container, "_parent", None)
             if parent_container is None:
                 parent_container = renderer._root
@@ -262,7 +305,6 @@ def update_selection(
 
 
 def clear_selection(renderer: Any) -> None:
-    renderer._pending_selection_start = None
     if renderer._current_selection is not None:
         for renderable in renderer._current_selection.touched_renderables:
             if getattr(renderable, "selectable", False) and not getattr(
@@ -302,29 +344,22 @@ def notify_selectables_of_selection_change(renderer: Any) -> None:
             init_sx, init_sy = accumulate_scroll_offsets(ancestor, init_sx, init_sy)
             ancestor = getattr(ancestor, "_parent", None)
 
+        bounds = renderer._current_selection.bounds
+
         walk_selectable_renderables(
             renderer,
             current_container,
-            renderer._current_selection.bounds,
+            bounds,
             selected_renderables,
             touched_renderables,
             init_sx,
             init_sy,
         )
-        if _log.isEnabledFor(logging.DEBUG):
-            _log.debug(
-                "selection notify: container=%s init_scroll=(%d,%d) bounds=%s "
-                "selected=%d touched=%d",
-                type(current_container).__name__,
-                init_sx,
-                init_sy,
-                renderer._current_selection.bounds,
-                len(selected_renderables),
-                len(touched_renderables),
-            )
 
         for renderable in renderer._current_selection.touched_renderables:
-            if renderable not in touched_renderables and not getattr(renderable, "_destroyed", False):
+            if renderable not in touched_renderables and not getattr(
+                renderable, "_destroyed", False
+            ):
                 renderable.on_selection_changed(None)
 
         renderer._current_selection.update_selected_renderables(selected_renderables)
@@ -358,7 +393,10 @@ def walk_selectable_renderables(
         sw = selection_bounds["width"]
         sh = selection_bounds["height"]
 
-        if cx + cw <= sx or cx >= sx + sw or cy + ch <= sy or cy >= sy + sh:
+        overlaps = not (cx + cw <= sx or cx >= sx + sw or cy + ch <= sy or cy >= sy + sh)
+        is_selectable = getattr(child, "selectable", False)
+
+        if not overlaps:
             gcc = getattr(child, "get_children_count", None)
             if gcc is not None and gcc() > 0:
                 walk_selectable_renderables(
@@ -372,7 +410,7 @@ def walk_selectable_renderables(
                 )
             continue
 
-        if getattr(child, "selectable", False):
+        if is_selectable:
             has_sel = child.on_selection_changed(renderer._current_selection)
             if has_sel:
                 selected_renderables.append(child)
@@ -401,7 +439,9 @@ def request_selection_update(renderer: Any) -> None:
 
 def apply_selection_overlay(renderer: Any, buffer: Buffer, selection_bg: Any) -> None:
     sel = renderer._current_selection
-    if sel is None or not sel.is_active:
+    if sel is None:
+        return
+    if not sel.is_active:
         return
 
     anchor = sel.anchor
@@ -416,17 +456,19 @@ def apply_selection_overlay(renderer: Any, buffer: Buffer, selection_bg: Any) ->
     w = buffer.width
     h = buffer.height
     skip_rects: list[tuple[int, int, int, int]] = []
-    for renderable in sel.selected_renderables:
-        if not getattr(renderable, "_destroyed", False) and getattr(renderable, "has_selection", False):
+    for renderable in sel.touched_renderables:
+        if not getattr(renderable, "_destroyed", False):
+            rsx, rsy = _total_scroll_offset(renderable)
             skip_rects.append(
                 (
-                    getattr(renderable, "_x", 0),
-                    getattr(renderable, "_y", 0),
+                    getattr(renderable, "_x", 0) - rsx,
+                    getattr(renderable, "_y", 0) - rsy,
                     int(getattr(renderable, "_layout_width", 0) or 0),
                     int(getattr(renderable, "_layout_height", 0) or 0),
                 )
             )
 
+    total_cells = 0
     for row in range(max(0, start_y), min(end_y + 1, h)):
         if row == start_y and row == end_y:
             col_start = max(0, start_x)
@@ -460,6 +502,7 @@ def apply_selection_overlay(renderer: Any, buffer: Buffer, selection_bg: Any) ->
             rect_w = seg_end - seg_start
             if rect_w > 0:
                 buffer.fill_rect(seg_start, row, rect_w, 1, selection_bg)
+                total_cells += rect_w
 
 
 __all__ = [

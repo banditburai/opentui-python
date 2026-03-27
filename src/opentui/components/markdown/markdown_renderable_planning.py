@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -36,16 +34,19 @@ class MarkdownTableOptions:
     selectable: bool = True
 
 
-def parse_table_options(value: dict | MarkdownTableOptions | None) -> MarkdownTableOptions:
+def parse_table_options(
+    value: dict[str, Any] | MarkdownTableOptions | None,
+) -> MarkdownTableOptions:
     if isinstance(value, dict):
+        d: dict[str, Any] = value
         return MarkdownTableOptions(
-            width_mode=value.get("widthMode", value.get("width_mode", "full")),
-            column_fitter=value.get("columnFitter", value.get("column_fitter", "proportional")),
-            wrap_mode=value.get("wrapMode", value.get("wrap_mode", "word")),
-            cell_padding=value.get("cellPadding", value.get("cell_padding", 0)),
-            borders=value.get("borders", True),
-            outer_border=value.get("outerBorder", value.get("outer_border")),
-            selectable=value.get("selectable", True),
+            width_mode=d.get("widthMode", d.get("width_mode", "full")),
+            column_fitter=d.get("columnFitter", d.get("column_fitter", "proportional")),
+            wrap_mode=d.get("wrapMode", d.get("wrap_mode", "word")),
+            cell_padding=d.get("cellPadding", d.get("cell_padding", 0)),
+            borders=d.get("borders", True),
+            outer_border=d.get("outerBorder", d.get("outer_border")),
+            selectable=d.get("selectable", True),
         )
     if isinstance(value, MarkdownTableOptions):
         return value

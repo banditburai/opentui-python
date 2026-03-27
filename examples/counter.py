@@ -3,12 +3,12 @@
 import asyncio
 
 import opentui
-from opentui import Box, Signal, Text, template_component, use_keyboard, use_renderer
+from opentui import Box, Signal, Text, component, use_keyboard, use_renderer
 
 count = Signal(0, name="count")
 
 
-@template_component
+@component
 def counter_app():
     """Simple counter with reactive text content."""
     return Box(

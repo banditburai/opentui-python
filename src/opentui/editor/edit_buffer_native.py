@@ -1,9 +1,6 @@
 """Native edit buffer wrapper."""
 
-from __future__ import annotations
-
 import contextlib
-import ctypes
 from typing import Any
 
 from ..native import _decode, _nb
@@ -130,20 +127,7 @@ class NativeEditBuffer:
         self._emit("cursor_changed")
 
     def get_cursor_position(self) -> tuple[int, int]:
-        # The native API writes (line, col) as two consecutive int32 values
-        # into the first capsule pointer (8 bytes total).
-        ctypes.pythonapi.PyCapsule_New.restype = ctypes.py_object
-        ctypes.pythonapi.PyCapsule_New.argtypes = [
-            ctypes.c_void_p,
-            ctypes.c_char_p,
-            ctypes.c_void_p,
-        ]
-        buf = (ctypes.c_int32 * 2)(0, 0)
-        dummy = ctypes.c_int64(0)
-        buf_cap = ctypes.pythonapi.PyCapsule_New(ctypes.addressof(buf), b"nb_handle", None)
-        dummy_cap = ctypes.pythonapi.PyCapsule_New(ctypes.addressof(dummy), b"nb_handle", None)
-        _nb.edit_buffer.edit_buffer_get_cursor_position(self._ptr, buf_cap, dummy_cap)
-        return (buf[0], buf[1])
+        return self.get_cursor_native()
 
     def delete_range(self, start_line: int, start_col: int, end_line: int, end_col: int) -> None:
         _nb.edit_buffer.edit_buffer_delete_range(

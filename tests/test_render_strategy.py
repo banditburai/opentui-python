@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 
 from opentui import Box, FrameBuffer, Text, create_test_renderer

@@ -10,14 +10,12 @@ that is defined on ``InputHandler`` — it is not intended to be instantiated
 on its own.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import select
 from typing import TYPE_CHECKING, Any
 
-from ..events import KeyEvent
+from ..events import KeyEvent, MouseEvent
 from ._capability_parsing import parse_apc_content, parse_capability_csi, parse_dcs_content
 from ._mouse_protocol import build_mouse_event, parse_rxvt_mouse, parse_sgr_mouse
 from .key_maps import (
@@ -38,10 +36,8 @@ from .key_maps import (
     _char_code_to_key,
 )
 
-if TYPE_CHECKING:
-    from ..events import MouseEvent
-
 _log = logging.getLogger(__name__)
+
 
 # Single-letter CSI sequences (unmodified arrow/nav keys)
 _SINGLE_LETTER: dict[str, str] = {
@@ -260,26 +256,13 @@ class EscapeParserMixin:
             self._begin_bracketed_paste()
             return True
 
-        # --- Capability responses (DECRPM, DA1, kitty keyboard query, CPR) ---
         if self._try_dispatch_capability_csi(seq):
             return True
 
-        # X10/normal mouse protocol: \x1b[M<cb><cx><cy>
-        # seq == "M" means the CSI body was just "M" — the 3 raw bytes follow.
-        if seq == "M":
-            try:
-                cb = self._read_char()
-                cx = self._read_char()
-                cy = self._read_char()
-                button_byte = ord(cb) - 32
-                x = ord(cx) - 33  # 0-based
-                y = ord(cy) - 33
-                _log.debug("input csi x10 mouse button=%s x=%s y=%s", button_byte, x, y)
-                return self._handle_x10_mouse(button_byte, x, y)
-            except Exception:
-                return True
+        if self._dispatch_mouse_csi(seq):
+            return True
 
-        # Focus events — filter silently
+        # Focus events
         if seq == "I":
             _log.debug("input focus-in event (filtered)")
             self._emit_focus("focus")
@@ -294,26 +277,53 @@ class EscapeParserMixin:
             self._emit_key("tab", f"\x1b[{seq}", shift=True)
             return True
 
+        if self._handle_modify_other_keys(seq):
+            return True
+        if self._use_kitty_keyboard and self._handle_kitty_keyboard(seq):
+            return True
+
+        if self._dispatch_keyboard_csi(seq):
+            return True
+
+        if self._dispatch_tilde_csi(seq):
+            return True
+
+        _log.debug("input unknown csi seq=%r", seq)
+        self._emit_key(f"unknown-{seq}", f"\x1b[{seq}")
+        return True
+
+    def _dispatch_mouse_csi(self, seq: str) -> bool:
+        """Handle X10, SGR, and rxvt mouse CSI sequences."""
+        # X10/normal mouse protocol: \x1b[M<cb><cx><cy>
+        if seq == "M":
+            try:
+                cb = self._read_char()
+                cx = self._read_char()
+                cy = self._read_char()
+                button_byte = ord(cb) - 32
+                x = ord(cx) - 33  # 0-based
+                y = ord(cy) - 33
+                _log.debug("input csi x10 mouse button=%s x=%s y=%s", button_byte, x, y)
+                return self._handle_x10_mouse(button_byte, x, y)
+            except Exception:
+                return True
+
         # SGR mouse protocol: \x1b[<button;x;y;M (press) or m (release)
         if seq.startswith("<") and (seq.endswith("M") or seq.endswith("m")):
             _log.debug("input csi sgr mouse seq=%r", seq)
             return self._handle_sgr_mouse(seq)
 
         # rxvt/1015-style extended mouse protocol: \x1b[button;x;yM
-        # Some terminals emit wheel/trackpad events in this format rather
-        # than SGR, so treat it as mouse before falling back to unknown CSI.
         if ";" in seq and (seq.endswith("M") or seq.endswith("m")):
             _log.debug("input csi rxvt mouse seq=%r", seq)
             return self._handle_rxvt_mouse(seq)
 
-        if self._handle_modify_other_keys(seq):
-            return True
-        if self._use_kitty_keyboard and self._handle_kitty_keyboard(seq):
-            return True
+        return False
 
+    def _dispatch_keyboard_csi(self, seq: str) -> bool:
+        """Handle xterm modified keys and rxvt shifted/ctrl key suffixes."""
         # xterm-style modified keys: CSI 1;modifier[:event_type] letter
         # e.g. \x1b[1;2A = Shift+Up, \x1b[1;5C = Ctrl+Right
-        # With kitty keyboard protocol, event_type suffix: 1;1:3A = Up release
         xm = _XTERM_MODIFIED_KEY_RE.match(seq)
         if xm is not None:
             modifier = int(xm.group(1)) - 1
@@ -367,6 +377,7 @@ class EscapeParserMixin:
             except ValueError:
                 pass
 
+        # Single-letter unmodified keys (arrows, nav)
         if len(seq) == 1 and seq in _SINGLE_LETTER:
             self._emit_key(_SINGLE_LETTER[seq], f"\x1b[{seq}")
             return True
@@ -376,60 +387,63 @@ class EscapeParserMixin:
             self._emit_key(_SHIFT_CODES[seq], f"\x1b[{seq}", shift=True)
             return True
 
-        # CSI tilde sequences: num~ (F1-F12, nav keys)
-        if seq.endswith("~"):
-            body = seq[:-1]
-            # Handle modified tilde: num;modifier[:event_type]~
-            # e.g. 3;5~ = Ctrl+Delete, 3;1:3~ = Delete release
-            if ";" in body:
-                parts = body.split(";")
-                try:
-                    num = int(parts[0])
-                    mod_field = parts[1]
-                    if ":" in mod_field:
-                        mod_str, evt_str = mod_field.split(":", 1)
-                        modifier = int(mod_str) - 1
-                        event_type_code = evt_str
-                    else:
-                        modifier = int(mod_field) - 1
-                        event_type_code = "1"
-                    key_name = _TILDE_KEY_MAP.get(num, f"unknown-{num}")
-                    shift = bool(modifier & 1)
-                    alt = bool(modifier & 2)
-                    ctrl = bool(modifier & 4)
-                    meta = bool(modifier & 8)
-                    repeated = event_type_code == "2"
-                    event_kind = "release" if event_type_code == "3" else "press"
-                    event = KeyEvent(
-                        key=key_name,
-                        code=f"\x1b[{seq}",
-                        ctrl=ctrl,
-                        shift=shift,
-                        alt=alt,
-                        meta=meta,
-                        repeated=repeated,
-                        event_type=event_kind,
-                        source="raw",
-                    )
-                    for handler in self._key_handlers:
-                        handler(event)
-                        if event.propagation_stopped:
-                            break
-                    return True
-                except (ValueError, IndexError):
-                    pass
-            else:
-                try:
-                    num = int(body)
-                    key_name = _TILDE_KEY_MAP.get(num, f"unknown-{num}")
-                    self._emit_key(key_name, f"\x1b[{seq}")
-                    return True
-                except ValueError:
-                    pass
+        return False
 
-        _log.debug("input unknown csi seq=%r", seq)
-        self._emit_key(f"unknown-{seq}", f"\x1b[{seq}")
-        return True
+    def _dispatch_tilde_csi(self, seq: str) -> bool:
+        """Handle CSI tilde sequences: num~ (F1-F12, nav keys)."""
+        if not seq.endswith("~"):
+            return False
+
+        body = seq[:-1]
+        # Modified tilde: num;modifier[:event_type]~
+        # e.g. 3;5~ = Ctrl+Delete, 3;1:3~ = Delete release
+        if ";" in body:
+            parts = body.split(";")
+            try:
+                num = int(parts[0])
+                mod_field = parts[1]
+                if ":" in mod_field:
+                    mod_str, evt_str = mod_field.split(":", 1)
+                    modifier = int(mod_str) - 1
+                    event_type_code = evt_str
+                else:
+                    modifier = int(mod_field) - 1
+                    event_type_code = "1"
+                key_name = _TILDE_KEY_MAP.get(num, f"unknown-{num}")
+                shift = bool(modifier & 1)
+                alt = bool(modifier & 2)
+                ctrl = bool(modifier & 4)
+                meta = bool(modifier & 8)
+                repeated = event_type_code == "2"
+                event_kind = "release" if event_type_code == "3" else "press"
+                event = KeyEvent(
+                    key=key_name,
+                    code=f"\x1b[{seq}",
+                    ctrl=ctrl,
+                    shift=shift,
+                    alt=alt,
+                    meta=meta,
+                    repeated=repeated,
+                    event_type=event_kind,
+                    source="raw",
+                )
+                for handler in self._key_handlers:
+                    handler(event)
+                    if event.propagation_stopped:
+                        break
+                return True
+            except (ValueError, IndexError):
+                pass
+        else:
+            try:
+                num = int(body)
+                key_name = _TILDE_KEY_MAP.get(num, f"unknown-{num}")
+                self._emit_key(key_name, f"\x1b[{seq}")
+                return True
+            except ValueError:
+                pass
+
+        return False
 
     # -- Bracketed paste -----------------------------------------------------
 

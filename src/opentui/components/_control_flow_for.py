@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -51,7 +49,10 @@ def patch_existing_for_children(
 
 
 def _for_patch_in_place(
-    node: Any, new_key_list: list, items: list, log: logging.Logger,
+    node: Any,
+    new_key_list: list,
+    items: list,
+    log: logging.Logger,
 ) -> bool:
     """Fast path: keys match exactly — patch existing children in place."""
     old_key_list = [child.key for child in node._children]
@@ -64,7 +65,11 @@ def _for_patch_in_place(
 
 
 def _for_append(
-    node: Any, new_key_list: list, old_key_list: list, items: list, log: logging.Logger,
+    node: Any,
+    new_key_list: list,
+    old_key_list: list,
+    items: list,
+    log: logging.Logger,
 ) -> bool:
     """Fast path: new items appended to end."""
     if len(new_key_list) <= len(old_key_list):
@@ -91,13 +96,20 @@ def _for_append(
     node._last_items = items
     log.debug(
         "For[%s] append fast-path: patched=%d created=%d total=%d",
-        node.key, patched, created, len(node._children),
+        node.key,
+        patched,
+        created,
+        len(node._children),
     )
     return True
 
 
 def _for_truncate(
-    node: Any, new_key_list: list, old_key_list: list, items: list, log: logging.Logger,
+    node: Any,
+    new_key_list: list,
+    old_key_list: list,
+    items: list,
+    log: logging.Logger,
 ) -> bool:
     """Fast path: items removed from end."""
     if len(new_key_list) >= len(old_key_list):
@@ -124,13 +136,20 @@ def _for_truncate(
     node._last_items = items
     log.debug(
         "For[%s] truncate fast-path: patched=%d destroyed=%d total=%d",
-        node.key, patched, destroyed, len(node._children),
+        node.key,
+        patched,
+        destroyed,
+        len(node._children),
     )
     return True
 
 
 def _for_prepend(
-    node: Any, new_key_list: list, old_key_list: list, items: list, log: logging.Logger,
+    node: Any,
+    new_key_list: list,
+    old_key_list: list,
+    items: list,
+    log: logging.Logger,
 ) -> bool:
     """Fast path: items prepended to beginning."""
     if len(new_key_list) <= len(old_key_list):
@@ -161,13 +180,19 @@ def _for_prepend(
     node._last_items = items
     log.debug(
         "For[%s] prepend fast-path: patched=%d created=%d total=%d",
-        node.key, patched, created, len(node._children),
+        node.key,
+        patched,
+        created,
+        len(node._children),
     )
     return True
 
 
 def _for_full_reconcile(
-    node: Any, new_key_list: list, items: list, log: logging.Logger,
+    node: Any,
+    new_key_list: list,
+    items: list,
+    log: logging.Logger,
 ) -> None:
     """General reconciliation: arbitrary reorder, add, remove."""
     old_by_key = {c.key: c for c in node._children if c.key is not None}
@@ -191,7 +216,9 @@ def _for_full_reconcile(
             new_children.append(child)
             created += 1
 
-    removed = [child for child in node._children if child.key is not None and child.key not in new_keys]
+    removed = [
+        child for child in node._children if child.key is not None and child.key not in new_keys
+    ]
 
     node._children = new_children
     _mark_children_changed(node)
@@ -210,7 +237,11 @@ def _for_full_reconcile(
     node._last_items = items
     log.debug(
         "For[%s] reconcile: reused=%d created=%d destroyed=%d total=%d",
-        node.key, reused, created, len(removed), len(new_children),
+        node.key,
+        reused,
+        created,
+        len(removed),
+        len(new_children),
     )
 
 

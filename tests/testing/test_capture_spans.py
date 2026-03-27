@@ -3,8 +3,6 @@
 Upstream: reference/opentui/packages/core/src/testing/capture-spans.test.ts
 """
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest

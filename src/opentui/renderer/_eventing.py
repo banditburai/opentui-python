@@ -1,7 +1,5 @@
 """Event listener registry and callback management for the renderer."""
 
-from __future__ import annotations
-
 import contextlib
 from collections.abc import Callable
 from typing import Any

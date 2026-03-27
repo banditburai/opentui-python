@@ -6,8 +6,6 @@ shape matches the marked-style format (type, raw, text, lang, rows, header,
 align, ...) so that downstream renderers can consume them identically.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field
 from typing import Any

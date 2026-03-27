@@ -3,8 +3,6 @@
 Upstream: reference/opentui/packages/core/src/syntax-style.test.ts
 """
 
-from __future__ import annotations
-
 import time
 
 import pytest

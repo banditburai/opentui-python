@@ -4,8 +4,6 @@ Upstream: reference/opentui/packages/core/src/lib/stdin-buffer.test.ts
 Async timeout tests use threading.Event to wait for timer-based flush.
 """
 
-from __future__ import annotations
-
 import time
 
 import pytest

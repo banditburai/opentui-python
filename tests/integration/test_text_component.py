@@ -1,7 +1,5 @@
 """Integration tests for the lightweight Text component."""
 
-from __future__ import annotations
-
 import pytest
 
 from opentui import Box, Text, create_test_renderer

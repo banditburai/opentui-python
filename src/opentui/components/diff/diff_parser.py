@@ -4,13 +4,11 @@ Extracted from ``diff_renderable.py`` so the parser can be tested and
 reused independently of the rendering layer.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field
 
 from ... import structs as s
-from ..line_types import LineColorConfig, LineSign
+from ..line_types import LineSign
 
 
 @dataclass

@@ -35,10 +35,23 @@
   "[" @conceal)
   (#set! conceal ""))
 
-; Conceal closing bracket with space replacement
+; Conceal closing bracket (no space — URL is now hidden)
 ((inline_link
   "]" @conceal)
-  (#set! conceal " "))
+  (#set! conceal ""))
+
+; Conceal link URL portion (URL carried as OSC 8 metadata instead)
+((inline_link
+  "(" @conceal)
+  (#set! conceal ""))
+
+((inline_link
+  (link_destination) @conceal)
+  (#set! conceal ""))
+
+((inline_link
+  ")" @conceal)
+  (#set! conceal ""))
 
 ; Conceal image links
 (image

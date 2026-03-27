@@ -5,19 +5,16 @@ tuple, patches matched nodes in-place, destroys unmatched old nodes,
 and inserts unmatched new nodes.
 """
 
-from __future__ import annotations
-
+import logging
 import types
 from collections import defaultdict, deque
-from typing import TYPE_CHECKING
 
-from .components._renderable_base import _sync_yoga_children
+_log = logging.getLogger(__name__)
+
+from .components._renderable_base import BaseRenderable, _sync_yoga_children
 from .components._renderable_constants import _SIMPLE_DEFAULTS
 from .components.control_flow import For, Portal
 from .components.scrollbox import ScrollBox
-
-if TYPE_CHECKING:
-    from .components._renderable_base import BaseRenderable
 
 _SENTINEL = object()
 
@@ -44,7 +41,7 @@ def _load_native_patch() -> None:
         init_fn(list(_SKIP_ATTRS), types.MethodType)
         _native_patch_fn = patch_fn
     except Exception:
-        pass
+        _log.debug("native reconciler patch init failed", exc_info=True)
 
 
 # Attributes that must NOT be copied during patching — these are either
@@ -52,6 +49,7 @@ def _load_native_patch() -> None:
 # computed values that the layout engine will overwrite each frame.
 _SKIP_ATTRS: frozenset[str] = frozenset(
     {
+        "__weakref__",
         "_id",
         "_num",
         "key",
@@ -198,6 +196,36 @@ def _can_patch_positionally(
     )
 
 
+def _reconcile_prop_bindings(matched: BaseRenderable, new_child: BaseRenderable) -> None:
+    """Reconcile reactive prop bindings between matched and new nodes.
+
+    Transfers or re-binds signal subscriptions, using source-identity
+    optimization to avoid unnecessary unsubscribe/resubscribe cycles.
+    """
+    new_prop_bindings = getattr(new_child, "_prop_bindings", None)
+    old_prop_bindings = getattr(matched, "_prop_bindings", None)
+
+    if new_prop_bindings:
+        for _attr, _new_binding in list(new_prop_bindings.items()):
+            _old_binding = old_prop_bindings.get(_attr) if old_prop_bindings else None
+            if _old_binding and _old_binding.source is _new_binding.source:
+                _new_binding.unsub_only()
+            else:
+                _new_binding.unsub_only()
+                if _old_binding:
+                    matched._unbind_reactive_prop(_attr)
+                matched._bind_reactive_prop(_attr, _new_binding.source)
+            new_child._cleanups.pop(id(_new_binding.cleanup), None)
+        new_child._prop_bindings = None
+
+        if old_prop_bindings:
+            for _attr in list(old_prop_bindings):
+                if _attr not in new_prop_bindings:
+                    matched._unbind_reactive_prop(_attr)
+    elif old_prop_bindings:
+        matched._unbind_all_reactive_props()
+
+
 def _reconcile_matched_child(
     parent: BaseRenderable,
     matched: BaseRenderable,
@@ -206,44 +234,13 @@ def _reconcile_matched_child(
     _patch_node(matched, new_child)
 
     # Clean up reactive subscriptions on the discarded new node.
-    # The old node keeps its own subscriptions (in _SKIP_ATTRS);
-    # the new node's subscriptions were created in __init__ and
-    # would otherwise be orphaned, leaking into Signal._subscribers.
     for cleanup_attr in ("_condition_cleanup", "_data_cleanup"):
         _cleanup_fn = getattr(new_child, cleanup_attr, None)
         if _cleanup_fn is not None:
             _cleanup_fn()
             object.__setattr__(new_child, cleanup_attr, None)
-    # Generic reactive prop bindings — source-identity optimization
-    new_prop_bindings = getattr(new_child, "_prop_bindings", None)
-    old_prop_bindings = getattr(matched, "_prop_bindings", None)
 
-    if new_prop_bindings:
-        for _attr, _new_binding in list(new_prop_bindings.items()):
-            _old_binding = old_prop_bindings.get(_attr) if old_prop_bindings else None
-            if _old_binding and _old_binding.source is _new_binding.source:
-                # Same source object — keep old subscription, unsub new only
-                # (must NOT dispose shared source via full cleanup)
-                _new_binding.unsub_only()
-            else:
-                # Different source — unsub new's callback (without disposing
-                # the source), then re-bind on old with the still-alive source.
-                _new_binding.unsub_only()
-                if _old_binding:
-                    matched._unbind_reactive_prop(_attr)
-                matched._bind_reactive_prop(_attr, _new_binding.source)
-            # Remove cleanup from new node's _cleanups to prevent leak
-            new_child._cleanups.pop(id(_new_binding.cleanup), None)
-        new_child._prop_bindings = None
-
-        # Clean up old bindings for attrs not in new (reactive→static)
-        if old_prop_bindings:
-            for _attr in list(old_prop_bindings):
-                if _attr not in new_prop_bindings:
-                    matched._unbind_reactive_prop(_attr)
-    elif old_prop_bindings:
-        # All reactive→static: clean up everything
-        matched._unbind_all_reactive_props()
+    _reconcile_prop_bindings(matched, new_child)
 
     if isinstance(matched, For):
         matched._reconcile_children()

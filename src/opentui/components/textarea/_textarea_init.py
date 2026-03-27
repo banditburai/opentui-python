@@ -1,13 +1,12 @@
-from __future__ import annotations
-
+import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ...editor.edit_buffer_native import NativeEditBuffer
-from ...editor.editor_view_native import NativeEditorView
 
-if TYPE_CHECKING:
-    from .textarea_keymap import TextareaColorConfig
+_log = logging.getLogger(__name__)
+from ...editor.editor_view_native import NativeEditorView
+from .textarea_keymap import TextareaColorConfig
 
 
 def _viewport_dimension(value: Any, fallback: int) -> int:
@@ -112,7 +111,7 @@ def wire_textarea_runtime_handlers(textarea) -> None:
             textarea._editor_view.set_viewport_size(width, height)
             textarea._follow_cursor()
         except Exception:
-            pass
+            _log.debug("textarea size change handler failed", exc_info=True)
         if previous_on_size_change is not None:
             previous_on_size_change(width, height)
 

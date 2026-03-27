@@ -8,8 +8,6 @@ Validates that the post-render selection overlay correctly:
 - Paints single-row partial selections correctly
 """
 
-from __future__ import annotations
-
 import pytest
 
 from opentui import Box, TestSetup, create_test_renderer

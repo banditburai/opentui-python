@@ -43,9 +43,10 @@ def test_normalize_file_drop_path(tmp_path):
     path = tmp_path / "image.png"
     path.write_text("x")
 
-    event = normalize_paste_payload(f"{path}\n")
+    raw = f"{path}\n"
+    event = normalize_paste_payload(raw)
 
-    assert event.text is None
+    assert event.text == raw
     assert len(event.attachments) == 1
     assert event.attachments[0].kind == "file"
     assert event.attachments[0].path == str(path)

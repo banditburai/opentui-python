@@ -40,6 +40,7 @@ _RESERVED_KEYS = frozenset(
     }
 )
 
+
 class Timeline:
     """Animation timeline with support for animations, callbacks, and sub-timelines."""
 
@@ -322,6 +323,7 @@ class Timeline:
         if self.duration <= 0:
             return 1.0
         return min(self.current_time / self.duration, 1.0)
+
 
 class TimelineEngine:
     """Manages a set of timelines and drives their updates."""

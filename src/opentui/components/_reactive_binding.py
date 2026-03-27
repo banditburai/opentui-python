@@ -4,11 +4,10 @@ Handles binding attributes to Signals, ComputedSignals, and callables
 so that UI props update automatically when reactive sources change.
 """
 
-from __future__ import annotations
-
 import contextlib
 import logging
 from collections.abc import Callable
+from typing import cast
 
 from .._signal_types import Signal, _ComputedSignal
 from .._signals_runtime import _tracking_context
@@ -201,14 +200,15 @@ class _ReactiveBindingMixin:
             if len(tracked) == 1:
                 # Fast path: single dep — subscribe directly, skip ComputedSignal
                 dep = next(iter(tracked))
+                fn = cast("Callable[[], object]", source)
                 token2 = _tracking_context.set(None)
                 try:
-                    initial = source()
+                    initial = fn()
                 finally:
                     _tracking_context.reset(token2)
                 setattr(self, attr, initial)
 
-                on_change = self._make_on_change_callable(attr, yogadirty, source)
+                on_change = self._make_on_change_callable(attr, yogadirty, fn)
                 unsub = dep.subscribe(on_change)
 
                 def cleanup_single() -> None:
@@ -221,9 +221,10 @@ class _ReactiveBindingMixin:
                 return True
 
             # Multi-dep or zero-dep — use ComputedSignal for auto-tracking
+            fn = cast("Callable[[], object]", source)
             token2 = _tracking_context.set(None)
             try:
-                computed_sig = _ComputedSignal(source)
+                computed_sig = _ComputedSignal(fn)
                 initial = computed_sig()
             finally:
                 _tracking_context.reset(token2)

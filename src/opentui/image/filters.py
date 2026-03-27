@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import math
 
+from .types import LUMINANCE_B, LUMINANCE_G, LUMINANCE_R, luminance_u8
+
 try:
     import numpy as np
 
@@ -24,9 +26,7 @@ class Filter:
     ``apply`` dispatches to the numpy path when available.
     """
 
-    def apply(
-        self, data: bytes, format: str = "RGBA", *, width: int = 0, height: int = 0
-    ) -> bytes:
+    def apply(self, data: bytes, format: str = "RGBA", *, width: int = 0, height: int = 0) -> bytes:
         if _HAS_NUMPY:
             return self._apply_numpy(data, format, width=width, height=height)
         return self._apply_pure(data, format, width=width, height=height)
@@ -72,7 +72,7 @@ class GrayscaleFilter(Filter):
             g = data[i + 1]
             b = data[i + 2]
 
-            gray = int(0.299 * r + 0.587 * g + 0.114 * b)
+            gray = luminance_u8(r, g, b)
 
             result[i] = gray
             result[i + 1] = gray
@@ -90,7 +90,7 @@ class GrayscaleFilter(Filter):
         g = pixels[:, 1].astype(np.float64)
         b = pixels[:, 2].astype(np.float64)
 
-        gray = (0.299 * r + 0.587 * g + 0.114 * b).astype(np.uint8)
+        gray = (LUMINANCE_R * r + LUMINANCE_G * g + LUMINANCE_B * b).astype(np.uint8)
 
         pixels[:, 0] = gray
         pixels[:, 1] = gray
@@ -425,9 +425,7 @@ class FilterChain:
         self._filters.append(filter_)
         return self
 
-    def apply(
-        self, data: bytes, format: str = "RGBA", *, width: int = 0, height: int = 0
-    ) -> bytes:
+    def apply(self, data: bytes, format: str = "RGBA", *, width: int = 0, height: int = 0) -> bytes:
         """Apply all filters in sequence.
 
         Args:

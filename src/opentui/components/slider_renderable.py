@@ -1,17 +1,13 @@
 """SliderRenderable - a scrollbar-like slider with sub-cell precision."""
 
-from __future__ import annotations
-
 import builtins as _builtins
 import math
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .. import structs as s
+from ..renderer.buffer import Buffer
 from .base import Renderable
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
 
 # Avoid shadowing by parameter names ``min`` / ``max``
 _min = _builtins.min

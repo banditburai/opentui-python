@@ -8,8 +8,6 @@ terminal colours).  The palette detector works with mock stdin/stdout
 streams in test mode so no real terminal is required.
 """
 
-from __future__ import annotations
-
 import asyncio
 import time
 

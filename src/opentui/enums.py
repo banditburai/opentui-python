@@ -7,8 +7,6 @@ fast path all work transparently.  Because ``StrEnum`` inherits from
 this module is purely additive.
 """
 
-from __future__ import annotations
-
 import sys
 from enum import StrEnum
 

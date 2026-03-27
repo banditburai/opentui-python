@@ -4,8 +4,6 @@ Provides 16 standard easing curves used by the animation Timeline engine.
 Each function maps a progress value t in [0, 1] to an eased output.
 """
 
-from __future__ import annotations
-
 import math
 from collections.abc import Callable
 from typing import Literal

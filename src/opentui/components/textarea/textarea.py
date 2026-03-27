@@ -1,20 +1,15 @@
 """Multi-line text input component."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
 from ... import structs as s
 from ...events import KeyEvent
 from ...hooks import use_cursor, use_cursor_style
+from ...renderer.buffer import Buffer
 from ...structs import MUTED_GRAY
 from ...text_utils import measure_text, wrap_text
-from ._text_edit_mixin import _TextEditMixin
 from ..base import Renderable
-
-if TYPE_CHECKING:
-    from ...renderer import Buffer
+from ._text_edit_mixin import _TextEditMixin
 
 
 class Textarea(_TextEditMixin, Renderable):

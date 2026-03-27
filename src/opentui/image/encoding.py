@@ -7,17 +7,29 @@ Provides:
 - Pixel format conversion utilities
 """
 
-from __future__ import annotations
-
 import io
+import logging
 import os
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from ..renderer import Buffer, TerminalCapabilities
+from ..renderer._config import TerminalCapabilities
 
+_log = logging.getLogger(__name__)
+from ..renderer.buffer import Buffer
+from .types import luminance_u8
 
 _ASCII_RAMP = " .:-=+*#%@"
+
+# ── Encoding caches ─────────────────────────────────────────────────
+# PNG, base64, and Sixel encoding are expensive and produce identical
+# output for identical input.  Cache results keyed by
+# (hash(data), len(data), dimensions) to avoid re-encoding on every
+# render frame.  Using hash() instead of id() prevents stale-data bugs
+# if the original bytes object is garbage-collected and its address reused.
+
+_PNG_ENCODE_CACHE: dict[tuple, bytes] = {}
+_B64_ENCODE_CACHE: dict[tuple, bytes] = {}
+_SIXEL_ENCODE_CACHE: dict[tuple, bytes] = {}
+_ENCODE_CACHE_MAX = 8
 
 
 def _encode_png_from_rgba(data: bytes, width: int, height: int) -> bytes:
@@ -31,6 +43,19 @@ def _encode_png_from_rgba(data: bytes, width: int, height: int) -> bytes:
     output = io.BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
+
+
+def _cached_png_encode(data: bytes, width: int, height: int) -> bytes:
+    """PNG-encode RGBA data with caching to avoid per-frame Pillow overhead."""
+    key = (hash(data), len(data), width, height)
+    cached = _PNG_ENCODE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    result = _encode_png_from_rgba(data, width, height)
+    if len(_PNG_ENCODE_CACHE) >= _ENCODE_CACHE_MAX:
+        _PNG_ENCODE_CACHE.clear()
+    _PNG_ENCODE_CACHE[key] = result
+    return result
 
 
 class ImageRenderer:
@@ -99,9 +124,17 @@ class ImageRenderer:
             return False
 
         try:
-            sixel_data = _encode_sixel(data, width, height, bg_color)
-            if not sixel_data:
-                return False
+            cache_key = (hash(data), len(data), width, height)
+            cached = _SIXEL_ENCODE_CACHE.get(cache_key)
+            if cached is not None:
+                sixel_data = cached
+            else:
+                sixel_data = _encode_sixel(data, width, height, bg_color)
+                if not sixel_data:
+                    return False
+                if len(_SIXEL_ENCODE_CACHE) >= _ENCODE_CACHE_MAX:
+                    _SIXEL_ENCODE_CACHE.clear()
+                _SIXEL_ENCODE_CACHE[cache_key] = sixel_data
 
             self._get_stdout().write(f"\x1b[{y + 1};{x + 1}H".encode())
             self._get_stdout().write(sixel_data)
@@ -158,7 +191,7 @@ class ImageRenderer:
                 if chunk is output_chunks[0]:
                     stdout.write(f"\x1b[{y + 1};{x + 1}H".encode())
                 stdout.write(chunk)
-                stdout.flush()
+            stdout.flush()
 
             return True
         except Exception:
@@ -202,7 +235,7 @@ class ImageRenderer:
                 for col in range(width):
                     idx = (row * width + col) * 4
                     r, g, b, a = data[idx : idx + 4]
-                    luminance = ((r * 299) + (g * 587) + (b * 114)) // 1000
+                    luminance = luminance_u8(r, g, b)
                     luminance = (luminance * a) // 255
                     ramp_idx = min(len(_ASCII_RAMP) - 1, luminance * (len(_ASCII_RAMP) - 1) // 255)
                     chars.append(_ASCII_RAMP[ramp_idx])
@@ -222,7 +255,7 @@ class ImageRenderer:
             self._get_stdout().write(clear_seq)
             self._get_stdout().flush()
         except Exception:
-            pass
+            _log.debug("failed to clear kitty graphics", exc_info=True)
 
     @classmethod
     def get_next_graphics_id(cls) -> int:
@@ -269,7 +302,7 @@ class ImageRenderer:
 
         # At this point kitty_graphics must be True (sixel was handled above).
         try:
-            png_data = _encode_png_from_rgba(
+            png_data = _cached_png_encode(
                 data,
                 source_width if source_width is not None else width,
                 source_height if source_height is not None else height,
@@ -347,7 +380,7 @@ def _convert_to_grayscale(data: bytes, width: int, height: int) -> bytes:
         g = data[idx + 1]
         b = data[idx + 2]
 
-        gray = int(0.299 * r + 0.587 * g + 0.114 * b)
+        gray = luminance_u8(r, g, b)
         gray16 = gray * 257  # Scale 8-bit (0-255) to 16-bit (0-65535)
 
         result[i * 2] = gray16 & 0xFF
@@ -464,9 +497,16 @@ def _encode_kitty(
     """Encode image data as Kitty graphics protocol chunks."""
     import base64
 
-    # Recompressing payloads requires protocol flags we weren't sending,
-    # which makes terminals reject the payload as invalid.
-    encoded = base64.b64encode(data)
+    # Cache base64 encoding — identical PNG data produces identical output.
+    b64_key = (hash(data), len(data))
+    cached_b64 = _B64_ENCODE_CACHE.get(b64_key)
+    if cached_b64 is not None:
+        encoded = cached_b64
+    else:
+        encoded = base64.b64encode(data)
+        if len(_B64_ENCODE_CACHE) >= _ENCODE_CACHE_MAX:
+            _B64_ENCODE_CACHE.clear()
+        _B64_ENCODE_CACHE[b64_key] = encoded
 
     CHUNK_SIZE = 4000
     chunks: list[bytes] = []
@@ -488,7 +528,9 @@ def _encode_kitty(
             chunk = header + chunk_data + b"\x1b\\"
         else:
             more = 0 if is_last else 1
-            chunk = f"\x1b_Gm={more};".encode() + chunk_data + b"\x1b\\"
+            # Include i=ID on continuation chunks for WezTerm interop —
+            # Kitty itself infers the ID but some terminals don't.
+            chunk = f"\x1b_Gi={chunk_id},m={more};".encode() + chunk_data + b"\x1b\\"
 
         chunks.append(chunk)
 

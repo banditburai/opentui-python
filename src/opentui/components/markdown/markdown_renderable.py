@@ -1,16 +1,15 @@
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ...enums import RenderStrategy
+from ...renderer.buffer import Buffer
 from ..base import Renderable
 from .markdown_blocks import (
     BlockState,
-    _ExternalBlockRenderable,
-    _MarkdownBlockRenderable,
-    _MarkdownCodeBlock,
-    _MarkdownTableBlock,
+    MarkdownTableBlock,
+    MarkdownTextBlock,
+    _ExternalBlockWrapper,
+    _MarkdownBlockWrapper,
 )
 from .markdown_parser import MarkedToken, ParseState, parse_markdown_incremental
 from .markdown_renderable_blocks import (
@@ -29,16 +28,13 @@ from .markdown_renderable_planning import (
     render_token_lines,
 )
 
-if TYPE_CHECKING:
-    from ...renderer import Buffer
-
 
 class MarkdownRenderable(Renderable):
     """Renders markdown content as terminal output.
 
     Parses markdown incrementally, creating child renderables for each
-    block: tables become _MarkdownTableBlock, code blocks become
-    _MarkdownCodeBlock, and text blocks become _MarkdownCodeBlock with filetype="markdown".
+    block: tables become MarkdownTableBlock, code blocks become
+    MarkdownTextBlock, and text blocks become MarkdownTextBlock with filetype="markdown".
 
     Supports concealment of inline formatting markers, streaming mode
     for incremental content updates, and custom render node callbacks.
@@ -165,7 +161,7 @@ class MarkdownRenderable(Renderable):
 
     def _apply_table_options_to_blocks(self) -> None:
         for state in self._block_states:
-            if isinstance(state.renderable, _MarkdownTableBlock):
+            if isinstance(state.renderable, MarkdownTableBlock):
                 apply_table_options(state.renderable, self._table_options)
         self.mark_dirty()
 
@@ -287,10 +283,10 @@ class MarkdownRenderable(Renderable):
             if custom is not None:
                 if isinstance(
                     custom,
-                    _MarkdownBlockRenderable | _MarkdownCodeBlock | _MarkdownTableBlock,
+                    _MarkdownBlockWrapper | MarkdownTextBlock | MarkdownTableBlock,
                 ):
                     return custom
-                return _ExternalBlockRenderable(
+                return _ExternalBlockWrapper(
                     child=custom,
                     id=block_id,
                     margin_bottom=margin_bottom,
@@ -350,7 +346,7 @@ class MarkdownRenderable(Renderable):
 
         if (
             token.type == "table"
-            and isinstance(state.renderable, _MarkdownTableBlock)
+            and isinstance(state.renderable, MarkdownTableBlock)
             and token.rows
         ):
             update_table_renderable(
@@ -373,7 +369,7 @@ class MarkdownRenderable(Renderable):
 
             if (
                 token.type == "table"
-                and isinstance(state.renderable, _MarkdownTableBlock)
+                and isinstance(state.renderable, MarkdownTableBlock)
                 and token.rows
             ):
                 update_table_renderable(

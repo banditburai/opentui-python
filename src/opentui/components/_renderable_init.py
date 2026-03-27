@@ -1,9 +1,29 @@
 """Initialization helpers for Renderable."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import Any
+
+# Attrs that default to None and are only conditionally set by _bind_layout_props.
+_OPTIONAL_NONE_ATTRS = (
+    "_min_width",
+    "_min_height",
+    "_max_width",
+    "_max_height",
+    "_flex_basis",
+    "_align_self",
+    "_row_gap",
+    "_column_gap",
+    "_background_color",
+    "_fg",
+    "_border_color",
+    "_title",
+    "_border_chars",
+    "_focused_border_color",
+    "_pos_top",
+    "_pos_right",
+    "_pos_bottom",
+    "_pos_left",
+)
 
 
 def initialize_renderable(
@@ -191,14 +211,25 @@ def _resolve_fixed_dimensions(
     min_height: int | str | None,
     max_width: int | str | None,
     max_height: int | str | None,
-) -> tuple[int | str | None, int | str | None, int | str | None, int | str | None, int | str | None, int | str | None]:
+) -> tuple[
+    int | str | None,
+    int | str | None,
+    int | str | None,
+    int | str | None,
+    int | str | None,
+    int | str | None,
+]:
     if fixed_width is not None:
         if width is not None or min_width is not None or max_width is not None:
-            raise ValueError("Cannot combine 'fixed_width' with 'width', 'min_width', or 'max_width'")
+            raise ValueError(
+                "Cannot combine 'fixed_width' with 'width', 'min_width', or 'max_width'"
+            )
         width = min_width = max_width = fixed_width
     if fixed_height is not None:
         if height is not None or min_height is not None or max_height is not None:
-            raise ValueError("Cannot combine 'fixed_height' with 'height', 'min_height', or 'max_height'")
+            raise ValueError(
+                "Cannot combine 'fixed_height' with 'height', 'min_height', or 'max_height'"
+            )
         height = min_height = max_height = fixed_height
     return width, height, min_width, min_height, max_width, max_height
 
@@ -211,24 +242,8 @@ def _validate_dimensions(width: int | str | None, height: int | str | None) -> N
 
 
 def _initialize_optional_slots(renderable: Any) -> None:
-    renderable._min_width = None
-    renderable._min_height = None
-    renderable._max_width = None
-    renderable._max_height = None
-    renderable._flex_basis = None
-    renderable._align_self = None
-    renderable._row_gap = None
-    renderable._column_gap = None
-    renderable._background_color = None
-    renderable._fg = None
-    renderable._border_color = None
-    renderable._title = None
-    renderable._border_chars = None
-    renderable._focused_border_color = None
-    renderable._pos_top = None
-    renderable._pos_right = None
-    renderable._pos_bottom = None
-    renderable._pos_left = None
+    for attr in _OPTIONAL_NONE_ATTRS:
+        setattr(renderable, attr, None)
 
 
 def _resolve_flex_shrink(
@@ -318,7 +333,9 @@ def _bind_layout_props(renderable: Any, **kwargs: Any) -> None:
         )
 
     if background_color is not None:
-        renderable._set_or_bind("_background_color", background_color, transform=renderable._parse_color)
+        renderable._set_or_bind(
+            "_background_color", background_color, transform=renderable._parse_color
+        )
     if fg is not None:
         renderable._set_or_bind("_fg", fg, transform=renderable._parse_color)
     renderable._set_or_bind("_border", kwargs["border"])

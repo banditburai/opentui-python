@@ -18,8 +18,6 @@ Example:
     await render(App)
 """
 
-from __future__ import annotations
-
 from importlib.metadata import version as _pkg_version
 
 try:
@@ -41,6 +39,7 @@ from .enums import (
     JustifyContent,
     Overflow,
     Position,
+    RenderStrategy,
     TitleAlignment,
 )
 
@@ -66,7 +65,6 @@ from .components import (
     LayoutRect,
     LineBreak,
     LineColorConfig,
-    LineNumber,
     LineNumberRenderable,
     LineSign,
     LinearScrollAccel,
@@ -286,7 +284,6 @@ __all__ = [
     "TabSelect",
     "Slider",
     "TextTable",
-    "LineNumber",
     "Selection",
     "SelectionAnchor",
     "LocalSelectionBounds",
@@ -372,5 +369,6 @@ __all__ = [
     "JustifyContent",
     "Overflow",
     "Position",
+    "RenderStrategy",
     "TitleAlignment",
 ]

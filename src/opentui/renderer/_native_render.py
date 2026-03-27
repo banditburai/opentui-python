@@ -4,16 +4,14 @@ Provides fast paths for common-tree rendering, hybrid rendering,
 incremental dirty-subtree repainting, and layout-aware repaint plans.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
 from .buffer import Buffer
 from .layout import supports_common_tree_strategy
 from .native import (
-    LayoutRepaintFact,
     _COMMON_RENDER_CACHE,
+    LayoutRepaintFact,
     _ensure_common_render_loaded,
     _has_instance_render_override,
 )

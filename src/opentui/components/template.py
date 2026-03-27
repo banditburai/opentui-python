@@ -6,16 +6,13 @@ primary public entry point for named components; ``Mount`` is the
 inline primitive for reactive regions.
 """
 
-from __future__ import annotations
-
 import inspect
 from collections.abc import Callable
 from typing import Any
 
 from .._signal_types import Signal
 from .._signals_runtime import _tracking_context
-from ._control_flow_region import subscribe_signals
-from ._control_flow_region import normalize_render_result
+from ._control_flow_region import normalize_render_result, resubscribe_tracked
 from .base import BaseRenderable, Renderable
 from .structural import Portal
 
@@ -120,17 +117,7 @@ class Mount(Renderable):
             self._update_fn(update_target)
 
     def _subscribe_data(self, tracked: set[Signal]) -> None:
-        next_tracked = frozenset(tracked)
-        if next_tracked == self._tracked_signals:
-            return
-
-        if self._data_cleanup:
-            self._data_cleanup()
-            self._data_cleanup = None
-            self._tracked_signals = frozenset()
-
-        self._data_cleanup = subscribe_signals(tracked, self._reactive_update)
-        self._tracked_signals = next_tracked
+        resubscribe_tracked(self, tracked, self._reactive_update)
 
     def _evaluate_template(
         self,

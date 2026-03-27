@@ -1,18 +1,13 @@
 """Single-line text input component."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
 from ..events import KeyEvent
 from ..hooks import use_cursor, use_cursor_style
+from ..renderer.buffer import Buffer
 from ..structs import MUTED_GRAY
-from .textarea._text_edit_mixin import _TextEditMixin
 from .base import Renderable
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
+from .textarea._text_edit_mixin import _TextEditMixin
 
 
 class Input(_TextEditMixin, Renderable):
@@ -58,9 +53,6 @@ class Input(_TextEditMixin, Renderable):
             self.on("change", on_change)
         if on_submit:
             self.on("submit", on_submit)
-        if on_key:
-            self.on("key", on_key)
-
         self._focusable = True
         self._on_key = on_key
 

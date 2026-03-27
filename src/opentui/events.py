@@ -1,7 +1,5 @@
 """Event types for OpenTUI Python."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -57,7 +55,6 @@ class AttachmentPayload:
 
 @dataclass
 class KeyEvent(_EventPropagationMixin):
-
     key: str
     code: str = ""
     ctrl: bool = False

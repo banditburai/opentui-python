@@ -1,7 +1,5 @@
 """Repaint plan computation — decides which subtrees to re-render after layout."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from .layout import supports_common_tree_strategy

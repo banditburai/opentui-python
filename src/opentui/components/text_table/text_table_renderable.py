@@ -1,17 +1,19 @@
 """TextTableRenderable - table with per-cell native text buffers."""
 
-from __future__ import annotations
-
+import logging
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+_log = logging.getLogger(__name__)
 
 from ... import structs as s
 from ...editor.text_buffer_native import NativeTextBuffer
 from ...editor.text_view_native import NativeTextBufferView
 from ...enums import RenderStrategy
 from ...native import _nb
-from ..base import Renderable
+from ...renderer.buffer import Buffer
 from .._raster_cache import RasterCache
+from ..base import Renderable
 from .text_table_borders import (
     _BorderLayout,
     draw_borders,
@@ -19,11 +21,11 @@ from .text_table_borders import (
     get_vertical_border_count,
     resolve_border_layout,
 )
+from .text_table_config import CellState, TableLayoutState, resolve_text_table_config
 from .text_table_fitting import (
     expand_column_widths,
     fit_column_widths,
 )
-from .text_table_config import resolve_text_table_config
 from .text_table_selection import (
     get_selected_text as _get_selected_text,
 )
@@ -37,15 +39,8 @@ from .text_table_selection import (
     on_selection_changed as _on_selection_changed,
 )
 from .text_table_selection import (
-    setup_mouse_handlers as _setup_text_table_mouse_handlers,
-)
-from .text_table_selection import (
     should_start_selection as _should_start_selection,
 )
-from .text_table_config import CellState, TableLayoutState
-
-if TYPE_CHECKING:
-    from ...renderer import Buffer
 
 # Large sentinel height for text measurement.
 MEASURE_HEIGHT = 10_000
@@ -103,8 +98,6 @@ class TextTableRenderable(Renderable):
         "_cached_measure_width",
         "_last_local_selection",
         "_last_selection_mode",
-        "_is_selecting",
-        "_selection_anchor",
     )
 
     def get_render_strategy(self) -> RenderStrategy:
@@ -131,6 +124,8 @@ class TextTableRenderable(Renderable):
         fg: s.RGBA | str | None = None,
         bg: s.RGBA | str | None = None,
         attributes: int = 0,
+        header_fg: s.RGBA | str | None = None,
+        header_attributes: int = 0,
         # Renderable pass-through
         **kwargs,
     ):
@@ -181,6 +176,9 @@ class TextTableRenderable(Renderable):
         self._default_bg = config.default_bg
         self._default_attributes = config.default_attributes
 
+        self._header_fg = self._parse_color(header_fg) if header_fg is not None else None
+        self._header_attributes = header_attributes
+
         self._cells: list[list[CellState]] = []
         self._prev_cell_content: list[list[TextTableCellContent]] = []
         self._row_count: int = 0
@@ -194,12 +192,8 @@ class TextTableRenderable(Renderable):
 
         self._last_local_selection: dict | None = None
         self._last_selection_mode: str | None = None
-        self._is_selecting: bool = False
-        self._selection_anchor: tuple[int, int] | None = None
-
         self._setup_measure_func()
         self._rebuild_cells()
-        self._setup_mouse_handlers()
 
         # Chain _on_size_change: invalidate table layout when dimensions change.
         # Preserve any user-provided on_size_change callback from kwargs.
@@ -386,9 +380,6 @@ class TextTableRenderable(Renderable):
 
         self._yoga_node.set_measure_func(measure)
 
-    def _setup_mouse_handlers(self) -> None:
-        _setup_text_table_mouse_handlers(self)
-
     def _rebuild_cells(self) -> None:
         new_row_count = len(self._content)
         new_column_count = max((len(row) for row in self._content), default=0)
@@ -403,10 +394,18 @@ class TextTableRenderable(Renderable):
                 row_data = self._content[row_idx] if row_idx < len(self._content) else []
                 row_cells: list[CellState] = []
                 row_refs: list[TextTableCellContent] = []
+                is_header = row_idx == 0
 
                 for col_idx in range(new_column_count):
                     cell_content = row_data[col_idx] if col_idx < len(row_data) else None
-                    row_cells.append(self._create_cell(cell_content))
+                    if is_header and (self._header_fg is not None or self._header_attributes):
+                        row_cells.append(
+                            self._create_cell(
+                                cell_content, fg=self._header_fg, attributes=self._header_attributes
+                            )
+                        )
+                    else:
+                        row_cells.append(self._create_cell(cell_content))
                     row_refs.append(cell_content)
 
                 self._cells.append(row_cells)
@@ -415,65 +414,111 @@ class TextTableRenderable(Renderable):
             self._invalidate_layout_and_raster()
             return
 
-        self._update_cells_diff(new_row_count, new_column_count)
-        self._invalidate_layout_and_raster()
+        changed = self._update_cells_diff(new_row_count, new_column_count)
+        if changed:
+            self._invalidate_layout_and_raster()
 
-    def _update_cells_diff(self, new_row_count: int, new_column_count: int) -> None:
+    def _update_cells_diff(self, new_row_count: int, new_column_count: int) -> bool:
         old_row_count = self._row_count
         old_column_count = self._column_count
         keep_rows = min(old_row_count, new_row_count)
         keep_cols = min(old_column_count, new_column_count)
+        has_header_style = self._header_fg is not None or self._header_attributes
+        changed = False
 
         for row_idx in range(keep_rows):
             new_row = self._content[row_idx] if row_idx < len(self._content) else []
             cell_row = self._cells[row_idx]
             ref_row = self._prev_cell_content[row_idx]
+            is_header = row_idx == 0 and has_header_style
 
             for col_idx in range(keep_cols):
                 cell_content = new_row[col_idx] if col_idx < len(new_row) else None
                 if cell_content is ref_row[col_idx]:
                     continue
-                cell_row[col_idx] = self._create_cell(cell_content)
+                # Value equality fallback: avoid recreating NativeTextBuffer
+                # when streaming produces fresh dict objects with identical text.
+                if cell_content == ref_row[col_idx]:
+                    ref_row[col_idx] = cell_content
+                    continue
+                if is_header:
+                    cell_row[col_idx] = self._create_cell(
+                        cell_content, fg=self._header_fg, attributes=self._header_attributes
+                    )
+                else:
+                    cell_row[col_idx] = self._create_cell(cell_content)
                 ref_row[col_idx] = cell_content
+                changed = True
 
             if new_column_count > old_column_count:
+                changed = True
                 for col_idx in range(old_column_count, new_column_count):
                     cell_content = new_row[col_idx] if col_idx < len(new_row) else None
-                    cell_row.append(self._create_cell(cell_content))
+                    if is_header:
+                        cell_row.append(
+                            self._create_cell(
+                                cell_content, fg=self._header_fg, attributes=self._header_attributes
+                            )
+                        )
+                    else:
+                        cell_row.append(self._create_cell(cell_content))
                     ref_row.append(cell_content)
             elif new_column_count < old_column_count:
+                changed = True
                 del cell_row[new_column_count:]
                 del ref_row[new_column_count:]
 
         if new_row_count > old_row_count:
+            changed = True
             for row_idx in range(old_row_count, new_row_count):
                 new_row = self._content[row_idx] if row_idx < len(self._content) else []
                 row_cells: list[CellState] = []
                 row_refs: list[TextTableCellContent] = []
+                is_header = row_idx == 0 and has_header_style
                 for col_idx in range(new_column_count):
                     cell_content = new_row[col_idx] if col_idx < len(new_row) else None
-                    row_cells.append(self._create_cell(cell_content))
+                    if is_header:
+                        row_cells.append(
+                            self._create_cell(
+                                cell_content, fg=self._header_fg, attributes=self._header_attributes
+                            )
+                        )
+                    else:
+                        row_cells.append(self._create_cell(cell_content))
                     row_refs.append(cell_content)
                 self._cells.append(row_cells)
                 self._prev_cell_content.append(row_refs)
         elif new_row_count < old_row_count:
+            changed = True
             del self._cells[new_row_count:]
             del self._prev_cell_content[new_row_count:]
+
+        if new_row_count != old_row_count or new_column_count != old_column_count:
+            changed = True
 
         self._row_count = new_row_count
         self._column_count = new_column_count
 
-    def _create_cell(self, content: TextTableCellContent) -> CellState:
+        return changed
+
+    def _create_cell(
+        self,
+        content: TextTableCellContent,
+        fg: s.RGBA | None = None,
+        attributes: int = 0,
+    ) -> CellState:
         text = self._cell_content_to_text(content)
         text_buffer = NativeTextBuffer()
         text_buffer.set_text(text)
 
-        if self._default_fg is not None:
-            text_buffer.set_default_fg(self._default_fg)
+        cell_fg = fg if fg is not None else self._default_fg
+        if cell_fg is not None:
+            text_buffer.set_default_fg(cell_fg)
         if self._default_bg is not None:
             text_buffer.set_default_bg(self._default_bg)
-        if self._default_attributes:
-            text_buffer.set_default_attributes(self._default_attributes)
+        cell_attrs = attributes or self._default_attributes
+        if cell_attrs:
+            text_buffer.set_default_attributes(cell_attrs)
 
         text_buffer_view = NativeTextBufferView(text_buffer.ptr, text_buffer)
         text_buffer_view.set_wrap_mode(self._wrap_mode_str)
@@ -742,7 +787,7 @@ class TextTableRenderable(Renderable):
                 )
                 return
             except Exception:
-                pass
+                _log.debug("native border render failed, falling back to Python", exc_info=True)
 
         fg = self._border_color_val
         bg = self._border_bg_color if self._border_bg_color.a > 0 else None
@@ -764,6 +809,14 @@ class TextTableRenderable(Renderable):
         row_offsets = self._table_layout.row_offsets
         cell_padding = self._cell_padding
 
+        # Native draw bypasses Buffer's Python offset stack.
+        # Apply it manually, same as TextRenderable.render().
+        render_base_x, render_base_y = base_x, base_y
+        if buffer._offset_stack:
+            dx, dy = buffer._offset_stack[-1]
+            render_base_x += dx
+            render_base_y += dy
+
         for row_idx in range(self._row_count):
             if row_idx >= len(self._cells) or row_idx >= len(row_offsets):
                 continue
@@ -777,13 +830,18 @@ class TextTableRenderable(Renderable):
 
                 try:
                     _nb.text_buffer.buffer_draw_text_buffer_view(
-                        buffer._ptr, cell.text_buffer_view.ptr, base_x + cell_x, base_y + cell_y
+                        buffer._ptr,
+                        cell.text_buffer_view.ptr,
+                        render_base_x + cell_x,
+                        render_base_y + cell_y,
                     )
                 except Exception:
                     text = cell.text_buffer.get_plain_text()
                     if text:
                         buffer.draw_text(
-                            text, base_x + cell_x, base_y + cell_y,
+                            text,
+                            base_x + cell_x,
+                            base_y + cell_y,
                             self._default_fg,
                             self._default_bg if self._default_bg.a > 0 else None,
                             self._default_attributes,

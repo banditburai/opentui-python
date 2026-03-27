@@ -13,8 +13,6 @@ exercise palette detection via the renderer; these tests focus on:
 - Edge cases: malformed data, buffer overflow, partial chunks, timeouts
 """
 
-from __future__ import annotations
-
 import asyncio
 import re
 
@@ -1251,7 +1249,7 @@ class TestParseOSCFunctions:
     """Direct tests for the three OSC parsing helper functions."""
 
     def test_parse_osc4_responses_valid(self):
-        from opentui.palette.terminal import parse_osc4_responses
+        from opentui.palette.common import parse_osc4_responses
 
         data = "\x1b]4;0;rgb:0000/0000/0000\x1b\\\x1b]4;1;rgb:ffff/0000/0000\x1b\\"
         result = parse_osc4_responses(data)
@@ -1261,13 +1259,13 @@ class TestParseOSCFunctions:
         assert result[1] == "#ff0000"
 
     def test_parse_osc4_responses_empty(self):
-        from opentui.palette.terminal import parse_osc4_responses
+        from opentui.palette.common import parse_osc4_responses
 
         assert parse_osc4_responses("") == {}
         assert parse_osc4_responses("random junk") == {}
 
     def test_parse_osc_special_responses_valid(self):
-        from opentui.palette.terminal import parse_osc_special_responses
+        from opentui.palette.common import parse_osc_special_responses
 
         data = "\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b]11;rgb:0000/0000/0000\x1b\\"
         result = parse_osc_special_responses(data)
@@ -1277,17 +1275,17 @@ class TestParseOSCFunctions:
         assert result[11] == "#000000"
 
     def test_parse_osc_special_responses_empty(self):
-        from opentui.palette.terminal import parse_osc_special_responses
+        from opentui.palette.common import parse_osc_special_responses
 
         assert parse_osc_special_responses("") == {}
 
     def test_has_osc4_response_true(self):
-        from opentui.palette.terminal import has_osc4_response
+        from opentui.palette.common import has_osc4_response
 
         assert has_osc4_response("\x1b]4;0;rgb:0000/0000/0000\x1b\\") is True
 
     def test_has_osc4_response_false(self):
-        from opentui.palette.terminal import has_osc4_response
+        from opentui.palette.common import has_osc4_response
 
         assert has_osc4_response("") is False
         assert has_osc4_response("not an osc response") is False

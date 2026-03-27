@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
 
@@ -100,7 +98,8 @@ class DiffCodeAdapter:
         return "\n".join(self._owner._right_lines)
 
     @content.setter
-    def content(self, value: str) -> None:
+    def content(self, value: str) -> None:  # noqa: ARG002
+        # Content is computed from diff — setter exists for CodeRenderable protocol compliance
         self.emit("line-info-change")
 
     def on(self, event: str, handler: Any) -> None:
@@ -134,4 +133,9 @@ class DiffLineNumberAdapter:
         return self._owner._destroyed
 
 
-__all__ = ["DiffCodeAdapter", "DiffLineNumberAdapter", "DiffRenderConfig", "resolve_diff_render_config"]
+__all__ = [
+    "DiffCodeAdapter",
+    "DiffLineNumberAdapter",
+    "DiffRenderConfig",
+    "resolve_diff_render_config",
+]

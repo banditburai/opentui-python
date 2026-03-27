@@ -1,14 +1,13 @@
 """Retained raster buffer cache for offscreen rendering."""
 
-from __future__ import annotations
-
+import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ..native import _nb
+from ..renderer.buffer import Buffer
 
-if TYPE_CHECKING:
-    from ..renderer.buffer import Buffer
+_log = logging.getLogger(__name__)
 
 
 class RasterCache:
@@ -49,11 +48,9 @@ class RasterCache:
             return None
 
         if self._ptr is None:
-            from ..renderer.buffer import Buffer as RenderBuffer
-
             ptr = _nb.buffer.create_optimized_buffer(width, height, True, 0, self._id)
             self._ptr = ptr
-            self._buffer = RenderBuffer(ptr, _nb.buffer, _nb.graphics)
+            self._buffer = Buffer(ptr, _nb.buffer, _nb.graphics)
             self._size = (width, height)
             self._dirty = True
             return self._buffer
@@ -88,7 +85,7 @@ class RasterCache:
         raster = self.ensure(w, h)
         if raster is not None:
             if self._dirty:
-                raster.clear(0.0)
+                raster.clear()
                 raster.push_offset(-x, -y)
                 try:
                     render_fn(raster)
@@ -97,10 +94,17 @@ class RasterCache:
                 self._dirty = False
 
             try:
-                buffer._native.draw_frame_buffer(buffer._ptr, x, y, raster._ptr)
+                # Apply the parent buffer's offset stack (e.g. ScrollBox scroll
+                # offset) so the blit lands at the correct screen position.
+                blit_x, blit_y = x, y
+                if buffer._offset_stack:
+                    dx, dy = buffer._offset_stack[-1]
+                    blit_x += dx
+                    blit_y += dy
+                buffer._native.draw_frame_buffer(buffer._ptr, blit_x, blit_y, raster._ptr)
                 return
             except Exception:
-                pass
+                _log.debug("raster cache blit failed, falling back to direct render", exc_info=True)
 
         render_fn(buffer)
         self._dirty = False
@@ -111,7 +115,7 @@ class RasterCache:
         try:
             _nb.buffer.destroy_optimized_buffer(self._ptr)
         except Exception:
-            pass
+            _log.debug("failed to destroy optimized buffer %s", self._id, exc_info=True)
         finally:
             self._buffer = None
             self._ptr = None

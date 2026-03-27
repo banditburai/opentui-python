@@ -4,8 +4,6 @@ Upstream: packages/core/src/tests/hover-cursor.test.ts
 Tests ported: 6/6
 """
 
-from __future__ import annotations
-
 import pytest
 
 from opentui import Box, create_test_renderer

@@ -9,8 +9,6 @@ These were originally ``_wrap_*`` methods on ``ExtmarksController``; they
 are extracted here so the controller class stays focused on data management.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from ..structs import display_width as _string_width

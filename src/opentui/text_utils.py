@@ -4,8 +4,6 @@ Provides text measurement functions for yoga layout integration.
 Uses display_width() for correct CJK/emoji double-width handling.
 """
 
-from __future__ import annotations
-
 from .structs import display_width as _dw
 
 

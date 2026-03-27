@@ -1,13 +1,31 @@
-from __future__ import annotations
-
-from ..text_renderable_utils import get_scroll_adjusted_position
+from ..text_renderable import get_scroll_adjusted_position
 
 
-def should_start_selection(table, x: int, y: int) -> bool:
-    if not table._selectable_flag:
-        return False
-    table._ensure_layout_ready()
-    return get_cell_at_local_position(table, x - table._x, y - table._y) is not None
+def _row_top(table, idx: int) -> int:
+    """Y of first content pixel in row (after top border)."""
+    layout = table._table_layout
+    return (layout.row_offsets[idx] if idx < len(layout.row_offsets) else 0) + 1
+
+
+def _col_left(table, idx: int) -> int:
+    """X of first content pixel in column (after left border)."""
+    layout = table._table_layout
+    return (layout.column_offsets[idx] if idx < len(layout.column_offsets) else 0) + 1
+
+
+def _row_height(table, idx: int) -> int:
+    layout = table._table_layout
+    return layout.row_heights[idx] if idx < len(layout.row_heights) else 1
+
+
+def _col_width(table, idx: int) -> int:
+    layout = table._table_layout
+    return layout.column_widths[idx] if idx < len(layout.column_widths) else 1
+
+
+def should_start_selection(table, _x: int, _y: int) -> bool:
+    # Hit test already verified containment; cell resolution happens in apply_selection_to_cells.
+    return table._selectable_flag
 
 
 def has_selection(table) -> bool:
@@ -57,8 +75,20 @@ def on_selection_changed(table, selection) -> bool:
         reset_cell_selections(table)
         table._last_selection_mode = None
     else:
-        is_start = getattr(selection, "is_start", False) if selection else False
+        is_start = (
+            (
+                selection.get("is_start", False)
+                if isinstance(selection, dict)
+                else getattr(selection, "is_start", False)
+            )
+            if selection
+            else False
+        )
         apply_selection_to_cells(table, local_selection, is_start)
+
+    # Invalidate raster cache so selection highlight is visible.
+    table._raster.invalidate()
+    table.mark_paint_dirty()
 
     return has_selection(table)
 
@@ -67,11 +97,11 @@ def convert_global_to_local_selection(table, selection) -> dict | None:
     if selection is None:
         return None
     if isinstance(selection, dict):
-        anchor_x = selection.get("anchorX", selection.get("anchor_x", 0))
-        anchor_y = selection.get("anchorY", selection.get("anchor_y", 0))
-        focus_x = selection.get("focusX", selection.get("focus_x", 0))
-        focus_y = selection.get("focusY", selection.get("focus_y", 0))
-        is_active = selection.get("isActive", selection.get("is_active", False))
+        anchor_x = selection.get("anchor_x", 0)
+        anchor_y = selection.get("anchor_y", 0)
+        focus_x = selection.get("focus_x", 0)
+        focus_y = selection.get("focus_y", 0)
+        is_active = selection.get("is_active", False)
     else:
         anchor = selection.anchor
         focus = selection.focus
@@ -110,11 +140,7 @@ def apply_selection_to_cells(table, local_selection: dict, is_start: bool) -> No
             reset_row_selection(table, row_idx)
             continue
 
-        cell_top = (
-            (table._table_layout.row_offsets[row_idx] if row_idx < len(table._table_layout.row_offsets) else 0)
-            + 1
-            + table._cell_padding
-        )
+        cell_top = _row_top(table, row_idx) + table._cell_padding
 
         for col_idx in range(table._column_count):
             cell = (
@@ -129,11 +155,7 @@ def apply_selection_to_cells(table, local_selection: dict, is_start: bool) -> No
                 cell.text_buffer_view.reset_local_selection()
                 continue
 
-            cell_left = (
-                (table._table_layout.column_offsets[col_idx] if col_idx < len(table._table_layout.column_offsets) else 0)
-                + 1
-                + table._cell_padding
-            )
+            cell_left = _col_left(table, col_idx) + table._cell_padding
             anchor_x = local_selection["anchor_x"] - cell_left
             anchor_y = local_selection["anchor_y"] - cell_top
             focus_x = local_selection["focus_x"] - cell_left
@@ -146,8 +168,8 @@ def apply_selection_to_cells(table, local_selection: dict, is_start: bool) -> No
             force_set = is_anchor_cell and resolution["mode"] != "single-cell"
 
             if force_set:
-                col_width = table._table_layout.column_widths[col_idx] if col_idx < len(table._table_layout.column_widths) else 1
-                row_height = table._table_layout.row_heights[row_idx] if row_idx < len(table._table_layout.row_heights) else 1
+                col_width = _col_width(table, col_idx)
+                row_height = _row_height(table, row_idx)
                 content_width = max(1, col_width - table._get_cell_padding())
                 content_height = max(1, row_height - table._get_cell_padding())
                 anchor_x = -1
@@ -157,20 +179,34 @@ def apply_selection_to_cells(table, local_selection: dict, is_start: bool) -> No
 
             if is_start or mode_changed or force_set:
                 cell.text_buffer_view.set_local_selection(
-                    anchor_x, anchor_y, focus_x, focus_y,
-                    bg_color=table._selection_bg_color, fg_color=table._selection_fg_color,
+                    anchor_x,
+                    anchor_y,
+                    focus_x,
+                    focus_y,
+                    bg_color=table._selection_bg_color,
+                    fg_color=table._selection_fg_color,
                 )
             else:
                 cell.text_buffer_view.update_local_selection(
-                    anchor_x, anchor_y, focus_x, focus_y,
-                    bg_color=table._selection_bg_color, fg_color=table._selection_fg_color,
+                    anchor_x,
+                    anchor_y,
+                    focus_x,
+                    focus_y,
+                    bg_color=table._selection_bg_color,
+                    fg_color=table._selection_fg_color,
                 )
 
 
 def resolve_selection_resolution(table, local_selection: dict) -> dict:
-    anchor_cell = get_cell_at_local_position(table, local_selection["anchor_x"], local_selection["anchor_y"])
-    focus_cell = get_cell_at_local_position(table, local_selection["focus_x"], local_selection["focus_y"])
-    anchor_column = anchor_cell[1] if anchor_cell else get_column_at_local_x(table, local_selection["anchor_x"])
+    anchor_cell = get_cell_at_local_position(
+        table, local_selection["anchor_x"], local_selection["anchor_y"]
+    )
+    focus_cell = get_cell_at_local_position(
+        table, local_selection["focus_x"], local_selection["focus_y"]
+    )
+    anchor_column = (
+        anchor_cell[1] if anchor_cell else get_column_at_local_x(table, local_selection["anchor_x"])
+    )
 
     if (
         anchor_cell is not None
@@ -191,10 +227,8 @@ def get_column_at_local_x(table, local_x: int) -> int | None:
     if table._column_count == 0 or local_x < 0 or local_x >= table._table_layout.table_width:
         return None
     for col_idx in range(table._column_count):
-        col_start = (table._table_layout.column_offsets[col_idx] if col_idx < len(table._table_layout.column_offsets) else 0) + 1
-        col_width = table._table_layout.column_widths[col_idx] if col_idx < len(table._table_layout.column_widths) else 1
-        col_end = col_start + col_width - 1
-        if col_start <= local_x <= col_end:
+        left = _col_left(table, col_idx)
+        if left <= local_x <= left + _col_width(table, col_idx) - 1:
             return col_idx
     return None
 
@@ -203,10 +237,8 @@ def find_row_for_local_y(table, local_y: int) -> int:
     if table._row_count == 0 or local_y < 0:
         return 0
     for row_idx in range(table._row_count):
-        row_start = (table._table_layout.row_offsets[row_idx] if row_idx < len(table._table_layout.row_offsets) else 0) + 1
-        row_height = table._table_layout.row_heights[row_idx] if row_idx < len(table._table_layout.row_heights) else 1
-        row_end = row_start + row_height - 1
-        if local_y <= row_end:
+        top = _row_top(table, row_idx)
+        if local_y <= top + _row_height(table, row_idx) - 1:
             return row_idx
     return table._row_count - 1
 
@@ -233,61 +265,40 @@ def get_cell_at_local_position(table, local_x: int, local_y: int) -> tuple[int, 
 
     row_idx = -1
     for idx in range(table._row_count):
-        top = (table._table_layout.row_offsets[idx] if idx < len(table._table_layout.row_offsets) else 0) + 1
-        row_h = table._table_layout.row_heights[idx] if idx < len(table._table_layout.row_heights) else 1
-        bottom = top + row_h - 1
-        if top <= local_y <= bottom:
+        top = _row_top(table, idx)
+        if top <= local_y <= top + _row_height(table, idx) - 1:
             row_idx = idx
             break
     if row_idx < 0:
-        return None
+        # Border-pixel snap: next cell below, or last cell if past all rows.
+        for idx in range(table._row_count):
+            if local_y < _row_top(table, idx):
+                row_idx = idx
+                break
+        if row_idx < 0:
+            row_idx = table._row_count - 1
 
     col_idx = -1
     for idx in range(table._column_count):
-        left = (table._table_layout.column_offsets[idx] if idx < len(table._table_layout.column_offsets) else 0) + 1
-        col_w = table._table_layout.column_widths[idx] if idx < len(table._table_layout.column_widths) else 1
-        right = left + col_w - 1
-        if left <= local_x <= right:
+        left = _col_left(table, idx)
+        if left <= local_x <= left + _col_width(table, idx) - 1:
             col_idx = idx
             break
     if col_idx < 0:
-        return None
+        # Border-pixel snap: next cell right, or last cell if past all columns.
+        for idx in range(table._column_count):
+            if local_x < _col_left(table, idx):
+                col_idx = idx
+                break
+        if col_idx < 0:
+            col_idx = table._column_count - 1
     return (row_idx, col_idx)
 
 
-def setup_mouse_handlers(table) -> None:
-    def _on_down(event) -> None:
-        x, y = event.x, event.y
-        if not should_start_selection(table, x, y):
-            return
-        table._is_selecting = True
-        table._selection_anchor = (x, y)
-        on_selection_changed(
-            table,
-            {"anchorX": x, "anchorY": y, "focusX": x, "focusY": y, "isActive": True, "is_start": True},
-        )
-
-    def _on_drag(event) -> None:
-        if not table._is_selecting or table._selection_anchor is None:
-            return
-        ax, ay = table._selection_anchor
-        on_selection_changed(
-            table,
-            {"anchorX": ax, "anchorY": ay, "focusX": event.x, "focusY": event.y, "isActive": True, "is_start": False},
-        )
-
-    def _on_drag_end(event) -> None:
-        if table._is_selecting:
-            table._is_selecting = False
-
-    def _on_up(event) -> None:
-        if table._is_selecting:
-            table._is_selecting = False
-
-    table._on_mouse_down = _on_down
-    table._on_mouse_drag = _on_drag
-    table._on_mouse_drag_end = _on_drag_end
-    table._on_mouse_up = _on_up
-
-
-__all__ = ["get_selected_text", "get_selection", "has_selection", "on_selection_changed", "setup_mouse_handlers", "should_start_selection"]
+__all__ = [
+    "get_selected_text",
+    "get_selection",
+    "has_selection",
+    "on_selection_changed",
+    "should_start_selection",
+]

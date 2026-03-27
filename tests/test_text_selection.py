@@ -1,7 +1,5 @@
 """Tests for Text component cross-renderable selection interface."""
 
-from __future__ import annotations
-
 import pytest
 
 from opentui.components.text import Text
@@ -66,8 +64,8 @@ class TestCoordToOffset:
         # Then wraps each: "hello world" → ["hello", "world"], "foo bar" → ["foo", "bar"]
         # Result: ["hello", "world", "foo", "bar"]
         t = _make_text("hello world\nfoo bar", width=5)
-        assert t._coord_to_offset(0, 0) == 0   # 'h'
-        assert t._coord_to_offset(0, 1) == 6   # 'w' (space at 5 consumed)
+        assert t._coord_to_offset(0, 0) == 0  # 'h'
+        assert t._coord_to_offset(0, 1) == 6  # 'w' (space at 5 consumed)
         assert t._coord_to_offset(0, 2) == 12  # 'f' (newline at 11 consumed)
         assert t._coord_to_offset(0, 3) == 16  # 'b' (space at 15 consumed)
 

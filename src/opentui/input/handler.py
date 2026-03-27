@@ -7,8 +7,6 @@ The escape-sequence parsing state machine lives in ``_escape_parser.py``
 and is mixed into ``InputHandler`` via ``EscapeParserMixin``.
 """
 
-from __future__ import annotations
-
 import atexit
 import contextlib
 import logging

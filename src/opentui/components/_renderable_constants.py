@@ -1,7 +1,5 @@
 """Shared internal constants for renderable internals."""
 
-from __future__ import annotations
-
 import sys as _sys
 
 # Pointer identity with C++-interned strings enables O(1) comparison in yoga.

@@ -1,8 +1,7 @@
 """FFI layer for OpenTUI core library - uses nanobind C++ bindings only."""
 
-from __future__ import annotations
-
 import ctypes
+import importlib.machinery
 import importlib.util
 import logging
 import os

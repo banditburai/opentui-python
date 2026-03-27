@@ -1,7 +1,7 @@
 """Renderer package — layout, painting, mouse dispatch, and native acceleration."""
 
-from .buffer import Buffer, FrameTimingBuckets
 from ._config import CliRendererConfig, RendererControlState, TerminalCapabilities
+from .buffer import Buffer, FrameTimingBuckets
 from .core import (
     KITTY_FLAG_ALL_KEYS_AS_ESCAPES,
     KITTY_FLAG_ALTERNATE_KEYS,

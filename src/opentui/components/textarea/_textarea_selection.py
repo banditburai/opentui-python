@@ -1,10 +1,11 @@
 """Selection management mixin for TextareaRenderable."""
 
-from __future__ import annotations
-
 import contextlib
+import logging
 
-from ..text_renderable_utils import get_scroll_adjusted_position
+from ..text_renderable import get_scroll_adjusted_position
+
+_log = logging.getLogger(__name__)
 from .textarea_text_utils import (
     offset_to_line_col,
 )
@@ -26,7 +27,7 @@ class _SelectionMixin:
                 if self._editor_view.has_selection():
                     return True
             except Exception:
-                pass
+                _log.debug("native has_selection check failed", exc_info=True)
         return (
             self._selection_start is not None
             and self._selection_end is not None
@@ -41,7 +42,7 @@ class _SelectionMixin:
                 if native_sel is not None:
                     return (native_sel["start"], native_sel["end"])
             except Exception:
-                pass
+                _log.debug("native get_selection failed", exc_info=True)
         if self._selection_start is None or self._selection_end is None:
             return None
         s_start = min(self._selection_start, self._selection_end)
@@ -73,7 +74,7 @@ class _SelectionMixin:
                 if native_text:
                     return native_text
             except Exception:
-                pass
+                _log.debug("native get_selected_text failed", exc_info=True)
         sel = self.selection
         if sel is None:
             return ""

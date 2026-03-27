@@ -1,9 +1,11 @@
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import Any
+from typing import NamedTuple as _NamedTuple
 
 from ... import hooks
 from ... import structs as s
+from ...editor.edit_buffer_native import NativeEditBuffer
+from ...editor.editor_view_native import NativeEditorView
 from ...enums import RenderStrategy
 from ...events import KeyEvent, PasteEvent
 from ...input.keymapping import (
@@ -12,15 +14,16 @@ from ...input.keymapping import (
     KeyBinding,
     lookup_action_for_event,
 )
+from ...renderer.buffer import Buffer
+from ..base import Renderable, _parse_color_static, _Prop
 from ._textarea_init import (
     create_textarea_editor,
     init_textarea_runtime_state,
     wire_textarea_runtime_handlers,
 )
-from ..base import Renderable, _parse_color_static, _Prop
-from .textarea_keymap import resolve_textarea_colors
 from .textarea_keymap import (
     init_textarea_key_bindings,
+    resolve_textarea_colors,
     update_textarea_key_aliases,
     update_textarea_key_bindings,
 )
@@ -29,16 +32,6 @@ from .textarea_text_utils import (
     offset_to_line_col,
     str_display_width,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from ...editor.edit_buffer_native import NativeEditBuffer
-    from ...editor.editor_view_native import NativeEditorView
-    from ...renderer import Buffer
-
-
-from typing import NamedTuple as _NamedTuple
 
 
 class _CursorPos(_NamedTuple):
@@ -89,7 +82,6 @@ class TextareaRenderable(_SelectionMixin, _NavigationMixin, _MouseMixin, Rendera
         "_on_key_down_handler",
         "_on_content_change",
         "_on_cursor_change",
-
         "_selectable",
         "_is_scroll_target",
         "_wrap_mode",

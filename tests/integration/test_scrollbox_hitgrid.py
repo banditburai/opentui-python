@@ -4,8 +4,6 @@ Upstream: packages/core/src/tests/scrollbox-hitgrid.test.ts
 Tests: 17
 """
 
-from __future__ import annotations
-
 import pytest
 
 from opentui import Box, ScrollBox, create_test_renderer

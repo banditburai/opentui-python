@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -126,7 +124,9 @@ def resolve_textarea_colors(
     selection_fg: ColorLike,
 ) -> TextareaColorConfig:
     return TextareaColorConfig(
-        placeholder_color=parse_color(placeholder_color) if placeholder_color else MUTED_GRAY,
+        placeholder_color=(parse_color(placeholder_color) or MUTED_GRAY)
+        if placeholder_color
+        else MUTED_GRAY,
         text_color=parse_color(text_color),
         focused_background_color=parse_color(focused_background_color),
         focused_text_color=parse_color(focused_text_color),

@@ -24,8 +24,6 @@ The log file path is printed to stderr before the TUI starts so you know
 where to ``tail -f``.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 import sys

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
 import re as _re
+from typing import TYPE_CHECKING, Any
 
 from .. import hooks
 from ..events import KeyEvent, Keys, MouseButton, MouseEvent

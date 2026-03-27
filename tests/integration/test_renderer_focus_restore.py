@@ -18,8 +18,6 @@ In testing mode ``_restore_terminal_modes`` is a no-op (it would need a live
 terminal), so we spy on it with ``unittest.mock.patch.object`` to count calls.
 """
 
-from __future__ import annotations
-
 import pytest
 from unittest.mock import patch
 

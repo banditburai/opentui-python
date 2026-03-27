@@ -182,7 +182,9 @@ def evaluate_animation(
 
     progress = time_in_cycle / duration
     is_reversed = item.alternate and (current_cycle % 2 == 1)
-    apply_animation_at_progress(item, animation_type, progress, is_reversed, timeline_time, delta_time)
+    apply_animation_at_progress(
+        item, animation_type, progress, is_reversed, timeline_time, delta_time
+    )
 
 
 def evaluate_callback(item: CallbackItem, timeline_time: float) -> None:
@@ -191,7 +193,9 @@ def evaluate_callback(item: CallbackItem, timeline_time: float) -> None:
         item.executed = True
 
 
-def evaluate_timeline_sync(item: TimelineItem, timeline_time: float, delta_time: float = 0.0) -> None:
+def evaluate_timeline_sync(
+    item: TimelineItem, timeline_time: float, delta_time: float = 0.0
+) -> None:
     if item.timeline is None or timeline_time < item.start_time:
         return
 

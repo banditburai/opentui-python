@@ -3,8 +3,6 @@
 Verifies that bundled .scm queries load correctly and produce valid results.
 """
 
-from __future__ import annotations
-
 import pytest
 
 ts = pytest.importorskip("tree_sitter")

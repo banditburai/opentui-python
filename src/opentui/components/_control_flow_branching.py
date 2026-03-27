@@ -1,24 +1,24 @@
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .. import diagnostics as _diag
 from .. import layout as yoga_layout
 from .._signal_types import Signal, _ComputedSignal
-from ._control_flow_region import subscribe_signals as _subscribe_signals
-from ._control_flow_region import track_signals as _track_signals
+from ..renderer.buffer import Buffer
 from ._control_flow_region import detach_children as _detach_children
 from ._control_flow_region import evict_lru_branches as _evict_lru_branches
 from ._control_flow_region import normalize_render_result as _normalize_render_result
 from ._control_flow_region import (
     split_cacheable_branch_children as _split_cacheable_branch_children,
 )
+from ._control_flow_region import subscribe_signals as _subscribe_signals
+from ._control_flow_region import track_signals as _track_signals
 from .base import BaseRenderable, Renderable
 from .structural import Match, _subtree_contains_portal
 
-if TYPE_CHECKING:
-    from ..renderer import Buffer
+_BRANCH_NONE = "none"
+_BRANCH_RENDER = "render"
+_BRANCH_FALLBACK = "fallback"
 
 
 class Show(Renderable):
@@ -76,7 +76,7 @@ class Show(Renderable):
         else:
             self._fallback_fn = fallback
 
-        self._current_branch: str = "none"
+        self._current_branch: str = _BRANCH_NONE
         self._render_cache: list[BaseRenderable] | None = None
         self._fallback_cache: list[BaseRenderable] | None = None
         self._setup_reactive_condition()
@@ -95,32 +95,34 @@ class Show(Renderable):
     def _apply_condition(self, condition: Any) -> None:
         active = bool(condition)
         new_branch = (
-            "render" if active else ("fallback" if self._fallback_fn is not None else "none")
+            _BRANCH_RENDER
+            if active
+            else (_BRANCH_FALLBACK if self._fallback_fn is not None else _BRANCH_NONE)
         )
         if new_branch == self._current_branch:
             return
 
         if _diag._enabled & _diag.VISIBILITY:
-            cache = self._render_cache if new_branch == "render" else self._fallback_cache
+            cache = self._render_cache if new_branch == _BRANCH_RENDER else self._fallback_cache
             _diag.log_show_branch(self, active, self._current_branch, new_branch, cache is not None)
 
         disposed_children: list[BaseRenderable] = []
         if self._children:
             reusable, disposed_children = _split_cacheable_branch_children(list(self._children))
-            if self._current_branch == "render":
+            if self._current_branch == _BRANCH_RENDER:
                 self._render_cache = reusable or None
-            elif self._current_branch == "fallback":
+            elif self._current_branch == _BRANCH_FALLBACK:
                 self._fallback_cache = reusable or None
         _detach_children(self)
         for child in disposed_children:
             child.destroy()
 
         self._current_branch = new_branch
-        self._is_active = new_branch != "none"
+        self._is_active = new_branch != _BRANCH_NONE
 
-        cache = self._render_cache if new_branch == "render" else self._fallback_cache
+        cache = self._render_cache if new_branch == _BRANCH_RENDER else self._fallback_cache
         if cache is not None:
-            if new_branch == "render":
+            if new_branch == _BRANCH_RENDER:
                 self._render_cache = None
             else:
                 self._fallback_cache = None
@@ -128,9 +130,9 @@ class Show(Renderable):
                 self.add(child)
             return
 
-        if new_branch == "render":
+        if new_branch == _BRANCH_RENDER:
             render_fn = self._render_fn
-        elif new_branch == "fallback" and self._fallback_fn is not None:
+        elif new_branch == _BRANCH_FALLBACK and self._fallback_fn is not None:
             render_fn = self._fallback_fn
         else:
             return
@@ -219,7 +221,7 @@ class Switch(Renderable):
         self._is_active = False
         self._condition_cleanup: Callable[[], None] | None = None
         self._updating = False
-        self._current_branch_key: tuple[Any, ...] = ("none",)
+        self._current_branch_key: tuple[Any, ...] = (_BRANCH_NONE,)
         self._branch_cache: dict[tuple[Any, ...], list[BaseRenderable]] = {}
         self._max_cached_branches = 4
 
@@ -274,8 +276,8 @@ class Switch(Renderable):
         if render_fn is not None:
             return render_fn, ("value", value)
         if self._fallback_fn is not None:
-            return self._fallback_fn, ("fallback",)
-        return None, ("none",)
+            return self._fallback_fn, (_BRANCH_FALLBACK,)
+        return None, (_BRANCH_NONE,)
 
     def _resolve_branch(self) -> tuple[Callable | None, tuple[Any, ...]]:
         if self._on_fn is not None:
@@ -289,9 +291,9 @@ class Switch(Renderable):
                     return match.render, ("match", idx)
 
         if self._fallback_fn is not None:
-            return self._fallback_fn, ("fallback",)
+            return self._fallback_fn, (_BRANCH_FALLBACK,)
 
-        return None, ("none",)
+        return None, (_BRANCH_NONE,)
 
     def _apply_branch(self, render_fn: Callable | None, branch_key: tuple[Any, ...]) -> None:
         if branch_key == self._current_branch_key:
@@ -302,7 +304,7 @@ class Switch(Renderable):
             _diag.log_switch_branch(self, branch_key, self._current_branch_key, cached)
 
         disposed_children: list[BaseRenderable] = []
-        if self._children and self._current_branch_key != ("none",):
+        if self._children and self._current_branch_key != (_BRANCH_NONE,):
             reusable, disposed_children = _split_cacheable_branch_children(list(self._children))
             if reusable:
                 self._branch_cache[self._current_branch_key] = reusable

@@ -7,8 +7,6 @@ Note: This file also contains existing Python-native scrollbox tests that
 are not ports of the upstream TypeScript tests.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from opentui import MouseButton, MouseEvent, Signal, test_render as render_for_test

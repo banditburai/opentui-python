@@ -8,8 +8,6 @@ global handlers run first, then internal (renderable) handlers —
 unless preventDefault() was called.
 """
 
-from __future__ import annotations
-
 import contextlib
 import logging
 from collections.abc import Callable

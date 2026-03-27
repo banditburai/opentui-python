@@ -4,8 +4,6 @@ Upstream: packages/core/src/lib/extmarks.test.ts
 Tests ported: 169/169
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional

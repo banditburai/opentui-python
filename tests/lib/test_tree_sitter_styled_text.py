@@ -3,8 +3,6 @@
 Tests the tree_sitter_to_text_chunks function and related helpers.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from opentui.components.code_renderable import (

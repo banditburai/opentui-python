@@ -1,7 +1,5 @@
 """Cursor position, style, color, and software blink management."""
 
-from __future__ import annotations
-
 import time as _time
 
 from .native import _CURSOR_STYLE_MAP, _CURSOR_STYLE_MAP_STEADY

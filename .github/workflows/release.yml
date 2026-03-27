@@ -63,7 +63,7 @@ jobs:
           CIBW_BEFORE_ALL_LINUX: "dnf install -y git && python {project}/scripts/download_opentui.py"
           CIBW_BEFORE_ALL_MACOS: "python {project}/scripts/download_opentui.py"
           CIBW_BEFORE_ALL_WINDOWS: "python {project}/scripts/download_opentui.py"
-          CIBW_TEST_REQUIRES: "pytest"
+          CIBW_TEST_REQUIRES: "pytest pytest-asyncio"
           CIBW_TEST_COMMAND: "pytest {project}/tests -v --tb=short -x"
           CIBW_ENVIRONMENT_PASS_LINUX: "GIT_TERMINAL_PROMPT"
           GIT_TERMINAL_PROMPT: "0"

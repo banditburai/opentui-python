@@ -1,7 +1,5 @@
 """Table column width fitting utilities extracted from TextTableRenderable."""
 
-from __future__ import annotations
-
 import math
 
 

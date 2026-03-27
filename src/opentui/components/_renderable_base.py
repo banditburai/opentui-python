@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import itertools
+import weakref
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -16,7 +17,7 @@ from .._signal_types import _HAS_NATIVE
 from ..enums import RenderStrategy
 
 if TYPE_CHECKING:
-    from ..renderer import Buffer
+    from ..renderer.buffer import Buffer
 
 
 class LayoutRect(NamedTuple):
@@ -180,9 +181,12 @@ def _sync_yoga_children(
 
 
 class BaseRenderable:
-    renderables_by_number: dict[int, BaseRenderable] = {}
+    renderables_by_number: weakref.WeakValueDictionary[int, BaseRenderable] = (
+        weakref.WeakValueDictionary()
+    )
 
     __slots__ = (
+        "__weakref__",
         "_num",
         "_id",
         "_parent",
@@ -231,6 +235,16 @@ class BaseRenderable:
         self._destroyed = False
         self._visible = True
         self._host: BaseRenderable | None = None
+
+    def __del__(self) -> None:
+        try:
+            node = self._yoga_node
+            if node is not None:
+                configurator = _get_yoga_configurator()
+                if configurator is not None:
+                    configurator.clear_cache(node)
+        except Exception:
+            pass
 
     @property
     def x(self) -> int:
@@ -572,7 +586,6 @@ class BaseRenderable:
         if self._destroyed:
             return
         self._destroyed = True
-        BaseRenderable.renderables_by_number.pop(self._num, None)
         for fn in self._cleanups.values():
             with contextlib.suppress(Exception):
                 fn()

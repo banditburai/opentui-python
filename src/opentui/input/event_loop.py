@@ -5,12 +5,13 @@ test-mode input handler (TestInputHandler) that were originally
 part of input.py.
 """
 
-from __future__ import annotations
-
 import contextlib
+import logging
 import os
 from collections.abc import Callable
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 from .handler import InputHandler
 
@@ -125,7 +126,7 @@ class EventLoop:
 
                 renderer.write_out(_clear_kitty_graphics(None))
             except Exception:
-                pass
+                _log.debug("failed to clear kitty graphics on resize", exc_info=True)
             renderer.resize(cols, lines)
             if renderer._root is not None:
                 renderer._root._width = cols

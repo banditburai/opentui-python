@@ -11,7 +11,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from opentui.renderer import CliRenderer
+    from .core import CliRenderer
 
 
 class ConsolePosition(Enum):
@@ -121,15 +121,7 @@ class TerminalConsole:
         local_x = event.x - self._console_x
         local_y = event.y - self._console_y
 
-        if (
-            local_x < 0
-            or local_x >= self._console_width
-            or local_y < 0
-            or local_y >= self._console_height
-        ):
-            return False
-
-        return True
+        return 0 <= local_x < self._console_width and 0 <= local_y < self._console_height
 
     def resize(self) -> None:
         self._update_dimensions()

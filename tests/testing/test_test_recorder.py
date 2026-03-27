@@ -3,8 +3,6 @@
 Upstream: reference/opentui/packages/core/src/testing/test-recorder.test.ts
 """
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest

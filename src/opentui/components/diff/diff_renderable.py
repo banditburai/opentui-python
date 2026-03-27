@@ -1,24 +1,20 @@
 """DiffRenderable - unified and split-view diff display."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, NamedTuple
 
 from ... import structs as s
 from ...enums import RenderStrategy
+from ...renderer.buffer import Buffer
 from ...text_utils import wrap_text as _tu_wrap_text
+from .._raster_cache import RasterCache
 from ..base import Renderable
+from ..line_types import LineColorConfig, LineSign
 from .diff_config import DiffCodeAdapter, DiffLineNumberAdapter, resolve_diff_render_config
 from .diff_parser import (
     StructuredPatch,
     parse_patch,
 )
-from ..line_types import LineColorConfig, LineSign
 from .diff_views import build_error_view_lines, build_split_view_data, build_unified_view_data
-from .._raster_cache import RasterCache
-
-if TYPE_CHECKING:
-    from ...renderer import Buffer
 
 
 class _PanelGeometry(NamedTuple):
@@ -650,9 +646,7 @@ class DiffRenderable(Renderable):
             self._unified_line_numbers,
         )
 
-    def _compute_content_width(
-        self, available: int, line_numbers: dict[int, int]
-    ) -> int:
+    def _compute_content_width(self, available: int, line_numbers: dict[int, int]) -> int:
         """Compute the text content width after subtracting gutter/sign columns."""
         gw = 0
         sw = 0
@@ -801,9 +795,7 @@ class DiffRenderable(Renderable):
         num_logical = len(left_wrapped)
 
         l_gw, l_sw, l_cx = self._compute_gutter_metrics(self._left_line_numbers, x)
-        r_gw, r_sw, r_cx = self._compute_gutter_metrics(
-            self._right_line_numbers, x + half_width
-        )
+        r_gw, r_sw, r_cx = self._compute_gutter_metrics(self._right_line_numbers, x + half_width)
 
         l_geo = _PanelGeometry(x, l_cx, left_cw, l_gw, l_sw)
         r_geo = _PanelGeometry(x + half_width, r_cx, right_cw, r_gw, r_sw)
@@ -826,12 +818,28 @@ class DiffRenderable(Renderable):
                     break
                 ly = y + visual_row
                 self._draw_split_side(
-                    buffer, vr, i, ly, lw, l_geo, l_cc,
-                    self._left_line_numbers, self._left_line_signs, l_hide,
+                    buffer,
+                    vr,
+                    i,
+                    ly,
+                    lw,
+                    l_geo,
+                    l_cc,
+                    self._left_line_numbers,
+                    self._left_line_signs,
+                    l_hide,
                 )
                 self._draw_split_side(
-                    buffer, vr, i, ly, rw, r_geo, r_cc,
-                    self._right_line_numbers, self._right_line_signs, r_hide,
+                    buffer,
+                    vr,
+                    i,
+                    ly,
+                    rw,
+                    r_geo,
+                    r_cc,
+                    self._right_line_numbers,
+                    self._right_line_signs,
+                    r_hide,
                 )
                 visual_row += 1
 
@@ -839,6 +847,7 @@ class DiffRenderable(Renderable):
         """Release retained raster resources before normal teardown."""
         self._raster.release()
         super().destroy()
+
 
 __all__ = [
     "DiffRenderable",

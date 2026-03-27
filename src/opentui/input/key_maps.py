@@ -3,8 +3,6 @@
 Extracted from input.py to keep the InputHandler class focused on parsing logic.
 """
 
-from __future__ import annotations
-
 import re
 
 from ..events import MouseButton
@@ -15,7 +13,7 @@ _MAX_ST_BUFFER = 65536  # Max DCS/APC/OSC buffer size before reset
 MAX_PASTE_SIZE = 1024 * 1024  # 1 MB max paste size
 
 _MODIFY_OTHER_KEYS_RE = re.compile(r"^27;(\d+);(\d+)~$")
-_KITTY_KEY_RE = re.compile(r"^(\d+(?::\d+)*)(?:;(\d+(?::\d*)*))?(?:;([\d:]+))?u$")
+_KITTY_KEY_RE = re.compile(r"^(\d+(?::\d+)*)(?:;(\d*(?::\d*)*))?(?:;([\d:]+))?u$")
 # xterm-style modified key: CSI 1;modifier[:event_type] letter
 # e.g. 1;2A = Shift+Up, 1;1:3A = Up release (kitty keyboard protocol)
 _XTERM_MODIFIED_KEY_RE = re.compile(r"^1;(\d+)(?::(\d+))?([A-HPS])$")
@@ -223,23 +221,16 @@ _META_KEY_MAP: dict[str, str] = {
     "n": "down",
 }
 
-# rxvt shifted key suffixes (CSI code a/b/c/d/e or CSI num$)
-_SHIFT_CODES: dict[str, str] = {
+# rxvt direction suffixes — shared by both shift (CSI a/b/c/d/e) and ctrl (ESC O a/b/c/d/e) paths
+_RXVT_DIRECTION_CODES: dict[str, str] = {
     "a": "up",
     "b": "down",
     "c": "right",
     "d": "left",
     "e": "clear",
 }
-
-# rxvt ctrl key suffixes (ESC O a/b/c/d/e or CSI num^)
-_CTRL_CODES: dict[str, str] = {
-    "a": "up",
-    "b": "down",
-    "c": "right",
-    "d": "left",
-    "e": "clear",
-}
+_SHIFT_CODES = _RXVT_DIRECTION_CODES
+_CTRL_CODES = _RXVT_DIRECTION_CODES
 
 # Exported set of all non-alphanumeric key names.
 NON_ALPHANUMERIC_KEYS: list[str] = sorted(
@@ -289,7 +280,6 @@ def _char_code_to_key(char_code: int) -> str:
     if 0 < char_code < 0x10FFFF:
         return chr(char_code)
     return f"unknown-{char_code}"
-
 
 
 KITTY_FLAG_DISAMBIGUATE = 0b1  # bit 0: disambiguated escape codes

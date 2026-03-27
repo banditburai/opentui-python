@@ -1,13 +1,11 @@
 """LineNumberRenderable - renders line number gutter alongside a target renderable."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .. import structs as s
+from ..renderer.buffer import Buffer
 from ..structs import MUTED_GRAY, MUTED_GRAY_HEX
 from .base import Renderable
-from .line_types import LineColorConfig, LineSign
 from .line_number_gutter import (
     GutterRenderable,
     LineInfo,
@@ -15,9 +13,7 @@ from .line_number_gutter import (
     _darken_color,
     _parse_color,
 )
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
+from .line_types import LineColorConfig, LineSign
 
 
 class LineNumberRenderable(Renderable):

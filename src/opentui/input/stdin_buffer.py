@@ -5,8 +5,6 @@ sequences that arrive across multiple chunks, bracketed paste, DCS/APC/OSC/SS3
 sequences, and surrogate pairs.
 """
 
-from __future__ import annotations
-
 import re
 import threading
 from collections.abc import Callable

@@ -1,7 +1,5 @@
 """Terminal session helpers for CliRenderer."""
 
-from __future__ import annotations
-
 import contextlib
 import logging
 import time as _time
@@ -63,6 +61,24 @@ def bind_event_loop(renderer: Any, event_loop: Any) -> None:
     for handler in hooks.get_focus_handlers():
         input_handler.on_focus(handler)
 
+    # Track modifier keys from keyboard events so we can inject them into
+    # mouse events (many terminals strip modifier bits from SGR mouse).
+    # Insert at position 0 so it runs before any handler can stop propagation.
+    if hasattr(renderer, "_init_kb_modifier_state"):
+        renderer._init_kb_modifier_state()
+        kh = getattr(input_handler, "_key_handlers", None)
+        if kh is not None:
+            kh.insert(0, renderer._on_key_modifier_track)
+            _log.debug(
+                "modifier tracker registered at position 0 of %d handlers",
+                len(kh),
+            )
+        else:
+            input_handler.on_key(renderer._on_key_modifier_track)
+            _log.debug("modifier tracker appended (no _key_handlers)")
+    else:
+        _log.debug("renderer has no _init_kb_modifier_state — modifier tracking disabled")
+
     input_handler.on_mouse(renderer._dispatch_mouse_event)
     for handler in hooks.get_mouse_handlers():
         input_handler.on_mouse(handler)
@@ -89,7 +105,9 @@ def restore_terminal_modes(renderer: Any) -> None:
         _log.debug("Failed to restore terminal modes on focus", exc_info=True)
 
 
-def teardown_terminal_session(renderer: Any, *, os_module: Any, select_module: Any, sys_module: Any) -> None:
+def teardown_terminal_session(
+    renderer: Any, *, os_module: Any, select_module: Any, sys_module: Any
+) -> None:
     with contextlib.suppress(Exception):
         renderer.disable_keyboard()
     with contextlib.suppress(Exception):

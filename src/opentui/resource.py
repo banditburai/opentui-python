@@ -4,8 +4,6 @@ Provides ``create_resource(fetcher, source)`` for async data loading
 with reactive ``data``, ``loading``, and ``error`` signals.
 """
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Callable
 from typing import Any

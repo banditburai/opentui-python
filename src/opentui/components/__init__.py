@@ -1,5 +1,13 @@
 """Components package."""
 
+from ._simple_variants import (
+    Code,
+    Diff,
+    Markdown,
+    Slider,
+    TabSelect,
+    TextTable,
+)
 from .base import BaseRenderable, LayoutRect, Renderable, VRenderable
 from .box import Box, Column, FlexFill, Row, Spacer
 from .control_flow import (
@@ -21,25 +29,16 @@ from .diff import DiffRenderable
 from .framebuffer import FrameBuffer
 from .image import Image
 from .input import Input
-from .select import Select, SelectOption
-from .textarea import Textarea, TextareaRenderable
 from .input_renderable import InputRenderable
 from .line_number_renderable import LineNumberRenderable
 from .line_types import LineColorConfig, LineSign
 from .scrollbar import ScrollBar
 from .scrollbox import LinearScrollAccel, MacOSScrollAccel, ScrollBox, ScrollContent
+from .select import Select, SelectOption
 from .select_renderable import SelectRenderable
-from ._simple_variants import (
-    Code,
-    Diff,
-    LineNumber,
-    Markdown,
-    Slider,
-    TabSelect,
-    TextTable,
-)
 from .text import Bold, Italic, LineBreak, Link, Span, Text, TextModifier, Underline
 from .text_renderable import TextRenderable
+from .textarea import Textarea, TextareaRenderable
 
 __all__ = [
     "BaseRenderable",
@@ -62,7 +61,6 @@ __all__ = [
     "Lazy",
     "LineBreak",
     "LineColorConfig",
-    "LineNumber",
     "LineNumberRenderable",
     "LineSign",
     "LinearScrollAccel",

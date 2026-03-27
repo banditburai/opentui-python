@@ -1,7 +1,5 @@
 """Navigation, editing, and undo/redo mixin for TextareaRenderable."""
 
-from __future__ import annotations
-
 import contextlib
 
 from .textarea_text_utils import (

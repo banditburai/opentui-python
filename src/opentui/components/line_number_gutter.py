@@ -4,21 +4,17 @@ Extracted from ``line_number_renderable.py`` to keep the
 ``LineNumberRenderable`` wrapper focused on orchestration.
 """
 
-from __future__ import annotations
-
 import math
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from .. import structs as s
+from ..renderer.buffer import Buffer
 from ..structs import MUTED_GRAY
 from ..structs import display_width as _string_width
-from .base import Renderable
-from .line_types import LineColorConfig, LineSign
 from ._raster_cache import RasterCache
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
+from .base import Renderable
+from .line_types import LineSign
 
 
 @dataclass

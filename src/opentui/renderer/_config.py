@@ -1,7 +1,5 @@
 """Configuration, capabilities, lifecycle, and palette detection mixins for CliRenderer."""
 
-from __future__ import annotations
-
 import asyncio
 import enum
 from dataclasses import dataclass
@@ -26,11 +24,14 @@ class CliRendererConfig:
     # Kitty keyboard protocol flags.  Bit layout:
     #   1 = disambiguate escape codes
     #   2 = report event types (press / repeat / release)
+    #   8 = report all keys as escape codes (modifier-only keys like shift)
     #  16 = report associated text (IME-composed text in CSI-u field 3)
+    # Flag 8 enables bare modifier press/release tracking (needed because
+    # many terminals don't report modifier bits in SGR mouse events).
     # Flag 16 is critical for CJK IME — the terminal sends the composed
     # syllable in field 3 instead of raw key codes, so Korean/Chinese/
     # Japanese input works correctly.
-    kitty_keyboard_flags: int = 19  # 1 + 2 + 16
+    kitty_keyboard_flags: int = 27  # 1 + 2 + 8 + 16
     # Whether mouse tracking should be enabled on startup.
     # None means auto-detect (enable when tree has mouse handlers).
     use_mouse: bool | None = None

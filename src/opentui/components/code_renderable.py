@@ -1,9 +1,8 @@
-from __future__ import annotations
-
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ..enums import RenderStrategy
+from ..renderer.buffer import Buffer
 from ._syntax_highlight import (
     ChunkRenderContext,
     HighlightContext,
@@ -17,9 +16,6 @@ from ._syntax_highlight import (
     tree_sitter_to_text_chunks,
 )
 from .text_renderable import TextRenderable
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
 
 
 class CodeRenderable(TextRenderable):

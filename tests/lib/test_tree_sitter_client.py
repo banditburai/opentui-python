@@ -4,8 +4,6 @@ All tests require the tree-sitter package and language grammars.
 They are automatically skipped if the highlighting extras aren't installed.
 """
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest

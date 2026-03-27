@@ -1,7 +1,5 @@
 """Native text buffer view wrapper."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from ..native import _nb, _rgba_to_list

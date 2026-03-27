@@ -1273,4 +1273,3 @@ class TestSignalEagerDunders:
         assert len(s) == 2
         s.set([1, 2, 3, 4])
         assert len(s) == 4
-

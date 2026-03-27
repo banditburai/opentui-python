@@ -13,8 +13,9 @@ Usage:
 import asyncio
 from collections.abc import Callable
 
-from opentui import test_render as _test_render
 from opentui.components.advanced import Code, Markdown
+
+from opentui import test_render as _test_render
 from opentui.components.base import BaseRenderable, Renderable
 from opentui.components.box import Box
 from opentui.components.control_flow import (

@@ -284,7 +284,6 @@ class MappedExpr(Expr):
 
 
 def _ensure_expr(value: Any) -> Expr:
-    """Ensure a value is an Expr."""
     if isinstance(value, Expr):
         return value
     return Literal(value)
@@ -293,7 +292,7 @@ def _ensure_expr(value: Any) -> Expr:
 def all_(*signals) -> Expr:
     """Logical AND of all values."""
     if not signals:
-        return BinaryOp(Literal(True), "and", Literal(True))
+        return Literal(True)
 
     result = Literal(True)
     for s in signals:
@@ -304,7 +303,7 @@ def all_(*signals) -> Expr:
 def any_(*signals) -> Expr:
     """Logical OR of all values."""
     if not signals:
-        return BinaryOp(Literal(False), "or", Literal(False))
+        return Literal(False)
 
     result = Literal(False)
     for s in signals:

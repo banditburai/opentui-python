@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import itertools
 from collections.abc import Callable
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 from . import _signals_runtime as _rt
 from .expr import Expr
@@ -17,15 +17,9 @@ def _load_native_signal() -> Any:
     try:
         from . import ffi
 
-        nb = ffi.get_native()
-    except ImportError:
-        nb = None
-    if nb is not None:
-        try:
-            return nb.native_signals.NativeSignal
-        except AttributeError:
-            return None
-    return None
+        return ffi.get_native().native_signals.NativeSignal
+    except (ImportError, AttributeError):
+        return None
 
 
 _NativeSignal = _load_native_signal()
@@ -170,9 +164,11 @@ class Signal(Expr):
 
     def subscribe(self, fn: Callable[[Any], Any]) -> Callable[[], None]:
         if self._native is not None:
+
             def wrapped(value: Any) -> None:
                 self._value = value
                 fn(value)
+
             return self._native.subscribe(wrapped)
 
         self._subscribers.append(fn)
@@ -270,7 +266,7 @@ class _ComputedSignal(Expr):
         self._recompute_cb = self._on_dep_changed
         self._computing = False
         self._stale = False
-        self._dep_unsubs: dict[ReadableSignal, Callable[[], None]] = {}
+        self._dep_unsubs: dict[Signal, Callable[[], None]] = {}
 
         if deps:
             self._auto_tracked = False
@@ -292,7 +288,8 @@ class _ComputedSignal(Expr):
 
         self._signal = Signal(initial, name=f"computed_{next(_counter)}")
         for dep in resolved_deps:
-            self._dep_unsubs[dep] = dep.subscribe(self._recompute_cb)
+            sig = cast(Signal, dep)
+            self._dep_unsubs[sig] = sig.subscribe(self._recompute_cb)
 
     @staticmethod
     def _eval_untracked(fn: Callable[[], Any]) -> Any:
@@ -337,7 +334,9 @@ class _ComputedSignal(Expr):
                 _rt._runtime.stale_computeds.append(self)
             return
         native = getattr(self._signal, "_native", None)
-        has_listeners = native.total_binding_count > 0 if native else bool(self._signal._subscribers)
+        has_listeners = (
+            native.total_binding_count > 0 if native else bool(self._signal._subscribers)
+        )
         if has_listeners:
             self._recompute()
         else:
@@ -397,7 +396,7 @@ class _ComputedSignal(Expr):
 def _sync_tracked_deps(
     old_deps: set[Signal],
     new_deps: set[Signal],
-    unsubs: dict[ReadableSignal, Callable[[], None]],
+    unsubs: dict[Signal, Callable[[], None]],
     callback: Callable[[Any], None],
 ) -> None:
     for dep in old_deps - new_deps:
@@ -416,6 +415,7 @@ def _drain_stale_computeds() -> None:
             if comp._stale:
                 comp._stale = False
                 comp._recompute()
+
 
 __all__ = [
     "ReadableSignal",

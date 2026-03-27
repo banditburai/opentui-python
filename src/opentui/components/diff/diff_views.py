@@ -1,14 +1,14 @@
-from __future__ import annotations
-
-from .diff_parser import LogicalLine
 from ..line_types import LineColorConfig, LineSign
+from .diff_parser import LogicalLine
 
 
 def build_error_view_lines(parse_error, diff_text: str) -> list[str]:
     return [f"Error parsing diff: {parse_error}", "", *diff_text.split("\n")]
 
 
-def build_unified_view_data(owner) -> tuple[list[str], dict[int, LineColorConfig], dict[int, LineSign], dict[int, int]]:
+def build_unified_view_data(
+    owner,
+) -> tuple[list[str], dict[int, LineColorConfig], dict[int, LineSign], dict[int, int]]:
     if not owner._parsed_diff:
         return [], {}, {}, {}
 
@@ -42,7 +42,9 @@ def build_unified_view_data(owner) -> tuple[list[str], dict[int, LineColorConfig
                 content_lines.append(content)
                 line_colors[line_index] = LineColorConfig(
                     gutter=owner._removed_line_number_bg,
-                    content=owner._removed_content_bg if owner._removed_content_bg else owner._removed_bg,
+                    content=owner._removed_content_bg
+                    if owner._removed_content_bg
+                    else owner._removed_bg,
                 )
                 line_signs[line_index] = LineSign(after=" -", after_color=owner._removed_sign_color)
                 line_numbers[line_index] = old_line_num
@@ -52,7 +54,9 @@ def build_unified_view_data(owner) -> tuple[list[str], dict[int, LineColorConfig
                 content_lines.append(content)
                 line_colors[line_index] = LineColorConfig(
                     gutter=owner._line_number_bg_color,
-                    content=owner._context_content_bg if owner._context_content_bg else owner._context_bg,
+                    content=owner._context_content_bg
+                    if owner._context_content_bg
+                    else owner._context_bg,
                 )
                 line_numbers[line_index] = new_line_num
                 old_line_num += 1
@@ -62,7 +66,9 @@ def build_unified_view_data(owner) -> tuple[list[str], dict[int, LineColorConfig
     return content_lines, line_colors, line_signs, line_numbers
 
 
-def build_split_view_data(owner) -> tuple[
+def build_split_view_data(
+    owner,
+) -> tuple[
     list[str],
     list[str],
     dict[int, LineColorConfig],
@@ -94,10 +100,20 @@ def build_split_view_data(owner) -> tuple[
             if first_char == " ":
                 content = line[1:]
                 left_logical.append(
-                    LogicalLine(content=content, line_num=old_line_num, color=owner._context_bg, line_type="context")
+                    LogicalLine(
+                        content=content,
+                        line_num=old_line_num,
+                        color=owner._context_bg,
+                        line_type="context",
+                    )
                 )
                 right_logical.append(
-                    LogicalLine(content=content, line_num=new_line_num, color=owner._context_bg, line_type="context")
+                    LogicalLine(
+                        content=content,
+                        line_num=new_line_num,
+                        color=owner._context_bg,
+                        line_type="context",
+                    )
                 )
                 old_line_num += 1
                 new_line_num += 1
@@ -137,7 +153,9 @@ def build_split_view_data(owner) -> tuple[
                             )
                         )
                     else:
-                        left_logical.append(LogicalLine(content="", hide_line_number=True, line_type="empty"))
+                        left_logical.append(
+                            LogicalLine(content="", hide_line_number=True, line_type="empty")
+                        )
 
                     if j < len(adds):
                         right_logical.append(
@@ -150,7 +168,9 @@ def build_split_view_data(owner) -> tuple[
                             )
                         )
                     else:
-                        right_logical.append(LogicalLine(content="", hide_line_number=True, line_type="empty"))
+                        right_logical.append(
+                            LogicalLine(content="", hide_line_number=True, line_type="empty")
+                        )
 
     left_lines = [ll.content for ll in left_logical]
     right_lines = [ll.content for ll in right_logical]
@@ -171,12 +191,16 @@ def build_split_view_data(owner) -> tuple[
         if ll.line_type == "remove":
             left_line_colors[idx] = LineColorConfig(
                 gutter=owner._removed_line_number_bg,
-                content=owner._removed_content_bg if owner._removed_content_bg else owner._removed_bg,
+                content=owner._removed_content_bg
+                if owner._removed_content_bg
+                else owner._removed_bg,
             )
         elif ll.line_type == "context":
             left_line_colors[idx] = LineColorConfig(
                 gutter=owner._line_number_bg_color,
-                content=owner._context_content_bg if owner._context_content_bg else owner._context_bg,
+                content=owner._context_content_bg
+                if owner._context_content_bg
+                else owner._context_bg,
             )
         if ll.sign:
             left_line_signs[idx] = ll.sign
@@ -194,7 +218,9 @@ def build_split_view_data(owner) -> tuple[
         elif ll.line_type == "context":
             right_line_colors[idx] = LineColorConfig(
                 gutter=owner._line_number_bg_color,
-                content=owner._context_content_bg if owner._context_content_bg else owner._context_bg,
+                content=owner._context_content_bg
+                if owner._context_content_bg
+                else owner._context_bg,
             )
         if ll.sign:
             right_line_signs[idx] = ll.sign

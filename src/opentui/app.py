@@ -1,15 +1,14 @@
 """App entry point — render() function for running OpenTUI applications."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
+from typing import Any
 
 from .renderer import CliRendererConfig, create_cli_renderer
 
 
 async def render(
     component_fn: Callable,
-    config: CliRendererConfig | dict | None = None,
+    config: CliRendererConfig | dict[str, Any] | None = None,
 ) -> None:
     """Render a component to the terminal.
 
@@ -30,7 +29,8 @@ async def render(
         await render(App)
     """
     if isinstance(config, dict):
-        config = CliRendererConfig(**config)
+        d: dict[str, Any] = config
+        config = CliRendererConfig(**d)
     if config is None:
         config = CliRendererConfig()
 

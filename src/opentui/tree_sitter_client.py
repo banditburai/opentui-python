@@ -11,8 +11,6 @@ Usage:
     # [start, end, group_name, {"conceal": "..."}]
 """
 
-from __future__ import annotations
-
 import asyncio
 import importlib
 import logging
@@ -53,7 +51,6 @@ _QUERY_DIR_MAP: dict[str, str] = {
 }
 
 
-
 def _byte_to_char_map(text: str) -> list[int]:
     """Build byte-offset → char-offset lookup table.
 
@@ -67,7 +64,6 @@ def _byte_to_char_map(text: str) -> list[int]:
             mapping.append(i)
     mapping.append(len(text))  # sentinel for end positions
     return mapping
-
 
 
 def _load_bundled_query(filetype: str) -> str | None:
@@ -104,7 +100,6 @@ def _load_query_for_filetype(filetype: str) -> str | None:
             pass
 
     return None
-
 
 
 class PyTreeSitterClient:
@@ -245,11 +240,11 @@ class PyTreeSitterClient:
         return {"highlights": highlights}
 
     def start_highlight_once(self, content: str, filetype: str) -> asyncio.Future:
-        """Synchronously create a highlight request and return a future."""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
+        """Synchronously create a highlight request and return a future.
+
+        Must be called from within a running event loop.
+        """
+        loop = asyncio.get_running_loop()
         future = loop.create_future()
 
         async def _run():

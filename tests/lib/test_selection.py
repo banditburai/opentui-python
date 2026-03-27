@@ -5,8 +5,6 @@ convert_global_to_local_selection. No upstream TypeScript test file exists
 for lib/selection.ts — these tests are written from the Python implementation.
 """
 
-from __future__ import annotations
-
 from opentui.selection import (
     LocalSelectionBounds,
     Selection,
@@ -233,18 +231,18 @@ class TestSelectionBounds:
         assert b == {"x": 0, "y": 0, "width": 4, "height": 3}
 
     def test_bounds_follow_anchor_movement(self):
-        """When the anchor renderable moves, bounds must update."""
+        """When the anchor renderable moves, bounds must update (both anchor and focus track)."""
         r = _FakeRenderable(x=0, y=0)
         sel = Selection(r, {"x": 2, "y": 3}, {"x": 5, "y": 6})
         b1 = sel.bounds
         assert b1 == {"x": 2, "y": 3, "width": 4, "height": 4}
 
-        # Simulate renderable move (anchor follows)
+        # Simulate renderable move — both anchor and focus follow
         r.x = 10
         r.y = 10
         b2 = sel.bounds
-        # Anchor is now (12, 13), focus is still (5, 6)
-        assert b2 == {"x": 5, "y": 6, "width": 8, "height": 8}
+        # Anchor is now (12, 13), focus is now (15, 16) — same shape, shifted
+        assert b2 == {"x": 12, "y": 13, "width": 4, "height": 4}
 
     def test_bounds_after_focus_update(self):
         """Changing focus updates the bounds."""
@@ -473,19 +471,19 @@ class TestConvertGlobalToLocalSelection:
         assert result.is_active is True
 
     def test_respects_anchor_renderable_move(self):
-        """If the anchor renderable has moved, global anchor position changes."""
+        """If the anchor renderable has moved, both anchor and focus positions change."""
         r = _FakeRenderable(x=5, y=5)
         sel = Selection(r, {"x": 10, "y": 10}, {"x": 20, "y": 20})
-        # Anchor relative offset is (5, 5). Now move renderable.
+        # Anchor offset is (5, 5), focus offset is (15, 15). Now move renderable.
         r.x = 15
         r.y = 15
-        # Anchor is now (20, 20), focus is still (20, 20)
+        # Anchor is now (20, 20), focus is now (30, 30)
         result = convert_global_to_local_selection(sel, local_x=0, local_y=0)
         assert result is not None
         assert result.anchor_x == 20
         assert result.anchor_y == 20
-        assert result.focus_x == 20
-        assert result.focus_y == 20
+        assert result.focus_x == 30
+        assert result.focus_y == 30
 
 
 # ===========================================================================
@@ -499,7 +497,9 @@ class _FakeBuffer:
     def __init__(self, lines: list[str], width: int | None = None) -> None:
         self._lines = lines
         self.height = len(lines)
-        self.width = width if width is not None else (max(len(l) for l in lines) if lines else 0)
+        self.width = (
+            width if width is not None else (max(len(line) for line in lines) if lines else 0)
+        )
 
     def get_char_code(self, x: int, y: int) -> int:
         if 0 <= y < len(self._lines) and 0 <= x < len(self._lines[y]):
@@ -566,9 +566,7 @@ class TestSelectionExtractFromBuffer:
         buf = _FakeBuffer(["SHOULD NOT SEE THIS"])
         r = _FakeRenderable(x=0, y=0)
         sel = Selection(r, {"x": 0, "y": 0}, {"x": 10, "y": 0})
-        sel.update_selected_renderables(
-            [_FakeRenderable(x=0, y=0, text="component text")]
-        )
+        sel.update_selected_renderables([_FakeRenderable(x=0, y=0, text="component text")])
         assert sel.get_selected_text(buffer=buf) == "component text"
 
     def test_buffer_fallback_when_no_component_text(self):

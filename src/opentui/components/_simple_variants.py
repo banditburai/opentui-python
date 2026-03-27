@@ -1,19 +1,21 @@
 """Simple component variants - Code, Diff, Markdown, etc."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yoga
 
 from .. import structs as s
+from ..renderer.buffer import Buffer
 from ..structs import MUTED_GRAY, SELECTED_TAB_BG
 from .base import Renderable
 
 _MEASURE_AT_MOST = yoga.MeasureMode.AtMost
 
-if TYPE_CHECKING:
-    from ..renderer import Buffer
+_DIFF_REMOVED_FG = s.RGBA(1, 0.3, 0.3, 1)
+_DIFF_ADDED_FG = s.RGBA(0.3, 1, 0.3, 1)
+_TAB_SELECTED_FG = s.RGBA(1, 1, 1, 1)
+_SLIDER_THUMB_FG = s.RGBA(0.3, 0.7, 1, 1)
+_CODE_GUTTER_WIDTH = 4
 
 
 def _text_measure_func(renderable, content_fn, extra_width_fn=None):
@@ -78,7 +80,9 @@ class Code(Renderable):
             lines = self._content.split("\n") if self._content else []
             return lines, len(lines), max((len(line) for line in lines), default=0)
 
-        _text_measure_func(self, _content, lambda: 4 if self._show_line_numbers else 0)
+        _text_measure_func(
+            self, _content, lambda: _CODE_GUTTER_WIDTH if self._show_line_numbers else 0
+        )
 
     def render(self, buffer: Buffer, delta_time: float = 0) -> None:
         if not self._visible or not self._content:
@@ -106,8 +110,10 @@ class Code(Renderable):
                 line_num = str(i + 1).rjust(3)
                 buffer.draw_text(line_num, x, line_y, MUTED_GRAY, self._background_color)
 
-            code_x = x + 4 if self._show_line_numbers else x
-            display_line = line[: width - 4] if self._show_line_numbers else line[:width]
+            code_x = x + _CODE_GUTTER_WIDTH if self._show_line_numbers else x
+            display_line = (
+                line[: width - _CODE_GUTTER_WIDTH] if self._show_line_numbers else line[:width]
+            )
             buffer.draw_text(display_line, code_x, line_y, self._fg, self._background_color)
 
 
@@ -189,13 +195,9 @@ class Diff(Renderable):
                 break
 
             if status == "-":
-                buffer.draw_text(
-                    f"- {line}", x, y + i, s.RGBA(1, 0.3, 0.3, 1), self._background_color
-                )
+                buffer.draw_text(f"- {line}", x, y + i, _DIFF_REMOVED_FG, self._background_color)
             elif status == "+":
-                buffer.draw_text(
-                    f"+ {line}", x, y + i, s.RGBA(0.3, 1, 0.3, 1), self._background_color
-                )
+                buffer.draw_text(f"+ {line}", x, y + i, _DIFF_ADDED_FG, self._background_color)
             else:
                 buffer.draw_text(f"  {line}", x, y + i, self._fg, self._background_color)
 
@@ -245,57 +247,6 @@ class Markdown(Renderable):
                 buffer.draw_text(line[4:], x, y + i, self._fg, self._background_color)
             else:
                 buffer.draw_text(line, x, y + i, self._fg, self._background_color)
-
-
-class LineNumber(Renderable):
-    """Code display with line numbers.
-
-    Usage:
-        code = LineNumber("code content here")
-    """
-
-    def __init__(
-        self,
-        content: str = "",
-        start: int = 1,
-        width: int = 4,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-
-        self._content = content
-        self._start = start
-        self._gutter_width = width
-
-        self._setup_measure_func()
-
-    def _setup_measure_func(self) -> None:
-        def _content():
-            lines = self._content.split("\n") if self._content else []
-            return lines, len(lines), max((len(line) for line in lines), default=0)
-
-        _text_measure_func(self, _content, lambda: self._gutter_width + 1)
-
-    def render(self, buffer: Buffer, delta_time: float = 0) -> None:
-        if not self._visible or not self._content:
-            return
-
-        x = self._x + self._padding_left
-        y = self._y + self._padding_top
-        width = self._layout_width or (buffer.width - x)
-
-        lines = self._content.split("\n")
-        for i, line in enumerate(lines):
-            line_y = y + i
-            if line_y >= buffer.height:
-                break
-
-            num = str(self._start + i).rjust(self._gutter_width)
-            buffer.draw_text(num, x, line_y, MUTED_GRAY, self._background_color)
-
-            content_x = x + self._gutter_width + 1
-            display_line = line[: width - self._gutter_width - 1]
-            buffer.draw_text(display_line, content_x, line_y, self._fg, self._background_color)
 
 
 class TabSelect(Renderable):
@@ -354,7 +305,7 @@ class TabSelect(Renderable):
             bg = SELECTED_TAB_BG if is_selected else self._background_color
 
             text = f" {tab} "
-            fg = s.RGBA(1, 1, 1, 1) if is_selected else self._fg
+            fg = _TAB_SELECTED_FG if is_selected else self._fg
 
             buffer.draw_text(text, current_x, y, fg, bg)
 
@@ -430,7 +381,7 @@ class Slider(Renderable):
         buffer.draw_text("]", x + width - 1, y, self._fg, self._background_color)
 
         thumb_x = x + 1 + position
-        buffer.draw_text("●", thumb_x, y, s.RGBA(0.3, 0.7, 1, 1), self._background_color)
+        buffer.draw_text("●", thumb_x, y, _SLIDER_THUMB_FG, self._background_color)
 
         value_text = f" {self._value:.1f} "
         buffer.draw_text(value_text, x, y + 1, self._fg, self._background_color)
@@ -503,7 +454,6 @@ __all__ = [
     "Code",
     "Diff",
     "Markdown",
-    "LineNumber",
     "TabSelect",
     "Slider",
     "TextTable",

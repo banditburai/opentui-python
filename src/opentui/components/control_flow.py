@@ -7,8 +7,6 @@ primitive auto-tracks the signals it reads and re-evaluates only when
 those specific signals change.
 """
 
-from __future__ import annotations
-
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -22,6 +20,7 @@ from ._control_flow_region import detach_children as _detach_children
 from ._control_flow_region import evict_lru_branches as _evict_lru_branches
 from ._control_flow_region import normalize_inserted_children as _normalize_inserted_children
 from ._control_flow_region import normalize_render_result as _normalize_render_result
+from ._control_flow_region import resubscribe_tracked as _resubscribe_tracked
 from ._control_flow_region import subscribe_signals as _subscribe_signals
 from ._control_flow_region import track_signals as _track_signals
 from .base import BaseRenderable, Renderable
@@ -71,40 +70,31 @@ class Inserted(Renderable):
         tracked, result = _track_signals(self._render_fn)
         mode, payload = _normalize_inserted_children(result)
         self._apply_region(mode, payload)
-        self._subscribe_data(tracked)
+        _resubscribe_tracked(self, tracked, self._reactive_update)
 
-    def _subscribe_data(self, tracked: set[Signal]) -> None:
-        next_tracked = frozenset(tracked)
-        if next_tracked == self._tracked_signals:
-            return
-
-        if self._data_cleanup:
-            self._data_cleanup()
-            self._data_cleanup = None
-            self._tracked_signals = frozenset()
-
-        self._data_cleanup = _subscribe_signals(tracked, self._reactive_update)
-        self._tracked_signals = next_tracked
-
-    def _apply_region(self, mode: str, payload: str | list[BaseRenderable]) -> None:
+    def _apply_region(
+        self, mode: str, payload: str | BaseRenderable | list[BaseRenderable]
+    ) -> None:
         from .text import Text
 
         if mode == "text":
-            content = payload
+            assert isinstance(payload, str)
             if (
                 len(self._children) == 1
                 and isinstance(self._children[0], Text)
                 and self._children[0].key is None
             ):
-                self._children[0].content = content
+                self._children[0].content = payload
                 return
-            _apply_region_children(self, [Text(content)])
+            _apply_region_children(self, [Text(payload)])
             return
 
         if mode == "single_node":
+            assert isinstance(payload, BaseRenderable)
             _apply_region_children(self, [payload])
             return
 
+        assert isinstance(payload, list)
         _apply_region_children(self, payload)
 
     def _reactive_update(self) -> None:
@@ -115,7 +105,7 @@ class Inserted(Renderable):
             tracked, result = _track_signals(self._render_fn)
             mode, payload = _normalize_inserted_children(result)
             self._apply_region(mode, payload)
-            self._subscribe_data(tracked)
+            _resubscribe_tracked(self, tracked, self._reactive_update)
             self.mark_dirty()
             # Mark parent dirty so the renderer's local-subtree layout
             # optimization doesn't use stale parent dimensions as constraints.
@@ -270,20 +260,7 @@ class Dynamic(Renderable):
         tracked, result = self._evaluate_region()
         cache_key, mode, payload = result
         self._apply_region(cache_key, mode, payload)
-        self._subscribe_data(tracked)
-
-    def _subscribe_data(self, tracked: set[Signal]) -> None:
-        next_tracked = frozenset(tracked)
-        if next_tracked == self._tracked_signals:
-            return
-
-        if self._data_cleanup:
-            self._data_cleanup()
-            self._data_cleanup = None
-            self._tracked_signals = frozenset()
-
-        self._data_cleanup = _subscribe_signals(tracked, self._reactive_update)
-        self._tracked_signals = next_tracked
+        _resubscribe_tracked(self, tracked, self._reactive_update)
 
     def _evaluate_region(self) -> tuple[set[Signal], tuple[Any, str, list[BaseRenderable] | None]]:
         def _eval() -> tuple[Any, str, list[BaseRenderable] | None]:
@@ -352,7 +329,7 @@ class Dynamic(Renderable):
             tracked, result = self._evaluate_region()
             cache_key, mode, payload = result
             self._apply_region(cache_key, mode, payload)
-            self._subscribe_data(tracked)
+            _resubscribe_tracked(self, tracked, self._reactive_update)
             self.mark_dirty()
         finally:
             self._updating = False

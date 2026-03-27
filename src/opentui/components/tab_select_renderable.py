@@ -1,9 +1,7 @@
 """TabSelectRenderable - horizontal tab-style selection renderable."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ..events import KeyEvent
 from ..input.keymapping import (
@@ -15,10 +13,8 @@ from ..input.keymapping import (
     merge_key_aliases,
     merge_key_bindings,
 )
+from ..renderer.buffer import Buffer
 from .base import Renderable
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
 
 
 @dataclass

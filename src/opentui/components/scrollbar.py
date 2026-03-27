@@ -1,15 +1,11 @@
 """ScrollBar component for OpenTUI Python."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ..events import MouseButton, MouseEvent
+from ..renderer.buffer import Buffer
 from .base import Renderable
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
 
 
 class ScrollBar(Renderable):

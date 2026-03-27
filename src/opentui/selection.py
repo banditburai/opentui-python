@@ -4,34 +4,49 @@ Provides text selection with anchor/focus points, selected/touched renderable
 tracking, and conversion between global and local selection coordinates.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from .components.base import BaseRenderable
+from .components.base import BaseRenderable
+
+
+def _parent_scroll_offset(renderable: Any) -> tuple[int, int]:
+    """Accumulate scroll offsets from all scrollable ancestors."""
+    sx, sy = 0, 0
+    parent = getattr(renderable, "_parent", None)
+    while parent is not None:
+        if getattr(parent, "_scroll_y", False):
+            fn = getattr(parent, "_scroll_offset_y_fn", None)
+            sy += int(fn()) if fn else int(getattr(parent, "_scroll_offset_y", 0))
+        if getattr(parent, "_scroll_x", False):
+            sx += int(getattr(parent, "_scroll_offset_x", 0))
+        parent = getattr(parent, "_parent", None)
+    return sx, sy
 
 
 class SelectionAnchor:
-    """Stores selection anchor relative to a renderable.
+    """Stores selection anchor relative to a renderable's screen position.
 
-    The anchor tracks a position relative to the renderable's origin so that
-    when the renderable moves (e.g. due to scroll), the anchor follows.
+    The anchor tracks a position as an offset from the renderable's
+    scroll-adjusted screen position so that when the renderable moves
+    (e.g. due to scroll), the anchor follows.
     """
 
     def __init__(self, renderable: BaseRenderable, absolute_x: int, absolute_y: int) -> None:
         self._renderable = renderable
-        self._relative_x = absolute_x - renderable.x
-        self._relative_y = absolute_y - renderable.y
+        sx, sy = _parent_scroll_offset(renderable)
+        self._offset_x = absolute_x - (renderable.x - sx)
+        self._offset_y = absolute_y - (renderable.y - sy)
 
     @property
     def x(self) -> int:
-        return self._renderable.x + self._relative_x
+        sx, _ = _parent_scroll_offset(self._renderable)
+        return (self._renderable.x - sx) + self._offset_x
 
     @property
     def y(self) -> int:
-        return self._renderable.y + self._relative_y
+        _, sy = _parent_scroll_offset(self._renderable)
+        return (self._renderable.y - sy) + self._offset_y
 
 
 class Selection:
@@ -40,6 +55,9 @@ class Selection:
     The anchor is the point where the selection started, and the focus is
     where the selection currently extends to. The selection bounds are
     computed from the min/max of anchor and focus.
+
+    Both anchor and focus track the anchor renderable's screen position
+    so that selection follows content during scroll.
     """
 
     def __init__(
@@ -49,7 +67,7 @@ class Selection:
         focus: dict[str, int],
     ) -> None:
         self._anchor = SelectionAnchor(anchor_renderable, anchor["x"], anchor["y"])
-        self._focus = {"x": focus["x"], "y": focus["y"]}
+        self._focus_sel = SelectionAnchor(anchor_renderable, focus["x"], focus["y"])
         self._selected_renderables: list[Any] = []
         self._touched_renderables: list[Any] = []
         self._is_active: bool = True
@@ -70,11 +88,11 @@ class Selection:
 
     @property
     def focus(self) -> dict[str, int]:
-        return dict(self._focus)
+        return {"x": self._focus_sel.x, "y": self._focus_sel.y}
 
     @focus.setter
     def focus(self, value: dict[str, int]) -> None:
-        self._focus = {"x": value["x"], "y": value["y"]}
+        self._focus_sel = SelectionAnchor(self._anchor._renderable, value["x"], value["y"])
 
     @property
     def is_active(self) -> bool:
@@ -99,10 +117,11 @@ class Selection:
         Selection bounds are inclusive of both anchor and focus.
         A selection from (0,0) to (0,0) covers 1 cell.
         """
-        min_x = min(self._anchor.x, self._focus["x"])
-        max_x = max(self._anchor.x, self._focus["x"])
-        min_y = min(self._anchor.y, self._focus["y"])
-        max_y = max(self._anchor.y, self._focus["y"])
+        fx, fy = self._focus_sel.x, self._focus_sel.y
+        min_x = min(self._anchor.x, fx)
+        max_x = max(self._anchor.x, fx)
+        min_y = min(self._anchor.y, fy)
+        max_y = max(self._anchor.y, fy)
 
         width = max_x - min_x + 1
         height = max_y - min_y + 1
@@ -186,7 +205,6 @@ class Selection:
 
 @dataclass
 class LocalSelectionBounds:
-
     anchor_x: int
     anchor_y: int
     focus_x: int

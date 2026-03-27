@@ -1,7 +1,5 @@
 """FrameBuffer integration tests."""
 
-from __future__ import annotations
-
 import pytest
 
 from opentui import FrameBuffer, Renderable, create_test_renderer

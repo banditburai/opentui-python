@@ -172,7 +172,7 @@ BORDER_CHARS: dict[str, dict[str, str]] = {
         "horizontal": "═",
         "vertical": "║",
     },
-    "round": {
+    "rounded": {
         "top_left": "╭",
         "top_right": "╮",
         "bottom_left": "╰",
@@ -180,7 +180,7 @@ BORDER_CHARS: dict[str, dict[str, str]] = {
         "horizontal": "─",
         "vertical": "│",
     },
-    "bold": {
+    "heavy": {
         "top_left": "┏",
         "top_right": "┓",
         "bottom_left": "┗",
@@ -197,9 +197,9 @@ BORDER_CHARS: dict[str, dict[str, str]] = {
         "vertical": "█",
     },
 }
-# Canonical aliases: parse_border_style normalizes "round" → "rounded", "bold" → "heavy"
-BORDER_CHARS["rounded"] = BORDER_CHARS["round"]
-BORDER_CHARS["heavy"] = BORDER_CHARS["bold"]
+# Legacy aliases
+BORDER_CHARS["round"] = BORDER_CHARS["rounded"]
+BORDER_CHARS["bold"] = BORDER_CHARS["heavy"]
 
 
 def get_border_chars(style: str) -> dict[str, str]:

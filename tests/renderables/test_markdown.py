@@ -8,10 +8,10 @@ import pytest
 
 from opentui import ScrollBox, create_test_renderer
 from opentui.components.markdown import (
-    _MarkdownCodeBlock,
+    MarkdownTextBlock,
     MarkdownRenderable,
     MarkdownTableOptions,
-    _MarkdownTableBlock,
+    MarkdownTableBlock,
 )
 
 
@@ -95,7 +95,7 @@ class TestMarkdownRenderable:
         setup.render_frame()
 
         table = md._blockStates[0].renderable
-        assert isinstance(table, _MarkdownTableBlock)
+        assert isinstance(table, MarkdownTableBlock)
         assert table.column_width_mode == "full"
         assert table.column_fitter == "balanced"
 
@@ -110,7 +110,7 @@ class TestMarkdownRenderable:
         setup.render_frame()
 
         table = md._blockStates[0].renderable
-        assert isinstance(table, _MarkdownTableBlock)
+        assert isinstance(table, MarkdownTableBlock)
         assert table.column_width_mode == "full"
 
         md.table_options = {
@@ -388,7 +388,7 @@ class TestMarkdownRenderable:
         table = next(
             state.renderable
             for state in md._blockStates
-            if isinstance(state.renderable, _MarkdownTableBlock)
+            if isinstance(state.renderable, MarkdownTableBlock)
         )
         start = _find_selectable_point(table, "top-left")
         end = _find_selectable_point(table, "bottom-right")
@@ -420,7 +420,7 @@ class TestMarkdownRenderable:
         text_block = next(
             state.renderable
             for state in md._blockStates
-            if isinstance(state.renderable, _MarkdownCodeBlock)
+            if isinstance(state.renderable, MarkdownTextBlock)
         )
         setup.mock_mouse.drag(text_block.x, text_block.y, text_block.x + 6, text_block.y)
         setup.render_frame()
@@ -443,7 +443,7 @@ class TestMarkdownRenderable:
         text_block = next(
             state.renderable
             for state in md._blockStates
-            if isinstance(state.renderable, _MarkdownCodeBlock)
+            if isinstance(state.renderable, MarkdownTextBlock)
         )
         setup.mock_mouse.drag(text_block.x, text_block.y, text_block.x + 4, text_block.y)
         setup.render_frame()
@@ -720,11 +720,10 @@ class TestMarkdownRenderable:
             if token.type == "heading":
                 text = token.text
                 lines = [f"[CUSTOM] {text}"]
-                return _MarkdownCodeBlock(
+                return MarkdownTextBlock(
                     id="custom",
                     block_type="text",
                     lines=lines,
-                    filetype="markdown",
                 )
             return ctx.default_render()
 
@@ -747,11 +746,10 @@ class TestMarkdownRenderable:
         def custom_render(token, ctx):
             if token.type == "code":
                 lines = [f"CODE: {token.text.rstrip()}"]
-                return _MarkdownCodeBlock(
+                return MarkdownTextBlock(
                     id="code-text",
                     block_type="text",
                     lines=lines,
-                    filetype="",
                 )
             return ctx.default_render()
 
@@ -1273,7 +1271,7 @@ class TestMarkdownRenderable:
         setup.render_frame()
 
         table = md._blockStates[0].renderable
-        assert isinstance(table, _MarkdownTableBlock)
+        assert isinstance(table, MarkdownTableBlock)
 
         header_before = table.content[0][0]
         first_row_before = table.content[1][0]

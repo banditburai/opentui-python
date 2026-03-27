@@ -7,14 +7,18 @@ from typing import TYPE_CHECKING, Any
 
 from .. import layout as yoga_layout
 from .. import structs as s
+from ..events import KeyEvent, MouseEvent, PasteEvent
 from . import _renderable_base
+
+if TYPE_CHECKING:
+    from ..renderer.buffer import Buffer
 from ._renderable_base import (
     BaseRenderable,
     LayoutRect,
+    _get_configure_node_fast,
     _Prop,
     _PropBinding,
     _RenderableBehaviorMixin,
-    _get_configure_node_fast,
 )
 from ._renderable_constants import (
     _COLUMN,
@@ -29,11 +33,6 @@ from ._renderable_constants import (
 )
 
 is_renderable = _renderable_base.is_renderable
-
-
-if TYPE_CHECKING:
-    from ..events import KeyEvent, MouseEvent, PasteEvent
-    from ..renderer import Buffer
 
 
 def _clamp_opacity(v: float) -> float:
@@ -525,7 +524,7 @@ class VRenderable(Renderable):
     def __init__(
         self,
         *,
-        render_fn: Callable[[Buffer, float, "VRenderable"], None] | None = None,
+        render_fn: Callable[[Buffer, float, VRenderable], None] | None = None,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)

@@ -1,7 +1,5 @@
 """Private runtime state for the signals subsystem."""
 
-from __future__ import annotations
-
 import contextvars
 from collections.abc import Callable
 from operator import attrgetter
@@ -82,5 +80,6 @@ class Batch:
             from .signals import _flush_batch
 
             _flush_batch()
+
 
 __all__ = ["Batch", "_SignalState", "_runtime", "_signal_state", "_tracking_context"]

@@ -38,6 +38,9 @@ def _detect_links(
             if prev_group == "markup.link.label":
                 ranges.append({"start": prev_start, "end": prev_end, "url": url})
                 break
+            # Skip metadata captures (conceal, nospell) interleaved with link highlights
+            if prev_group in ("conceal", "nospell"):
+                continue
             if not prev_group.startswith("markup.link"):
                 break
 
@@ -143,10 +146,7 @@ class TreeSitterClient:
         content: str,
         filetype: str,
     ) -> asyncio.Future:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
+        loop = asyncio.get_running_loop()
         future = loop.create_future()
         future.set_result({"highlights": []})
         return future
@@ -178,10 +178,7 @@ class MockTreeSitterClient(TreeSitterClient):
         self._mock_result = result
 
     def start_highlight_once(self, content: str, filetype: str) -> asyncio.Future:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
+        loop = asyncio.get_running_loop()
         future = loop.create_future()
         entry = {"future": future, "content": content, "filetype": filetype}
         self._highlight_futures.append(entry)
@@ -282,6 +279,7 @@ def tree_sitter_to_text_chunks(
                 )
                 merged_fg = default_style.fg if default_style else None
                 merged_bg = default_style.bg if default_style else None
+                merged_attrs = 0
                 for grp in groups:
                     sty = syntax_style.get_style(grp)
                     if sty:
@@ -289,6 +287,14 @@ def tree_sitter_to_text_chunks(
                             merged_fg = sty.fg
                         if sty.bg is not None:
                             merged_bg = sty.bg
+                        if sty.bold:
+                            merged_attrs |= s.TEXT_ATTRIBUTE_BOLD
+                        if sty.italic:
+                            merged_attrs |= s.TEXT_ATTRIBUTE_ITALIC
+                        if sty.underline:
+                            merged_attrs |= s.TEXT_ATTRIBUTE_UNDERLINE
+                        if sty.dim:
+                            merged_attrs |= s.TEXT_ATTRIBUTE_DIM
 
                 conceal_text = None
                 if conceal_enabled:
@@ -319,6 +325,7 @@ def tree_sitter_to_text_chunks(
                             text=segment_text,
                             fg=merged_fg,
                             bg=merged_bg,
+                            attributes=merged_attrs,
                         )
                     )
             else:

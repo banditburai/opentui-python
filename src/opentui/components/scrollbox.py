@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from ..renderer.buffer import Buffer
 from ._scrollbox_state import (
+    LinearScrollAccel,
+    MacOSScrollAccel,
     apply_scroll_axis,
     apply_sticky_start,
     handle_mouse_scroll,
@@ -20,10 +23,6 @@ from ._scrollbox_state import (
 )
 from .base import BaseRenderable
 from .box import Box, _normalize_box_child
-from ._scrollbox_state import LinearScrollAccel, MacOSScrollAccel
-
-if TYPE_CHECKING:
-    from ..renderer import Buffer
 
 # Lazy-cached import of For (avoids circular import at module level)
 _For_cls: type | None = None

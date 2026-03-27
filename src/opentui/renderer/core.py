@@ -31,7 +31,6 @@ from ._debug import (
     debug_dump_tree,
     invalidate_layout_hook_cache,
 )
-from ._mouse_selection import apply_selection_overlay
 from ._eventing import (
     add_post_process_fn,
     cancel_animation_frame,
@@ -45,6 +44,7 @@ from ._eventing import (
     set_frame_callback,
 )
 from ._frame_pipeline import compute_layout, prepare_buffer, run_frame_callbacks
+from ._mouse_selection import apply_selection_overlay
 from ._native_render import _NativeRenderMixin
 from ._session import (
     bind_event_loop,
@@ -85,7 +85,9 @@ def _resolve_terminal_size(config: Any) -> tuple[int, int]:
     return config.width, config.height
 
 
-class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixin, MouseHandlingMixin):
+class CliRenderer(
+    _NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixin, MouseHandlingMixin
+):
     """CLI renderer - wraps the native OpenTUI renderer using nanobind."""
 
     def __init__(self, ptr: Any, config: CliRendererConfig, native: Any):
@@ -258,8 +260,9 @@ class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixi
         if stale:
             import sys as _sys
 
-            for gid in stale:
-                _sys.stdout.buffer.write(_clear_kitty_graphics(gid))
+            # Batch all clear escapes into a single write + flush to
+            # reduce syscall overhead when multiple images are stale.
+            _sys.stdout.buffer.write(b"".join(_clear_kitty_graphics(gid) for gid in stale))
             _sys.stdout.buffer.flush()
         self._prev_frame_graphics = self._frame_graphics
         self._frame_graphics = set()
@@ -376,12 +379,16 @@ class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixi
             )
 
     def _run_frame_callbacks(
-        self, delta_time: float, timings: FrameTimingBuckets,
+        self,
+        delta_time: float,
+        timings: FrameTimingBuckets,
     ) -> bool:
         return run_frame_callbacks(self, delta_time, timings)
 
     def _compute_layout(
-        self, delta_time: float, timings: FrameTimingBuckets,
+        self,
+        delta_time: float,
+        timings: FrameTimingBuckets,
     ) -> tuple[bool, bool, list[LayoutRepaintFact] | None]:
         return compute_layout(self, delta_time, timings)
 
@@ -449,7 +456,9 @@ class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixi
         return True
 
     def _flush_native_output(
-        self, hover_recheck_needed: bool, timings: FrameTimingBuckets,
+        self,
+        hover_recheck_needed: bool,
+        timings: FrameTimingBuckets,
     ) -> None:
         """Native render, graphics cleanup, cursor, and hover recheck."""
         force = self._force_next_render
@@ -495,7 +504,8 @@ class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixi
                 return
 
             needs_layout, layout_failed, layout_repaint_facts = self._compute_layout(
-                delta_time, timings,
+                delta_time,
+                timings,
             )
 
             (
@@ -507,9 +517,14 @@ class CliRenderer(_NativeRenderMixin, _LifecycleMixin, _CursorMixin, _ConfigMixi
             ) = self._prepare_buffer(needs_layout, layout_failed, layout_repaint_facts, timings)
 
             self._render_tree_to_buffer(
-                buffer, reused_current_buffer,
-                repainted_dirty_common_tree, repainted_layout_common_tree,
-                layout_common_plan, layout_failed, delta_time, timings,
+                buffer,
+                reused_current_buffer,
+                repainted_dirty_common_tree,
+                repainted_layout_common_tree,
+                layout_common_plan,
+                layout_failed,
+                delta_time,
+                timings,
             )
 
             if not self._run_post_render_phase(buffer, timings):

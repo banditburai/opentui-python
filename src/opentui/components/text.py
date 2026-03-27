@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yoga
 
@@ -12,6 +12,7 @@ from .._signal_types import Signal, _ComputedSignal
 from ..editor.text_buffer_native import NativeTextBuffer
 from ..editor.text_view_native import NativeTextBufferView
 from ..enums import RenderStrategy
+from ..renderer.buffer import Buffer
 from ..signals import is_reactive
 from ..structs import SELECTION_BG
 from ..structs import display_width as _display_width
@@ -39,12 +40,9 @@ def _truncate_with_ellipsis(text: str, max_width: int) -> str:
 _MEASURE_UNDEFINED = yoga.MeasureMode.Undefined
 _MEASURE_AT_MOST = yoga.MeasureMode.AtMost
 
-if TYPE_CHECKING:
-    from ..renderer import Buffer
-
 
 class Text(Renderable):
-    """Text component - displays styled text.
+    """Styled inline text with optional reactivity, modifiers, and selection.
 
     Usage:
         text = Text("Hello, World!")
@@ -271,7 +269,7 @@ class Text(Renderable):
 
         lines = tuple(wrap_text(self._content, available_width, self._wrap_mode))
         selection = None
-        if has_selection:
+        if has_selection and self._selection_start is not None and self._selection_end is not None:
             start_pos = max(0, self._selection_start)
             end_pos = min(len(self._content), self._selection_end)
             before_width, _ = measure_text(self._content[:start_pos], 0, "none")
@@ -466,11 +464,7 @@ class Text(Renderable):
 
 
 class TextModifier(Renderable):
-    """Base class for text modifiers (Bold, Italic, etc.).
-
-    Text modifiers apply styling to their child content.
-    They can be nested within Text components.
-    """
+    """Applies inline styling (bold, italic, etc.) to child content."""
 
     __slots__ = (
         "_bold",

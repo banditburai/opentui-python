@@ -8,8 +8,6 @@ In **test mode** the caller supplies mock stdin/stdout objects so that no
 real terminal is required.
 """
 
-from __future__ import annotations
-
 import asyncio
 import re
 from typing import Any, Protocol, runtime_checkable
@@ -201,7 +199,9 @@ class TerminalPalette:
             self._remove_stdin_listener(on_data)
 
     async def _query_palette(
-        self, indices: list[int], timeout_ms: float = 1200,
+        self,
+        indices: list[int],
+        timeout_ms: float = 1200,
     ) -> dict[int, str | None]:
         """Query indexed colours via OSC 4."""
         return await self._query_colors(indices, _OSC4_RE, "\x1b]4;{i};?\x07", timeout_ms)
@@ -209,7 +209,10 @@ class TerminalPalette:
     async def _query_special_colors(self, timeout_ms: float = 1200) -> dict[int, str | None]:
         """Query special colours via OSC 10-19."""
         return await self._query_colors(
-            [10, 11, 12, 13, 14, 15, 16, 17, 19], _OSC_SPECIAL_RE, "\x1b]{i};?\x07", timeout_ms,
+            [10, 11, 12, 13, 14, 15, 16, 17, 19],
+            _OSC_SPECIAL_RE,
+            "\x1b]{i};?\x07",
+            timeout_ms,
         )
 
     async def detect(

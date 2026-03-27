@@ -1,10 +1,8 @@
-from __future__ import annotations
-
 from collections import deque
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import Any
 
 from .. import structs as s
-from ..structs import MUTED_GRAY
 from ..events import KeyEvent
 from ..input.keymapping import (
     DEFAULT_KEY_ALIASES,
@@ -16,12 +14,9 @@ from ..input.keymapping import (
     merge_key_aliases,
     merge_key_bindings,
 )
+from ..renderer.buffer import Buffer
+from ..structs import MUTED_GRAY
 from .base import Renderable, _parse_color_static, _Prop
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from ..renderer import Buffer
 
 # Defaults match TextareaRenderable but override Enter → submit.
 _DEFAULT_INPUT_BINDINGS: list[KeyBinding] = [

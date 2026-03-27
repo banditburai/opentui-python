@@ -69,11 +69,21 @@ class DecodedImage:
     source: ImageSource | None = None
 
 
+# ITU-R BT.601 luminance coefficients
+LUMINANCE_R, LUMINANCE_G, LUMINANCE_B = 0.299, 0.587, 0.114
+
+
+def luminance_u8(r: int, g: int, b: int) -> int:
+    """Compute 8-bit grayscale luminance from RGB using BT.601."""
+    return int(LUMINANCE_R * r + LUMINANCE_G * g + LUMINANCE_B * b)
+
+
 __all__ = [
     "DecodedImage",
     "ImageFit",
     "ImageProtocol",
     "ImageSource",
+    "luminance_u8",
     "resize_rgba_nearest",
 ]
 

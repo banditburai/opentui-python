@@ -1,15 +1,14 @@
 """FrameBuffer component for offscreen rendering."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
+import logging
+from typing import Any
 
 from ..enums import RenderStrategy
 from ..ffi import get_native, is_native_available
+from ..renderer.buffer import Buffer
 from .base import Renderable
 
-if TYPE_CHECKING:
-    from ..renderer import Buffer
+_log = logging.getLogger(__name__)
 
 
 class FrameBuffer(Renderable):
@@ -24,19 +23,19 @@ class FrameBuffer(Renderable):
         fb.add(Text("Hello from offscreen!"))
     """
 
-    def __init__(self, *, internal_buffer: Any = None, **kwargs: Any):
+    def __init__(self, *, internal_buffer: Buffer | None = None, **kwargs: Any):
         super().__init__(**kwargs)
-        self._internal_buffer = internal_buffer
+        self._internal_buffer: Buffer | None = internal_buffer
         self._owned_internal_buffer_ptr: Any = None
         self._owned_internal_buffer_size: tuple[int, int] | None = None
         self._layer_dirty: bool = True
 
     @property
-    def internal_buffer(self) -> Any:
+    def internal_buffer(self) -> Buffer | None:
         return self._internal_buffer
 
     @internal_buffer.setter
-    def internal_buffer(self, value: Any) -> None:
+    def internal_buffer(self, value: Buffer | None) -> None:
         self._release_owned_internal_buffer()
         self._internal_buffer = value
         self._layer_dirty = True
@@ -63,7 +62,7 @@ class FrameBuffer(Renderable):
 
         if rerender_subtree:
             if target is not buffer:
-                target.clear(0.0)
+                target.clear()
                 target.push_offset(-self._x, -self._y)
             try:
                 for child in self._children:
@@ -104,19 +103,19 @@ class FrameBuffer(Renderable):
         if self._owned_internal_buffer_ptr is None:
             native = get_native()
             ptr = native.buffer.create_optimized_buffer(width, height, True, 0, f"fb-{self.id}")
-            from ..renderer import Buffer as RenderBuffer
-
             self._owned_internal_buffer_ptr = ptr
-            self._internal_buffer = RenderBuffer(ptr, native.buffer, native.graphics)
+            self._internal_buffer = Buffer(ptr, native.buffer, native.graphics)
             self._owned_internal_buffer_size = (width, height)
             self._layer_dirty = True
             return self._internal_buffer
 
         if self._owned_internal_buffer_size != (width, height):
+            assert self._internal_buffer is not None
             self._internal_buffer.resize(width, height)
             self._owned_internal_buffer_size = (width, height)
             self._layer_dirty = True
 
+        assert self._internal_buffer is not None
         return self._internal_buffer
 
     def _release_owned_internal_buffer(self) -> None:
@@ -128,7 +127,7 @@ class FrameBuffer(Renderable):
             native = get_native()
             native.buffer.destroy_optimized_buffer(self._owned_internal_buffer_ptr)
         except Exception:
-            pass
+            _log.debug("failed to destroy owned internal buffer", exc_info=True)
         finally:
             self._owned_internal_buffer_ptr = None
             self._owned_internal_buffer_size = None
@@ -155,7 +154,7 @@ class FrameBuffer(Renderable):
                 if text:
                     buffer.draw_text(text, self._x, self._y + row_idx)
         except Exception:
-            pass
+            _log.debug("framebuffer composite fallback failed", exc_info=True)
 
 
 __all__ = ["FrameBuffer"]

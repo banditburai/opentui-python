@@ -1,7 +1,5 @@
 """Mixin that adds mouse dispatch, hit testing, hover, and selection to CliRenderer."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -38,6 +36,38 @@ _MOUSE_HANDLER_MAP = {
 
 class MouseHandlingMixin:
     """Mixin providing mouse dispatch, hit testing, hover, and selection."""
+
+    # Keyboard-tracked modifier state — many terminals don't report modifier
+    # bits in SGR mouse events, so we maintain our own from key press/release.
+    #
+    # NOTE: Terminals intercept shift+click for their own text selection and
+    # completely consume the click (it never reaches the app).  We support
+    # both shift+click AND alt/option+click for extending selections:
+    # - shift+click: works only if the terminal passes it through (rare)
+    # - alt/option+click: works universally (terminals don't intercept it)
+    _kb_modifier_state: dict[str, bool]
+
+    def _init_kb_modifier_state(self) -> None:
+        self._kb_modifier_state = {"shift": False, "ctrl": False, "alt": False}
+
+    _SHIFT_KEYS = frozenset({"leftshift", "rightshift", "shift"})
+    _CTRL_KEYS = frozenset({"leftcontrol", "rightcontrol", "ctrl", "control"})
+    _ALT_KEYS = frozenset({"leftalt", "rightalt", "alt", "option"})
+
+    def _on_key_modifier_track(self, event) -> None:
+        """Update tracked modifier state from keyboard events."""
+        is_release = getattr(event, "event_type", None) == "release"
+        key = getattr(event, "key", "")
+        if key in self._SHIFT_KEYS:
+            self._kb_modifier_state["shift"] = not is_release
+        elif key in self._CTRL_KEYS:
+            self._kb_modifier_state["ctrl"] = not is_release
+        elif key in self._ALT_KEYS:
+            self._kb_modifier_state["alt"] = not is_release
+        else:
+            self._kb_modifier_state["shift"] = getattr(event, "shift", False)
+            self._kb_modifier_state["ctrl"] = getattr(event, "ctrl", False)
+            self._kb_modifier_state["alt"] = getattr(event, "alt", False)
 
     # -- Tree queries ----------------------------------------------------------
 
@@ -124,6 +154,18 @@ class MouseHandlingMixin:
         self._latest_pointer["x"] = event.x
         self._latest_pointer["y"] = event.y
         self._has_pointer = True
+
+        # Merge keyboard-tracked modifier state into mouse events — many
+        # terminals don't set modifier bits in SGR mouse encoding.
+        kb_mods = getattr(self, "_kb_modifier_state", None)
+        if kb_mods is not None:
+            if not getattr(event, "shift", False) and kb_mods["shift"]:
+                event.shift = True
+            if not getattr(event, "ctrl", False) and kb_mods["ctrl"]:
+                event.ctrl = True
+            if not getattr(event, "alt", False) and kb_mods["alt"]:
+                event.alt = True
+
         self._last_pointer_modifiers = {
             "shift": getattr(event, "shift", False),
             "alt": getattr(event, "alt", False),
@@ -160,7 +202,8 @@ class MouseHandlingMixin:
         button = getattr(event, "button", 0)
 
         # Selection-related branches (start, drag-update, up-finish, ctrl-extend).
-        if self._handle_selection_mouse(event, hit_renderable, is_ctrl, button):
+        sel_handled = self._handle_selection_mouse(event, hit_renderable, is_ctrl, button)
+        if sel_handled:
             return
 
         # Captured element routing (drag/move forwarding, up release).

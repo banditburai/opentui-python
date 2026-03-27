@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .text_buffer_native import NativeSyntaxStyle
 from ..structs import RGBA, ColorInput, parse_color
+from .text_buffer_native import NativeSyntaxStyle
 
 ATTR_NONE = 0
 ATTR_BOLD = 1 << 0  # 1
@@ -78,8 +78,9 @@ def convert_theme_to_styles(
     flat: dict[str, StyleDefinition] = {}
     for entry in theme:
         if isinstance(entry, dict):
-            scope = entry.get("scope", [])
-            style_data = entry.get("style", {})
+            d: dict[str, Any] = entry
+            scope = d.get("scope", [])
+            style_data: dict[str, Any] = d.get("style", {})
             fg = parse_color(style_data["foreground"]) if style_data.get("foreground") else None
             bg = parse_color(style_data["background"]) if style_data.get("background") else None
             sd = StyleDefinition(
@@ -115,10 +116,6 @@ class SyntaxStyle:
         self._style_defs: dict[str, StyleDefinition] = {}
         self._merged_cache: dict[str, MergedStyle] = {}
 
-    # ------------------------------------------------------------------
-    # Factory classmethods
-    # ------------------------------------------------------------------
-
     @classmethod
     def create(cls) -> SyntaxStyle:
         return cls()
@@ -128,13 +125,14 @@ class SyntaxStyle:
         inst = cls()
         for name, sdef in styles.items():
             if isinstance(sdef, dict):
+                sd: dict[str, Any] = sdef
                 resolved = StyleDefinition(
-                    fg=sdef.get("fg"),
-                    bg=sdef.get("bg"),
-                    bold=sdef.get("bold", False),
-                    italic=sdef.get("italic", False),
-                    underline=sdef.get("underline", False),
-                    dim=sdef.get("dim", False),
+                    fg=sd.get("fg"),
+                    bg=sd.get("bg"),
+                    bold=sd.get("bold", False),
+                    italic=sd.get("italic", False),
+                    underline=sd.get("underline", False),
+                    dim=sd.get("dim", False),
                 )
             else:
                 resolved = sdef
@@ -149,17 +147,9 @@ class SyntaxStyle:
             inst.register_style(name, sdef)
         return inst
 
-    # ------------------------------------------------------------------
-    # Guard
-    # ------------------------------------------------------------------
-
     def _guard(self) -> None:
         if self._destroyed:
             raise RuntimeError("NativeSyntaxStyle is destroyed")
-
-    # ------------------------------------------------------------------
-    # Core API
-    # ------------------------------------------------------------------
 
     def register_style(self, name: str, style: StyleDefinition) -> int:
         self._guard()
@@ -242,10 +232,6 @@ class SyntaxStyle:
         self._merged_cache[cache_key] = result
         return result
 
-    # ------------------------------------------------------------------
-    # Accessors
-    # ------------------------------------------------------------------
-
     @property
     def ptr(self) -> Any:
         self._guard()
@@ -273,10 +259,6 @@ class SyntaxStyle:
     def get_registered_names(self) -> list[str]:
         self._guard()
         return list(self._style_defs.keys())
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     def destroy(self) -> None:
         if self._destroyed:

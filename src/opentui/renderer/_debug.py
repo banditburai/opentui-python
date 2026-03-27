@@ -1,7 +1,5 @@
 """Debug/diagnostic helpers and layout cache invalidation for the renderer."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

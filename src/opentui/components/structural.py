@@ -7,25 +7,23 @@ module organisation but are re-exported from ``control_flow`` for
 backward compatibility.
 """
 
-from __future__ import annotations
-
+import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .. import layout as yoga_layout
 from .._signal_types import Signal
+from ..renderer.buffer import Buffer
 from .base import BaseRenderable, Renderable
 
-if TYPE_CHECKING:
-    from ..renderer import Buffer
+_log = logging.getLogger(__name__)
 
 
 def _subtree_contains_portal(node: BaseRenderable) -> bool:
-    """Check if a node's subtree contains a Portal.
+    """Only detects Portals present at construction time.
 
-    Only detects Portals present at construction time. Portals added
-    dynamically (e.g. inside @component children that build lazily)
-    are not caught by this check.
+    Portals added dynamically (e.g. inside @component children that
+    build lazily) are not caught by this check.
     """
     if isinstance(node, Portal):
         return True
@@ -91,7 +89,7 @@ class Portal(Renderable):
     def __init__(
         self,
         *children: BaseRenderable,
-        mount: BaseRenderable | Callable[[], BaseRenderable] | None = None,
+        mount: BaseRenderable | Callable[[], BaseRenderable | None] | None = None,
         ref: Callable[[BaseRenderable], None] | None = None,
         **kwargs,
     ):
@@ -275,7 +273,7 @@ class ErrorBoundary(Renderable):
             for c in normalize_render_result(self._fallback_fn(error, self._reset)):
                 self.add(c)
         except Exception:
-            pass  # Keep boundary alive but empty if fallback itself crashes
+            _log.debug("ErrorBoundary fallback render crashed", exc_info=True)
         self.mark_dirty()
 
     def _reset(self) -> None:

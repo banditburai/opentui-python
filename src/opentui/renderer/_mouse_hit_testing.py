@@ -1,7 +1,5 @@
 """Mouse hit-testing, hover, and tree-dispatch helpers."""
 
-from __future__ import annotations
-
 import contextlib
 from typing import Any
 
@@ -109,9 +107,7 @@ def find_deepest_hit(
         if not (rx <= x < rx + rw and ry <= y < ry + rh):
             return None
 
-    child_sx, child_sy = accumulate_scroll_offsets(
-        renderable, scroll_adjust_x, scroll_adjust_y
-    )
+    child_sx, child_sy = accumulate_scroll_offsets(renderable, scroll_adjust_x, scroll_adjust_y)
 
     try:
         children = list(renderable.get_children())

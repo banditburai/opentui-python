@@ -99,6 +99,10 @@ class Buffer:
         if self._offset_stack:
             self._offset_stack.pop()
 
+    def get_offset(self) -> tuple[int, int]:
+        """Return the current cumulative drawing offset (dx, dy)."""
+        return self._offset_stack[-1] if self._offset_stack else (0, 0)
+
     def draw_text(
         self,
         text: str,

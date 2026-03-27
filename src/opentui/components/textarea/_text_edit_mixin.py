@@ -1,12 +1,9 @@
 """Shared text-editing logic for Input and Textarea."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
-if TYPE_CHECKING:
-    from ...events import KeyEvent
+from ...events import KeyEvent
 
 
 class _TextEditHost(Protocol):
@@ -36,6 +33,7 @@ class _TextEditMixin:
     if TYPE_CHECKING:
         # These come from Renderable — declared here for type-checker only
         value: str
+
         def emit(self, event: str, *args: Any) -> None: ...
         def mark_paint_dirty(self) -> None: ...
 
@@ -43,7 +41,9 @@ class _TextEditMixin:
         max_len = getattr(self, "_max_length", None)
         if max_len is not None and max_len > 0 and len(self._value) + len(text) > max_len:
             text = text[: max_len - len(self._value)]
-        new_value = self._value[: self._cursor_position] + text + self._value[self._cursor_position :]
+        new_value = (
+            self._value[: self._cursor_position] + text + self._value[self._cursor_position :]
+        )
         self._cursor_position += len(text)
         self.value = new_value
         self.emit("input", new_value)

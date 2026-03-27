@@ -1,12 +1,10 @@
 """Testing utilities — SGR mouse escape-sequence generation and parsing."""
 
-from __future__ import annotations
-
 import re as _re
 from typing import Any
 
 
-class _SGRMouseButtons:
+class SGRMouseButtons:
     LEFT = 0
     MIDDLE = 1
     RIGHT = 2
@@ -14,10 +12,6 @@ class _SGRMouseButtons:
     WHEEL_DOWN = 65
     WHEEL_LEFT = 66
     WHEEL_RIGHT = 67
-
-
-SGRMouseButtons = _SGRMouseButtons()
-
 
 
 class SGRMockRenderer:
@@ -34,7 +28,6 @@ class SGRMockRenderer:
 
     def get_last_emitted_data(self) -> str:
         return self.emitted_data[-1] if self.emitted_data else ""
-
 
 
 class SGRMockMouse:
@@ -228,7 +221,6 @@ def create_mock_mouse(
     return SGRMockMouse(renderer), renderer
 
 
-
 _SGR_SEQ_RE = _re.compile(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
 # X10/normal mouse: ESC [ M <cb> <cx> <cy> — three raw bytes after "M"
 _X10_SEQ_RE = _re.compile(r"\x1b\[M(.)(.)(.)", _re.DOTALL)
@@ -390,7 +382,6 @@ class SGRMouseParser:
                         "scroll": None,
                     }
                 )
-
 
 
 class _TestStdinBridge:
