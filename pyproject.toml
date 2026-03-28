@@ -26,7 +26,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "yoga-python>=0.1.2",
+    "yoga-python>=0.1.4",
 ]
 
 [project.optional-dependencies]

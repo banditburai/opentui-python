@@ -824,6 +824,85 @@ class TestRenderableNestedChildrenLayout:
 class TestRenderableComplexLayoutUpdateScenarios:
     """Maps to describe('Renderable - Complex Layout Update Scenarios')."""
 
+    def test_yoga_direct_api_column_layout(self):
+        """Verify yoga API directly — no C++ configurator involvement."""
+        root_node = yoga.Node()
+        root_node.flex_direction = yoga.FlexDirection.Column
+        root_node.width = 80
+        root_node.height = 60
+
+        child_nodes = []
+        for i in range(5):
+            cn = yoga.Node()
+            cn.width = 80
+            cn.height = 10
+            root_node.insert_child(cn, i)
+            child_nodes.append(cn)
+
+        yoga_layout.compute_layout(root_node, 80, 60)
+
+        for i, cn in enumerate(child_nodes):
+            assert cn.layout_height == 10, f"child {i}: layout_height={cn.layout_height}"
+            assert cn.layout_top == i * 10, f"child {i}: layout_top={cn.layout_top}"
+
+    def test_configure_node_via_python_path_sets_height(self):
+        """Verify yoga_layout.configure_node (pure Python setters) works reliably."""
+        root_node = yoga.Node()
+        yoga_layout.configure_node(root_node, width=80, height=60, flex_direction="column")
+
+        child_nodes = []
+        for i in range(5):
+            cn = yoga.Node()
+            yoga_layout.configure_node(cn, width=80, height=10)
+            root_node.insert_child(cn, i)
+            child_nodes.append(cn)
+
+        yoga_layout.compute_layout(root_node, 80, 60)
+
+        for i, cn in enumerate(child_nodes):
+            assert cn.layout_height == 10, f"child {i}: layout_height={cn.layout_height}"
+            assert cn.layout_top == i * 10, f"child {i}: layout_top={cn.layout_top}"
+
+    def test_configure_node_fast_survives_address_reuse(self):
+        """configure_node_fast must not skip properties on nodes at reused addresses.
+
+        Regression test: yoga's per-node field cache keyed by Node* would retain
+        stale entries after GC, causing CACHE_CHECK to skip setting height on new
+        nodes allocated at the same address (especially common on Linux).
+        """
+        configure_node_fast = getattr(yoga, "configure_node_fast", None)
+        if configure_node_fast is None:
+            pytest.skip("yoga.configure_node_fast not available")
+
+        # Create nodes, configure them, then let them be GC'd to populate cache
+        for _ in range(10):
+            n = yoga.Node()
+            configure_node_fast(n, height=10, width=80)
+            del n
+
+        # Force GC to free the old nodes (addresses become available for reuse)
+        import gc
+
+        gc.collect()
+
+        # Now create new nodes — they may reuse addresses from the freed ones
+        root = yoga.Node()
+        configure_node_fast(root, width=80, height=60, flex_direction="column")
+
+        children = []
+        for i in range(5):
+            cn = yoga.Node()
+            configure_node_fast(cn, width=80, height=10)
+            root.insert_child(cn, i)
+            children.append(cn)
+
+        yoga_layout.compute_layout(root, 80, 60)
+
+        for i, cn in enumerate(children):
+            assert cn.layout_height == 10, (
+                f"child {i}: layout_height={cn.layout_height}, yoga height style={cn.height}"
+            )
+
     def test_multiple_rapid_add_operations_before_render_complete_correctly(self):
         """Several add() calls before a single layout pass all resolve correctly."""
         root = Renderable(width=80, height=60, flex_direction="column")
@@ -838,7 +917,10 @@ class TestRenderableComplexLayoutUpdateScenarios:
 
         for i, c in enumerate(children):
             assert c._layout_width == 80
-            assert c._layout_height == 10
+            assert c._layout_height == 10, (
+                f"child {i} ({c.id}): _layout_height={c._layout_height}, "
+                f"yoga height style={c._yoga_node.height}"
+            )
             assert c._y == i * 10
 
     def test_insert_before_at_different_positions_updates_subsequent_children_correctly(self):
@@ -868,7 +950,10 @@ class TestRenderableComplexLayoutUpdateScenarios:
 
         for i, c in enumerate(children):
             assert c._y == i * 10
-            assert c._layout_height == 10
+            assert c._layout_height == 10, (
+                f"child {i} ({c.id}): _layout_height={c._layout_height}, "
+                f"yoga height style={c._yoga_node.height}"
+            )
 
     def test_add_and_insert_before_mixed_operations_maintain_layout_integrity(self):
         """A mix of add() and insertBefore() produces consistent layout."""

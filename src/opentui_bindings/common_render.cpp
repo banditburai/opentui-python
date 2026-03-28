@@ -1,5 +1,6 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/function.h>
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include "border_draw.h"

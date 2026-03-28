@@ -58,7 +58,7 @@ void editBufferInsertText(EditBuffer* buffer, const char* text, size_t len);
 // EditorView functions
 void* createEditorView(EditBuffer* buffer, uint32_t width, uint32_t height);
 void destroyEditorView(EditorView* view);
-void editorViewSetViewport(EditorView* view, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+void editorViewSetViewport(EditorView* view, uint32_t x, uint32_t y, uint32_t width, uint32_t height, bool moveCursor);
 
 // Capabilities
 void getTerminalCapabilities(CliRenderer* renderer, void* caps);

@@ -33,7 +33,7 @@ extern "C" {
     // Existing
     void* createEditorView(void* buffer, uint32_t width, uint32_t height);
     void destroyEditorView(void* view);
-    void editorViewSetViewport(void* view, int32_t x, int32_t y, uint32_t width, uint32_t height);
+    void editorViewSetViewport(void* view, int32_t x, int32_t y, uint32_t width, uint32_t height, bool moveCursor);
     void editorViewSetViewportSize(void* view, uint32_t width, uint32_t height);
     void editorViewGetViewport(void* view, void* xOut, void* yOut, void* widthOut, void* heightOut);
     void editorViewSetScrollMargin(void* view, float margin);
@@ -96,8 +96,9 @@ static nb::dict ev_line_info_to_dict(const EditorViewExternalLineInfo& info) {
 void bind_editor_view(nb::module_& m) {
     m.def("create_editor_view", &createEditorView, nb::arg("buffer"), nb::arg("width"), nb::arg("height"));
     m.def("destroy_editor_view", &destroyEditorView, nb::arg("view"));
-    m.def("editor_view_set_viewport", &editorViewSetViewport,
-          nb::arg("view"), nb::arg("x"), nb::arg("y"), nb::arg("width"), nb::arg("height"));
+    m.def("editor_view_set_viewport", [](void* view, int32_t x, int32_t y, uint32_t width, uint32_t height, bool moveCursor) {
+        editorViewSetViewport(view, x, y, width, height, moveCursor);
+    }, nb::arg("view"), nb::arg("x"), nb::arg("y"), nb::arg("width"), nb::arg("height"), nb::arg("move_cursor") = false);
     m.def("editor_view_set_viewport_size", &editorViewSetViewportSize,
           nb::arg("view"), nb::arg("width"), nb::arg("height"));
     m.def("editor_view_get_viewport", &editorViewGetViewport,

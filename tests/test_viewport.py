@@ -142,10 +142,7 @@ class TestGetObjectsInViewport:
 
     def test_z_index_sorting(self):
         """Results are sorted by z_index."""
-        objects = [
-            ViewportObject(0, i * 10, 50, 10, z_index=(5 - i) % 3)
-            for i in range(20)
-        ]
+        objects = [ViewportObject(0, i * 10, 50, 10, z_index=(5 - i) % 3) for i in range(20)]
         vp = ViewportBounds(0, 0, 100, 200)
         result = get_objects_in_viewport(vp, objects, padding=0)
         z_values = [obj.z_index for obj in result]
@@ -155,9 +152,7 @@ class TestGetObjectsInViewport:
 
     def test_column_cross_axis_filters_offscreen_x(self):
         """In column mode, objects with x far outside viewport are filtered."""
-        objects = [
-            ViewportObject(0, i * 10, 50, 10) for i in range(20)
-        ]
+        objects = [ViewportObject(0, i * 10, 50, 10) for i in range(20)]
         # Add one object that is within y range but far off to the right
         objects.append(ViewportObject(9999, 50, 50, 10))
         objects.sort(key=lambda o: o.y)

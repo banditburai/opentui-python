@@ -133,7 +133,7 @@ requires-dist = [
     { name = "tree-sitter-python", marker = "extra == 'highlighting'", specifier = ">=0.23.0" },
     { name = "tree-sitter-typescript", marker = "extra == 'highlighting'", specifier = ">=0.23.0" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.20" },
-    { name = "yoga-python", specifier = ">=0.1.2" },
+    { name = "yoga-python", specifier = ">=0.1.4" },
 ]
 provides-extras = ["dev", "images", "highlighting"]
 
@@ -445,14 +445,14 @@ wheels = [
 
 [[package]]
 name = "yoga-python"
-version = "0.1.3"
+version = "0.1.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ec/14/a3642270f780123673296177c0c213a94433ba0d148f9849fc7ef3659902/yoga_python-0.1.3.tar.gz", hash = "sha256:85e9c04b16bd4c950759d244a01a2db850f8f39e38c0eaf3476430d4e11dda0f", size = 105753, upload-time = "2026-03-21T17:33:25.091Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/b0/94e7183712275a813e77d68dd424b864f7fa94c5da936b0883fddc755af4/yoga_python-0.1.4.tar.gz", hash = "sha256:b8deaca4b2c3e9e1b2dc5ef64ad07898c0b45ae6cb5c6a9c9eff1cd558c97ba1", size = 105829, upload-time = "2026-03-28T20:55:11.457Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/7d/2500f6b3d89dd353e8c4ca5f0a389ef7663eab82a17fdad298745f249713/yoga_python-0.1.3-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:58faea564ba718b7b367365b21f265593459a9485381ae266ae5e5ef6c9c60bb", size = 143333, upload-time = "2026-03-21T17:33:16.003Z" },
-    { url = "https://files.pythonhosted.org/packages/87/54/e0ed6a06b0407a28c29b93c417a3fb3befbdb3d62e08961cd35ad6aa673c/yoga_python-0.1.3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:25d9e0bded701797182595ce646d943b9782d2603b3120ab3b92465289b425c2", size = 201416, upload-time = "2026-03-21T17:33:17.641Z" },
-    { url = "https://files.pythonhosted.org/packages/6f/db/7062b11612438b53fd02c85918d9c2f15050eb10e72df437af6c5236f198/yoga_python-0.1.3-cp312-cp312-win_amd64.whl", hash = "sha256:11dba2b3db23d9c079c774756b87202395220165129c7052572fcf427e5e1d30", size = 168719, upload-time = "2026-03-21T17:33:19.145Z" },
-    { url = "https://files.pythonhosted.org/packages/f7/6a/4457d66d97852929499998f90df9c2fd5e8e27df924dfd1104111e183519/yoga_python-0.1.3-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:e23143fa7676be935c2ad20a5df92b348af9e3c5ff3b9f940d715a6f86b03db7", size = 143253, upload-time = "2026-03-21T17:33:20.57Z" },
-    { url = "https://files.pythonhosted.org/packages/ec/a5/9fbd8e730099b955a5e81e6674a5eeb029d8040112cb8c478435848e2c1d/yoga_python-0.1.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:03e149de8242ca036f7f75ada0d7d61d247c543457d1a1e3af64427a1731c8b1", size = 201312, upload-time = "2026-03-21T17:33:21.91Z" },
-    { url = "https://files.pythonhosted.org/packages/5d/54/eeff23f734d5ac909758b8a6b6af0710d73d127857c69e5627a69ea88b4b/yoga_python-0.1.3-cp313-cp313-win_amd64.whl", hash = "sha256:548381b01ac8105b6b60cee89c2b40fd3ef34a5009f1997ab815f1bdeb35fff7", size = 168653, upload-time = "2026-03-21T17:33:23.472Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/5d/094514101e808f8ae64d8661befc131b5ace7108afaca7464bddc6d334c8/yoga_python-0.1.4-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:0de63ff4d9813fdf760f3f0a7ecca90d921ad7bbf6c39f181b9da2146d0ab086", size = 143423, upload-time = "2026-03-28T20:55:04.028Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/3a/65f8c4b4c23f5a86a7b74492ecc49185f43be7a205d3aa1b5700e95e0da0/yoga_python-0.1.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b77e094a44ddf503bfcf2fd2d0e55404594a72b30943efabbf4b3688430da99a", size = 201499, upload-time = "2026-03-28T20:55:05.547Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/27/7939ddaaf6b5069bc032aa56bf9b462671c32619d5afc3ac000f0a612721/yoga_python-0.1.4-cp312-cp312-win_amd64.whl", hash = "sha256:bcbe5ba98a158b04e10ee416f6efca62256fcdc5e47e6e17601a37e4676f8760", size = 168823, upload-time = "2026-03-28T20:55:06.678Z" },
+    { url = "https://files.pythonhosted.org/packages/40/a2/4902015c65eea81110603448ba610cb4c79bd6336f14eae2bcc9ecc7ff4a/yoga_python-0.1.4-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:b2f5afb094c268d83bcebfa71d8511dfd098c1a58cd9a832bfe236d88fabb3aa", size = 143352, upload-time = "2026-03-28T20:55:07.764Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/70/3e4a1d5d9a58b2296ed3f3ef63881a9d3b1a9e96c9a0fe0c9fe18c093adc/yoga_python-0.1.4-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:29c91b6445b0b267f44545c9e92656f52b6e383c08ddb1f9884dffed876f1fb2", size = 201491, upload-time = "2026-03-28T20:55:09.119Z" },
+    { url = "https://files.pythonhosted.org/packages/38/76/64d41676934d676bec2dd372964e2dd0d6552efa5cdb08b80acd0ea32978/yoga_python-0.1.4-cp313-cp313-win_amd64.whl", hash = "sha256:2caa1d39ef242d8ce5a4e9fefd86962cb6ffb0ee9bb2b18628bf0f7adfd9b3eb", size = 168717, upload-time = "2026-03-28T20:55:10.364Z" },
 ]

@@ -65,6 +65,27 @@ def _get_yoga_configurator() -> Any:
 
 
 @functools.cache
+def _get_configure_tree_fn() -> Callable | None:
+    """Return a callable that configures the yoga tree, or *None*.
+
+    HAS_YOGACORE builds: ``configure_tree(root)`` — 1 arg, direct yoga C API.
+    Non-HAS_YOGACORE builds: ``configure_tree(root, configure_node_fast)`` — 2 args,
+    delegates to ``yoga.configure_node_fast`` for each dirty node.
+    """
+    configurator = _get_yoga_configurator()
+    if configurator is None:
+        return None
+    if hasattr(configurator, "clear_cache"):
+        # HAS_YOGACORE build: configure_tree(node) — direct yoga C API
+        return configurator.configure_tree
+    # Non-HAS_YOGACORE: configure_tree(node, configure_node_fast_fn)
+    cnf = getattr(yoga, "configure_node_fast", None)
+    if cnf is None:
+        return None
+    return lambda root: configurator.configure_tree(root, cnf)
+
+
+@functools.cache
 def _get_create_prop_binding() -> Any:
     if not _HAS_NATIVE:
         return None
@@ -82,6 +103,11 @@ def _get_create_prop_binding() -> Any:
 @functools.cache
 def _get_configure_node_fast() -> Any:
     return getattr(yoga, "configure_node_fast", None)
+
+
+@functools.cache
+def _get_clear_node_cache() -> Any:
+    return getattr(yoga, "clear_node_cache", None)
 
 
 class _PropBinding(NamedTuple):
@@ -345,12 +371,9 @@ class BaseRenderable:
         self._yoga_node.display = yoga.Display.Flex if self._visible else yoga.Display.None_
 
     def _configure_yoga_properties(self) -> None:
-        configurator = _get_yoga_configurator()
-        if configurator is not None:
-            try:
-                configurator.configure_tree(self)
-            except TypeError:
-                configurator.configure_tree(self, yoga.configure_node_fast)
+        configure_tree = _get_configure_tree_fn()
+        if configure_tree is not None:
+            configure_tree(self)
             return
         if not self._subtree_dirty:
             return
@@ -445,6 +468,7 @@ class BaseRenderable:
         self._invalidate_renderer_structure_caches()
         child._adjust_renderer_layout_hook_cache(1)
         if include_in_yoga:
+            child._dirty = True
             self.mark_dirty()
         else:
             pre = type(child)._pre_configure_yoga
@@ -494,6 +518,9 @@ class BaseRenderable:
             if include_in_yoga and child._yoga_node.owner is self._yoga_node:
                 self._yoga_node.remove_child(child._yoga_node)
             child._parent = None
+            # Invalidate yoga config cache so re-add triggers reconfiguration.
+            if hasattr(child, "_yoga_config_cache"):
+                child._yoga_config_cache = None
             if include_in_yoga:
                 self._queue_structural_clear_rect(clear_rect)
                 self.mark_dirty()
@@ -527,6 +554,7 @@ class BaseRenderable:
             )
             self._yoga_node.insert_child(child._yoga_node, yoga_index)
         if include_in_yoga:
+            child._dirty = True
             self.mark_dirty()
         else:
             pre = type(child)._pre_configure_yoga
@@ -602,6 +630,12 @@ class BaseRenderable:
             if configurator is not None:
                 with contextlib.suppress(AttributeError):
                     configurator.clear_cache(self._yoga_node)
+            # Evict from yoga's configure_node_fast pointer-identity cache.
+            # Without this, a new node allocated at the same address would
+            # silently skip property updates (stale cache hit on PyObject*).
+            clear_cache = _get_clear_node_cache()
+            if clear_cache is not None:
+                clear_cache(self._yoga_node)
         self._yoga_node = None
         self._parent = None
 

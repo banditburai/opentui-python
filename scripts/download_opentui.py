@@ -14,7 +14,7 @@ import tarfile
 import urllib.request
 from pathlib import Path
 
-OPENTUI_VERSION = "0.1.86"
+OPENTUI_VERSION = "0.1.91"
 
 NPM_REGISTRY = "https://registry.npmjs.org"
 

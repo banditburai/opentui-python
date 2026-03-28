@@ -83,9 +83,11 @@ class NativeEditorView:
             _nb.editor_view.destroy_editor_view(self._ptr)
             self._ptr = None
 
-    def set_viewport(self, x: int, y: int, width: int, height: int) -> None:
+    def set_viewport(
+        self, x: int, y: int, width: int, height: int, *, move_cursor: bool = False
+    ) -> None:
         self._guard()
-        _nb.editor_view.editor_view_set_viewport(self._ptr, x, y, width, height)
+        _nb.editor_view.editor_view_set_viewport(self._ptr, x, y, width, height, move_cursor)
 
     def set_viewport_size(self, width: int, height: int) -> None:
         self._guard()

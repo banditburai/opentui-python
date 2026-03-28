@@ -15,6 +15,8 @@
 #include "slot_utils.h"
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
+#include <cstdlib>
+#include <cstring>
 
 namespace nb = nanobind;
 
@@ -606,8 +608,8 @@ void YogaConfigurator::configure_node(nb::object node, nb::object configure_node
     nb::object max_width = borrow_slot(raw, o.max_width);
     nb::object max_height = borrow_slot(raw, o.max_height);
 
-    double flex_grow_v = read_float_or_zero(raw, o.flex_grow);
-    double flex_shrink_v = read_float_or_zero(raw, o.flex_shrink);
+    nb::object flex_grow_v = borrow_slot(raw, o.flex_grow);
+    nb::object flex_shrink_v = borrow_slot(raw, o.flex_shrink);
     nb::object flex_basis = borrow_slot(raw, o.flex_basis);
     nb::object flex_direction = borrow_slot(raw, o.flex_direction);
     nb::object flex_wrap = borrow_slot(raw, o.flex_wrap);
@@ -615,7 +617,7 @@ void YogaConfigurator::configure_node(nb::object node, nb::object configure_node
     nb::object align_items = borrow_slot(raw, o.align_items);
     nb::object align_self = borrow_slot(raw, o.align_self);
 
-    long gap_v = read_long_or_zero(raw, o.gap);
+    nb::object gap_v = borrow_slot(raw, o.gap);
     nb::object overflow_v = borrow_slot(raw, o.overflow);
     nb::object position_v = borrow_slot(raw, o.position);
 
@@ -624,7 +626,7 @@ void YogaConfigurator::configure_node(nb::object node, nb::object configure_node
     long pb = read_long_or_zero(raw, o.padding_bottom);
     long pl = read_long_or_zero(raw, o.padding_left);
 
-    long margin_v = read_long_or_zero(raw, o.margin);
+    nb::object margin_v = borrow_slot(raw, o.margin);
     nb::object margin_top = borrow_slot(raw, o.margin_top);
     nb::object margin_right = borrow_slot(raw, o.margin_right);
     nb::object margin_bottom = borrow_slot(raw, o.margin_bottom);
@@ -635,15 +637,20 @@ void YogaConfigurator::configure_node(nb::object node, nb::object configure_node
     nb::object pos_bottom = borrow_slot(raw, o.pos_bottom);
     nb::object pos_left = borrow_slot(raw, o.pos_left);
 
+    double flex_grow_d = flex_grow_v.is_none() ? 0.0 : nb::cast<double>(flex_grow_v);
+    double flex_shrink_d = flex_shrink_v.is_none() ? 0.0 : nb::cast<double>(flex_shrink_v);
+    long gap_l = gap_v.is_none() ? 0L : nb::cast<long>(gap_v);
+    long margin_l = margin_v.is_none() ? 0L : nb::cast<long>(margin_v);
+
     nb::object config = nb::make_tuple(
         width, height,
         min_width, min_height, max_width, max_height,
-        flex_grow_v, flex_shrink_v, flex_basis,
+        flex_grow_d, flex_shrink_d, flex_basis,
         flex_direction, flex_wrap,
         justify_content, align_items, align_self,
-        gap_v, overflow_v, position_v,
+        gap_l, overflow_v, position_v,
         pt + bt, pr + br, pb + bb, pl + bl,
-        margin_v, margin_top, margin_right,
+        margin_l, margin_top, margin_right,
         margin_bottom, margin_left,
         pos_top, pos_right, pos_bottom, pos_left
     );
@@ -668,23 +675,14 @@ void YogaConfigurator::configure_node(nb::object node, nb::object configure_node
         nb::borrow(yoga_node_py),
         width, height,
         min_width, min_height, max_width, max_height,
-        nb::cast(flex_grow_v),
-        nb::cast(flex_shrink_v),
+        flex_grow_v, flex_shrink_v,
         flex_basis,
-        flex_direction,
-        flex_wrap,
-        justify_content,
-        align_items,
-        align_self,
-        nb::cast((double)gap_v),
-        overflow_v,
-        position_v,
+        flex_direction, flex_wrap,
+        justify_content, align_items, align_self,
+        gap_v, overflow_v, position_v,
         (float)(pt + bt), (float)(pr + br), (float)(pb + bb), (float)(pl + bl),
-        nb::cast((float)margin_v),
-        !margin_top.is_none() ? nb::cast(nb::cast<float>(margin_top)) : nb::none(),
-        !margin_right.is_none() ? nb::cast(nb::cast<float>(margin_right)) : nb::none(),
-        !margin_bottom.is_none() ? nb::cast(nb::cast<float>(margin_bottom)) : nb::none(),
-        !margin_left.is_none() ? nb::cast(nb::cast<float>(margin_left)) : nb::none(),
+        margin_v, margin_top, margin_right,
+        margin_bottom, margin_left,
         pos_top, pos_right, pos_bottom, pos_left
     );
 }
