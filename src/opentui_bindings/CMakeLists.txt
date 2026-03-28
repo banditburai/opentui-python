@@ -78,3 +78,8 @@ if(APPLE)
 endif()
 
 install(TARGETS opentui_bindings DESTINATION "opentui")
+
+# Bundle the native library so auditwheel/delocate can find and repair it.
+if(OPENTUI_LIB)
+    install(FILES ${OPENTUI_LIB} DESTINATION "opentui/opentui-libs")
+endif()

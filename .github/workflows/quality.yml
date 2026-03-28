@@ -62,7 +62,8 @@ jobs:
           CIBW_BUILD: "cp312-*"
           CIBW_SKIP: "*-win* *-macos* *-manylinux_i686 *-musllinux_*"
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
-          CIBW_BEFORE_ALL_LINUX: "dnf install -y git && python {project}/scripts/download_opentui.py"
+          CIBW_BEFORE_ALL_LINUX: "dnf install -y git && python {project}/scripts/download_opentui.py && cp {project}/src/opentui/opentui-libs/libopentui.so /usr/local/lib/ && ldconfig"
+          CIBW_ENVIRONMENT_LINUX: "LD_LIBRARY_PATH={project}/src/opentui/opentui-libs"
           CIBW_BUILD_FRONTEND: "build[uv]"
           CIBW_BUILD_VERBOSITY: "3"
           CIBW_ENVIRONMENT_PASS_LINUX: "GIT_TERMINAL_PROMPT"
