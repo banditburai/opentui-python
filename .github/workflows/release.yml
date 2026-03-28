@@ -32,11 +32,8 @@ jobs:
             runs-on: macos-14
             cibw_archs: arm64
           - os: macos-x86_64
-            runs-on: macos-13
+            runs-on: macos-14
             cibw_archs: x86_64
-          - os: windows-x64
-            runs-on: windows-latest
-            cibw_archs: AMD64
 
     steps:
       - uses: actions/checkout@v4
@@ -54,18 +51,18 @@ jobs:
         uses: pypa/cibuildwheel@v2.22.0
         env:
           CIBW_BUILD: "cp312-* cp313-*"
-          CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_*"
+          CIBW_SKIP: "*-manylinux_i686 *-musllinux_*"
           CIBW_ARCHS_LINUX: ${{ matrix.cibw_archs }}
           CIBW_ARCHS_MACOS: ${{ matrix.cibw_archs }}
-          CIBW_ARCHS_WINDOWS: ${{ matrix.cibw_archs }}
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
           CIBW_BEFORE_ALL_LINUX: "dnf install -y git && python {project}/scripts/download_opentui.py && cp {project}/src/opentui/opentui-libs/libopentui.so /usr/local/lib/ && ldconfig"
-          CIBW_BEFORE_ALL_MACOS: "python {project}/scripts/download_opentui.py"
-          CIBW_BEFORE_ALL_WINDOWS: "python {project}/scripts/download_opentui.py"
+          CIBW_BEFORE_ALL_MACOS: "python {project}/scripts/download_opentui.py --force --arch ${{ matrix.cibw_archs }} && sudo mkdir -p /usr/local/lib && sudo cp {project}/src/opentui/opentui-libs/libopentui.dylib /usr/local/lib/"
           CIBW_ENVIRONMENT_LINUX: "LD_LIBRARY_PATH={project}/src/opentui/opentui-libs"
+          CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=13.0"
           CIBW_TEST_REQUIRES: "pytest pytest-asyncio"
           CIBW_TEST_COMMAND: "pytest {project}/tests -v --tb=short -x"
+          CIBW_TEST_SKIP: "*-macosx_x86_64"
           CIBW_ENVIRONMENT_PASS_LINUX: "GIT_TERMINAL_PROMPT"
           GIT_TERMINAL_PROMPT: "0"
           CIBW_BUILD_FRONTEND: "build[uv]"

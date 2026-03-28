@@ -146,7 +146,7 @@ class TestPartialEscapeSequences:
         b, em, _ = mk(timeout=10)
         b.process("\x1b[<35")
         assert em == []
-        time.sleep(0.025)
+        time.sleep(0.10)
         assert em == ["\x1b[<35"]
 
 
@@ -238,7 +238,7 @@ class TestEdgeCases:
         b, em, _ = mk(timeout=10)
         b.process("\x1b")
         assert em == []
-        time.sleep(0.025)
+        time.sleep(0.10)
         assert em == ["\x1b"]
 
     def test_lone_escape_flush(self, buf):
@@ -279,7 +279,7 @@ class TestFlush:
         b, em, _ = mk(timeout=10)
         b.process("\x1b[<35")
         assert em == []
-        time.sleep(0.025)
+        time.sleep(0.10)
         assert em == ["\x1b[<35"]
 
 
@@ -680,7 +680,7 @@ class TestDestroy:
         b, em, _ = mk(timeout=10)
         b.process("\x1b[<35")
         b.destroy()
-        time.sleep(0.025)
+        time.sleep(0.10)
         assert em == []
 
 

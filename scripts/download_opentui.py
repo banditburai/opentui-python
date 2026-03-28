@@ -36,10 +36,21 @@ LIB_NAMES = {
 DEFAULT_DEST = Path(__file__).resolve().parent.parent / "src" / "opentui" / "opentui-libs"
 
 
-def get_platform_id() -> str:
-    """Map current OS/arch to npm platform package suffix."""
+ARCH_ALIASES = {"amd64": "x86_64", "x64": "x86_64"}
+
+
+def get_platform_id(arch_override: str | None = None) -> str:
+    """Map current OS/arch to npm platform package suffix.
+
+    If *arch_override* is given (e.g. ``x86_64``, ``arm64``), it replaces
+    ``platform.machine()`` — useful for cross-compilation on CI.
+    """
     system = platform.system().lower()
-    machine = platform.machine().lower()
+    machine = (
+        ARCH_ALIASES.get(arch_override, arch_override)
+        if arch_override
+        else platform.machine().lower()
+    )
     key = (system, machine)
     if key not in PLATFORM_MAP:
         raise RuntimeError(f"Unsupported platform: {system}-{machine}")
@@ -82,9 +93,9 @@ def verify_integrity(data: bytes, integrity: str | None, shasum: str | None) -> 
         print("  Warning: no integrity data available, skipping verification")
 
 
-def download_library(version: str, dest_dir: Path) -> Path:
+def download_library(version: str, dest_dir: Path, *, arch: str | None = None) -> Path:
     """Download and extract the OpenTUI shared library from npm."""
-    platform_id = get_platform_id()
+    platform_id = get_platform_id(arch)
     package = f"@opentui/core-{platform_id}"
     lib_names = get_lib_names()
 
@@ -131,7 +142,9 @@ def download_library(version: str, dest_dir: Path) -> Path:
     )
 
 
-def ensure_library(version: str, dest_dir: Path, *, force: bool = False) -> Path:
+def ensure_library(
+    version: str, dest_dir: Path, *, force: bool = False, arch: str | None = None
+) -> Path:
     """Download library if not already present (or if --force)."""
     if not force:
         for name in get_lib_names():
@@ -140,7 +153,7 @@ def ensure_library(version: str, dest_dir: Path, *, force: bool = False) -> Path
                 print(f"Library already exists: {path}")
                 return path
 
-    return download_library(version, dest_dir)
+    return download_library(version, dest_dir, arch=arch)
 
 
 def main() -> None:
@@ -161,15 +174,20 @@ def main() -> None:
         default=DEFAULT_DEST,
         help=f"Destination directory (default: {DEFAULT_DEST})",
     )
+    parser.add_argument(
+        "--arch",
+        default=None,
+        help="Override target architecture (e.g. x86_64, arm64) for cross-compilation",
+    )
     args = parser.parse_args()
 
     print(f"OpenTUI Python - Library Downloader v{args.version}")
     print("=" * 50)
 
     try:
-        platform_id = get_platform_id()
+        platform_id = get_platform_id(args.arch)
         print(f"Platform: {platform_id}")
-        lib_path = ensure_library(args.version, args.dest, force=args.force)
+        lib_path = ensure_library(args.version, args.dest, force=args.force, arch=args.arch)
         print(f"\nLibrary ready: {lib_path}")
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

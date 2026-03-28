@@ -72,9 +72,13 @@ target_include_directories(opentui_bindings PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# macOS: use classic linker to avoid fixup errors on arm64
+# macOS: use classic linker to avoid fixup errors on arm64, and set rpath
+# so delocate can find libopentui.dylib relative to the extension module.
 if(APPLE)
     target_link_options(opentui_bindings PRIVATE "LINKER:-ld_classic")
+    set_target_properties(opentui_bindings PROPERTIES
+        INSTALL_RPATH "@loader_path/opentui-libs"
+    )
 endif()
 
 install(TARGETS opentui_bindings DESTINATION "opentui")
