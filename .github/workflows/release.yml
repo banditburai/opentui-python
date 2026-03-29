@@ -216,7 +216,7 @@ jobs:
           pip install pytest pytest-asyncio
 
       - name: Smoke test import
-        run: python -c "from opentui import Signal, Box; s = Signal(0); print(f'Signal value: {s()}')"
+        run: python -c "from opentui import Signal, Box; s = Signal(0); print(s())"
 
       - name: Run full test suite
         run: pytest tests -v --tb=short -x
