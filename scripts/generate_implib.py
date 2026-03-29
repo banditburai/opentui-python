@@ -1,12 +1,61 @@
 """Generate a .lib import library from opentui.dll using MSVC tools.
 
 Run after download_opentui.py on Windows. Requires Visual Studio (dumpbin, lib).
+Uses vswhere to locate the MSVC toolchain when tools aren't on PATH.
 """
 
+import glob
 import os
 import re
 import subprocess
 import sys
+
+
+def find_msvc_tools() -> dict[str, str]:
+    """Locate dumpbin.exe and lib.exe via vswhere + MSVC directory structure."""
+    tools: dict[str, str] = {}
+
+    # Check if already on PATH
+    for tool in ("dumpbin", "lib"):
+        try:
+            subprocess.run([tool], capture_output=True, timeout=5)
+            tools[tool] = tool
+        except FileNotFoundError:
+            pass
+
+    if len(tools) == 2:
+        return tools
+
+    # Use vswhere to find Visual Studio installation
+    vswhere = os.path.join(
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+        "Microsoft Visual Studio", "Installer", "vswhere.exe",
+    )
+    if not os.path.isfile(vswhere):
+        return tools
+
+    result = subprocess.run(
+        [vswhere, "-latest", "-property", "installationPath"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return tools
+
+    vs_path = result.stdout.strip()
+    # Find the latest MSVC toolset under VC/Tools/MSVC/*/bin/Hostx64/x64/
+    msvc_bin_pattern = os.path.join(
+        vs_path, "VC", "Tools", "MSVC", "*", "bin", "Hostx64", "x64",
+    )
+    msvc_dirs = sorted(glob.glob(msvc_bin_pattern), reverse=True)
+    for msvc_dir in msvc_dirs:
+        dumpbin = os.path.join(msvc_dir, "dumpbin.exe")
+        lib_exe = os.path.join(msvc_dir, "lib.exe")
+        if os.path.isfile(dumpbin) and os.path.isfile(lib_exe):
+            tools["dumpbin"] = dumpbin
+            tools["lib"] = lib_exe
+            break
+
+    return tools
 
 
 def find_dll(lib_dir: str) -> str | None:
@@ -21,9 +70,18 @@ def generate_implib(dll_path: str, lib_dir: str) -> None:
     def_path = os.path.join(lib_dir, "opentui.def")
     lib_path = os.path.join(lib_dir, "opentui.lib")
 
+    tools = find_msvc_tools()
+    if "dumpbin" not in tools or "lib" not in tools:
+        print("Could not find MSVC dumpbin/lib tools", file=sys.stderr)
+        print("Ensure Visual Studio with C++ workload is installed", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Using dumpbin: {tools['dumpbin']}")
+    print(f"Using lib: {tools['lib']}")
+
     # Extract exports with dumpbin
     result = subprocess.run(
-        ["dumpbin", "/EXPORTS", dll_path],
+        [tools["dumpbin"], "/EXPORTS", dll_path],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -58,7 +116,7 @@ def generate_implib(dll_path: str, lib_dir: str) -> None:
 
     # Generate .lib
     result = subprocess.run(
-        ["lib", f"/DEF:{def_path}", f"/OUT:{lib_path}", "/MACHINE:X64"],
+        [tools["lib"], f"/DEF:{def_path}", f"/OUT:{lib_path}", "/MACHINE:X64"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
