@@ -17,29 +17,40 @@ def find_msvc_lib() -> str | None:
     """Locate lib.exe via vswhere + MSVC directory structure."""
     # Check if already on PATH
     try:
-        subprocess.run(["lib", "/?"], capture_output=True, timeout=5)
+        subprocess.run(["lib", "/?"], capture_output=True, timeout=5, check=False)
         return "lib"
     except FileNotFoundError:
         pass
 
     # Use vswhere to find Visual Studio installation
     vswhere = os.path.join(
-        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-        "Microsoft Visual Studio", "Installer", "vswhere.exe",
+        os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+        "Microsoft Visual Studio",
+        "Installer",
+        "vswhere.exe",
     )
     if not os.path.isfile(vswhere):
         return None
 
     result = subprocess.run(
         [vswhere, "-latest", "-property", "installationPath"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if result.returncode != 0 or not result.stdout.strip():
         return None
 
     vs_path = result.stdout.strip()
     msvc_bin_pattern = os.path.join(
-        vs_path, "VC", "Tools", "MSVC", "*", "bin", "Hostx64", "x64",
+        vs_path,
+        "VC",
+        "Tools",
+        "MSVC",
+        "*",
+        "bin",
+        "Hostx64",
+        "x64",
     )
     for msvc_dir in sorted(glob.glob(msvc_bin_pattern), reverse=True):
         lib_exe = os.path.join(msvc_dir, "lib.exe")
@@ -72,12 +83,12 @@ def extract_symbols_from_source(bindings_dir: str) -> list[str]:
             block = content[start : pos - 1]
 
             # Extract function declarations (lines with return_type name(...))
-            for line in block.splitlines():
-                line = line.strip()
-                if not line or line.startswith("//") or line.startswith("/*"):
+            for raw_line in block.splitlines():
+                stripped = raw_line.strip()
+                if not stripped or stripped.startswith("//") or stripped.startswith("/*"):
                     continue
                 # Match function declarations: [const] type [*] name(args...)
-                m = re.match(r"(?:const\s+)?(?:\w+)\s*\*?\s+(\w+)\s*\(", line)
+                m = re.match(r"(?:const\s+)?(?:\w+)\s*\*?\s+(\w+)\s*\(", stripped)
                 if m:
                     symbols.add(m.group(1))
 
@@ -131,7 +142,9 @@ def main() -> None:
     # Generate .lib
     result = subprocess.run(
         [lib_exe, f"/DEF:{def_path}", f"/OUT:{lib_path}", "/MACHINE:X64"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if result.returncode != 0:
         print(f"lib.exe failed: {result.stderr}", file=sys.stderr)
