@@ -35,7 +35,13 @@ jobs:
 
     - name: Install native library (macOS)
       if: runner.os == 'macOS'
-      run: sudo cp src/opentui/opentui-libs/libopentui.dylib /usr/local/lib/
+      run: |
+        sudo mkdir -p /usr/local/lib
+        sudo cp src/opentui/opentui-libs/libopentui.dylib /usr/local/lib/
+
+    - name: Generate import library (Windows)
+      if: runner.os == 'Windows'
+      run: python scripts/generate_implib.py
 
     - name: Install dependencies
       run: uv sync --all-extras
