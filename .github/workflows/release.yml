@@ -61,7 +61,8 @@ jobs:
           CIBW_BEFORE_ALL_WINDOWS: "python {project}/scripts/download_opentui.py --force"
           CIBW_ENVIRONMENT_LINUX: "LD_LIBRARY_PATH={project}/src/opentui/opentui-libs"
           CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=13.0"
-          CIBW_ENVIRONMENT_WINDOWS: "PATH={project}\\src\\opentui\\opentui-libs;$PATH"
+          CIBW_ENVIRONMENT_WINDOWS: >
+            PATH="{project}\\src\\opentui\\opentui-libs;$PATH"
           CIBW_TEST_REQUIRES: "pytest pytest-asyncio"
           CIBW_TEST_COMMAND: "pytest {project}/tests -v --tb=short -x"
           CIBW_TEST_SKIP: "*-macosx_x86_64"
