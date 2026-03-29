@@ -128,21 +128,16 @@ class TestWindowsBackend:
         except OSError:
             pytest.skip("No console attached (headless CI)")
 
-    def test_has_data_returns_false_when_empty(self):
-        """has_data(0) returns False when no input is pending."""
+    def test_pushback_has_data(self):
+        """has_data returns True when pushback buffer has data, even without start()."""
         from opentui.input._backend_windows import WindowsBackend
 
         b = WindowsBackend()
-        try:
-            b.start()
-            assert not b.has_data(timeout=0)
-        except OSError:
-            pytest.skip("No console attached (headless CI)")
-        finally:
-            try:
-                b.stop()
-            except Exception:
-                pass
+        # Pushback doesn't need start() — tests the has_data fast path
+        assert not b._pushback
+        b.unread(42)
+        assert b.has_data(timeout=0)
+        assert b.read_byte() == 42
 
     def test_unread_makes_data_available(self):
         """unread() pushes byte to front of pushback buffer."""
