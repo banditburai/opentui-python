@@ -58,7 +58,7 @@ jobs:
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
           CIBW_BEFORE_ALL_LINUX: "dnf install -y git && python {project}/scripts/download_opentui.py && cp {project}/src/opentui/opentui-libs/libopentui.so /usr/local/lib/ && ldconfig"
           CIBW_BEFORE_ALL_MACOS: "python {project}/scripts/download_opentui.py --force --arch ${{ matrix.cibw_archs }} && sudo mkdir -p /usr/local/lib && sudo cp {project}/src/opentui/opentui-libs/libopentui.dylib /usr/local/lib/"
-          CIBW_BEFORE_ALL_WINDOWS: "python {project}/scripts/download_opentui.py --force"
+          CIBW_BEFORE_ALL_WINDOWS: "python {project}/scripts/download_opentui.py --force && python {project}/scripts/generate_implib.py"
           CIBW_ENVIRONMENT_LINUX: "LD_LIBRARY_PATH={project}/src/opentui/opentui-libs"
           CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=13.0"
           CIBW_ENVIRONMENT_WINDOWS: >
