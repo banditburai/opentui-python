@@ -38,7 +38,7 @@ def _poll_char(handler: InputHandler, char: str) -> list[KeyEvent]:
     handler.on_key(lambda event: seen.append(event))
 
     with (
-        patch("opentui.input.handler.select.select", return_value=([0], [], [])),
+        patch.object(handler, "_has_data", return_value=True),
         patch.object(handler, "_read_char", return_value=char),
     ):
         handler.poll()
@@ -48,7 +48,7 @@ def _poll_char(handler: InputHandler, char: str) -> list[KeyEvent]:
 def _escape_then(handler: InputHandler, *follow_chars: str) -> list[KeyEvent]:
     """Simulate ESC followed by *follow_chars* via ``_handle_escape``.
 
-    ``select.select`` returns readable for every call so the handler
+    ``_has_data`` returns True for every call so the handler
     keeps reading follow-up characters.
     """
     handler._fd = 0
@@ -61,7 +61,7 @@ def _escape_then(handler: InputHandler, *follow_chars: str) -> list[KeyEvent]:
         return next(chars)
 
     with (
-        patch("opentui.input.handler.select.select", return_value=([0], [], [])),
+        patch.object(handler, "_has_data", return_value=True),
         patch.object(handler, "_read_char", side_effect=fake_read),
     ):
         handler._handle_escape()
@@ -195,10 +195,8 @@ class TestSpecialKeys:
         handler._fd = 0
         seen: list[KeyEvent] = []
         handler.on_key(lambda event: seen.append(event))
-        # ESC alone: select returns no-data for follow-up
-        with (
-            patch("opentui.input.handler.select.select", return_value=([], [], [])),
-        ):
+        # ESC alone: _has_data returns False for follow-up
+        with patch.object(handler, "_has_data", return_value=False):
             handler._handle_escape()
         assert len(seen) == 1
         event = seen[0]
@@ -304,7 +302,7 @@ class TestFunctionKeys:
 
         chars = iter(["P"])
         with (
-            patch("opentui.input.handler.select.select", return_value=([0], [], [])),
+            patch.object(handler, "_has_data", return_value=True),
             patch.object(handler, "_read_char", side_effect=lambda: next(chars)),
         ):
             handler._handle_ss3()
@@ -794,20 +792,18 @@ class TestMetaSpaceAndEscapeCombinations:
         seen: list[KeyEvent] = []
         handler.on_key(lambda event: seen.append(event))
 
-        # First call to select returns readable (there IS a follow-up char),
+        # First call to _has_data returns True (there IS a follow-up char),
         # _read_char returns ESC (0x1b).  ESC is not '[', 'O', 'P', '_', ']',
         # not a ctrl char, and ord(0x1b)=27 < 32 so not printable —
         # falls through to emit plain "escape".
         call_count = [0]
 
-        def select_side_effect(*args, **kwargs):
+        def has_data_side_effect(*args, **kwargs):
             call_count[0] += 1
-            if call_count[0] == 1:
-                return ([0], [], [])
-            return ([], [], [])
+            return call_count[0] == 1
 
         with (
-            patch("opentui.input.handler.select.select", side_effect=select_side_effect),
+            patch.object(handler, "_has_data", side_effect=has_data_side_effect),
             patch.object(handler, "_read_char", return_value="\x1b"),
         ):
             handler._handle_escape()
@@ -857,7 +853,7 @@ class TestCtrlModifierKeys:
 
         chars = iter(["a"])
         with (
-            patch("opentui.input.handler.select.select", return_value=([0], [], [])),
+            patch.object(handler, "_has_data", return_value=True),
             patch.object(handler, "_read_char", side_effect=lambda: next(chars)),
         ):
             handler._handle_ss3()
@@ -1109,7 +1105,7 @@ class TestRegularParsingDefaultsToPress:
         h._fd = 0
         evts: list[KeyEvent] = []
         h.on_key(lambda e: evts.append(e))
-        with patch("opentui.input.handler.select.select", return_value=([], [], [])):
+        with patch.object(h, "_has_data", return_value=False):
             h._handle_escape()
         assert evts[0].event_type == "press"
 
@@ -1281,7 +1277,7 @@ class TestDoesNotFilterValidKeySequences:
         handler.on_key(lambda e: seen.append(e))
         chars = iter(["A"])
         with (
-            patch("opentui.input.handler.select.select", return_value=([0], [], [])),
+            patch.object(handler, "_has_data", return_value=True),
             patch.object(handler, "_read_char", side_effect=lambda: next(chars)),
         ):
             handler._handle_ss3()
@@ -1295,7 +1291,7 @@ class TestDoesNotFilterValidKeySequences:
         handler.on_key(lambda e: seen.append(e))
         chars = iter(["B"])
         with (
-            patch("opentui.input.handler.select.select", return_value=([0], [], [])),
+            patch.object(handler, "_has_data", return_value=True),
             patch.object(handler, "_read_char", side_effect=lambda: next(chars)),
         ):
             handler._handle_ss3()
@@ -1408,7 +1404,7 @@ class TestSourceFieldAlwaysRaw:
         handler.on_key(lambda e: seen.append(e))
         chars = iter(["P"])
         with (
-            patch("opentui.input.handler.select.select", return_value=([0], [], [])),
+            patch.object(handler, "_has_data", return_value=True),
             patch.object(handler, "_read_char", side_effect=lambda: next(chars)),
         ):
             handler._handle_ss3()
@@ -1435,7 +1431,7 @@ class TestSourceFieldAlwaysRaw:
         handler._fd = 0
         seen: list[KeyEvent] = []
         handler.on_key(lambda e: seen.append(e))
-        with patch("opentui.input.handler.select.select", return_value=([], [], [])):
+        with patch.object(handler, "_has_data", return_value=False):
             handler._handle_escape()
         assert seen[0].source == "raw"
 
@@ -1767,18 +1763,16 @@ class TestMetaArrowKeysOldStyle:
         handler.on_key(lambda event: seen.append(event))
 
         # ESC+'P' with no content → should emit key, not consume as DCS.
-        # select returns readable for first call (P char), then empty
+        # _has_data returns True for first call (P char), then False
         # (no DCS content follows).
         call_count = [0]
 
-        def fake_select(*args, **kwargs):
+        def fake_has_data(*args, **kwargs):
             call_count[0] += 1
-            if call_count[0] == 1:
-                return ([0], [], [])  # First call: readable (ESC follow-up = 'P')
-            return ([], [], [])  # No DCS content follows
+            return call_count[0] == 1  # First call: readable; then no DCS content
 
         with (
-            patch("opentui.input.handler.select.select", side_effect=fake_select),
+            patch.object(handler, "_has_data", side_effect=fake_has_data),
             patch.object(handler, "_read_char", return_value="P"),
         ):
             handler._handle_escape()

@@ -11,8 +11,6 @@ on its own.
 """
 
 import logging
-import os
-import select
 from typing import TYPE_CHECKING, Any
 
 from ..events import KeyEvent, MouseEvent
@@ -59,13 +57,14 @@ class EscapeParserMixin:
     """Mixin providing escape-sequence parsing methods.
 
     Requires the host class to define:
-    - ``_fd: int`` — raw file descriptor for reads
+    - ``_has_data(timeout) -> bool`` — check if input bytes are available
     - ``_read_char() -> str`` — read a single UTF-8 character
     - ``_emit_key(...)`` — emit a ``KeyEvent``
     - ``_emit_mouse(event)`` — emit a ``MouseEvent``
     - ``_emit_focus(focus_type)`` — emit a focus event
     - ``_emit_capability(cap)`` — emit a capability response
     - ``_emit_paste(text)`` — emit a paste event
+    - ``_backend`` — the terminal backend (has unread() for push-back)
     - ``_in_bracketed_paste: bool``
     - ``_bracketed_paste_buffer: str``
     - ``_use_kitty_keyboard: bool``
@@ -74,12 +73,15 @@ class EscapeParserMixin:
 
     # -- Typed stubs so the type checker knows what the host provides --------
     if TYPE_CHECKING:
-        _fd: int
+        from ._backend import TerminalBackend
+
+        _backend: TerminalBackend
         _in_bracketed_paste: bool
         _bracketed_paste_buffer: str
         _use_kitty_keyboard: bool
         _key_handlers: list[Any]
 
+        def _has_data(self, timeout: float = 0) -> bool: ...
         def _read_char(self) -> str: ...
         def _emit_key(
             self,
@@ -106,7 +108,7 @@ class EscapeParserMixin:
         - Meta+char: ESC followed by a printable char -> alt=True
         - Meta+Ctrl+letter: ESC followed by a control char -> alt=True, ctrl=True
         """
-        if not select.select([self._fd], [], [], 0)[0]:
+        if not self._has_data(0):
             self._emit_key("escape", "\x1b", sequence="\x1b")
             return True
 
@@ -119,7 +121,7 @@ class EscapeParserMixin:
             # DCS (Device Control String) — e.g. XTVersion `\x1bP>|kitty(0.40.1)\x1b\\`
             # Only consume as DCS if content follows; otherwise treat as meta+P
             # so ESC+P is treated as a keystroke.
-            if select.select([self._fd], [], [], 0)[0]:
+            if self._has_data(0):
                 content = self._consume_until_st()
                 if content:
                     self._handle_dcs_content(content)
@@ -191,7 +193,7 @@ class EscapeParserMixin:
         buf: list[str] = []
         buf_len = 0
         prev = ""
-        while select.select([self._fd], [], [], 0.05)[0]:
+        while self._has_data(0.05):
             ch = self._read_char()
             if ch == "\x9c":
                 return "".join(buf)  # 8-bit ST
@@ -215,7 +217,7 @@ class EscapeParserMixin:
     # -- CSI parsing ---------------------------------------------------------
 
     def _handle_csi(self) -> bool:
-        if not select.select([self._fd], [], [], 0)[0]:
+        if not self._has_data(0):
             self._emit_key("[", "\x1b[")
             return True
 
@@ -232,19 +234,13 @@ class EscapeParserMixin:
             if char == "$":
                 # DECRPM responses end with "$y" — peek at next byte.
                 # If it's 'y', include it as part of the sequence.
-                if select.select([self._fd], [], [], 0.01)[0]:
+                if self._has_data(0.01):
                     next_char = self._read_char()
                     if next_char == "y":
                         seq += next_char
-                    # Not DECRPM — put the peeked char back by
-                    # writing to pipe (TestInputHandler) or handling
-                    # the leftover.  For now, treat '$' as the
-                    # terminator and process leftover separately.
-                    # Write back to pipe for test mode.
                     else:
-                        pipe_w = getattr(self, "_pipe_w", None)
-                        if pipe_w is not None:
-                            os.write(pipe_w, next_char.encode("utf-8"))
+                        # Not DECRPM — push the peeked char back via backend
+                        self._backend.unread(ord(next_char[0]))
                 break
             if char.isalpha() or char in ("~", "^"):
                 break
@@ -660,7 +656,7 @@ class EscapeParserMixin:
         Covers function keys (P-S), navigation (H, F), arrow keys
         (A/B/C/D), and clear (E).
         """
-        if not select.select([self._fd], [], [], 0)[0]:
+        if not self._has_data(0):
             self._emit_key("O", "\x1bO")
             return True
 

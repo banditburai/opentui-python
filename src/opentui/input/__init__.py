@@ -1,5 +1,7 @@
 """Input package — key parsing, key binding, stdin buffering, and event loop."""
 
+from ._backend import TerminalBackend
+from ._backend_buffer import BufferBackend
 from .event_loop import EventLoop, TestInputHandler
 from .handler import InputHandler
 from .key_handler import InternalKeyHandler, KeyHandler
@@ -18,6 +20,7 @@ from .keymapping import (
 from .stdin_buffer import StdinBuffer
 
 __all__ = [
+    "BufferBackend",
     "DEFAULT_KEY_ALIASES",
     "EventLoop",
     "InputHandler",
@@ -26,6 +29,7 @@ __all__ = [
     "KeyHandler",
     "NON_ALPHANUMERIC_KEYS",
     "StdinBuffer",
+    "TerminalBackend",
     "TestInputHandler",
     "build_key_bindings_map",
     "init_key_bindings",

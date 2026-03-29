@@ -10,8 +10,8 @@ import pytest
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Unix-only terminal control")
 
-import select
-import termios
+select = pytest.importorskip("select")
+termios = pytest.importorskip("termios")
 import time
 
 from opentui.components.base import Renderable
