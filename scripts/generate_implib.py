@@ -76,8 +76,8 @@ def extract_symbols_from_source(bindings_dir: str) -> list[str]:
                 line = line.strip()
                 if not line or line.startswith("//") or line.startswith("/*"):
                     continue
-                # Match function declarations: type name(args...)
-                m = re.match(r"(?:const\s+)?(?:void|int|uint\d+_t|size_t|bool|float|double|char|unsigned|struct\s+\w+)\s*\*?\s+(\w+)\s*\(", line)
+                # Match function declarations: [const] type [*] name(args...)
+                m = re.match(r"(?:const\s+)?(?:\w+)\s*\*?\s+(\w+)\s*\(", line)
                 if m:
                     symbols.add(m.group(1))
 
