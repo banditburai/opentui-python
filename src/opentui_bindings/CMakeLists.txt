@@ -52,7 +52,7 @@ nanobind_add_module(
 )
 
 # Windows: find_library won't locate a .dll without a .lib import library.
-# Search for the DLL directly and create an IMPORTED target.
+# Find the DLL, then generate a .lib using dumpbin/lib (MSVC toolchain).
 if(NOT OPENTUI_LIB AND WIN32)
     foreach(_dir ${OPENTUI_LIB_PATHS})
         foreach(_name opentui.dll libopentui.dll)
@@ -66,20 +66,49 @@ if(NOT OPENTUI_LIB AND WIN32)
         endif()
     endforeach()
     if(OPENTUI_DLL)
-        add_library(opentui_imported SHARED IMPORTED)
-        set_target_properties(opentui_imported PROPERTIES
-            IMPORTED_LOCATION "${OPENTUI_DLL}"
+        set(_genlib "${CMAKE_BINARY_DIR}/opentui.lib")
+        set(_deffile "${CMAKE_BINARY_DIR}/opentui.def")
+        # Generate .def from DLL exports, then create .lib import library
+        execute_process(
+            COMMAND dumpbin /EXPORTS "${OPENTUI_DLL}"
+            OUTPUT_VARIABLE _exports
+            RESULT_VARIABLE _dump_rc
         )
-        set(OPENTUI_LIB "${OPENTUI_DLL}")
+        if(_dump_rc EQUAL 0)
+            # Parse dumpbin output: extract function names from the exports table
+            string(REPLACE "\n" ";" _lines "${_exports}")
+            set(_def_content "EXPORTS\n")
+            set(_in_exports FALSE)
+            foreach(_line ${_lines})
+                if(_line MATCHES "ordinal.*name")
+                    set(_in_exports TRUE)
+                elseif(_in_exports AND _line MATCHES "^[ \t]+[0-9]+[ \t]+[0-9A-Fa-f]+[ \t]+[0-9A-Fa-f]+[ \t]+(.+)$")
+                    string(STRIP "${CMAKE_MATCH_1}" _sym)
+                    string(APPEND _def_content "    ${_sym}\n")
+                elseif(_in_exports AND _line MATCHES "^[ \t]*$")
+                    set(_in_exports FALSE)
+                endif()
+            endforeach()
+            file(WRITE "${_deffile}" "${_def_content}")
+            execute_process(
+                COMMAND lib "/DEF:${_deffile}" "/OUT:${_genlib}" /MACHINE:X64
+                RESULT_VARIABLE _lib_rc
+            )
+            if(_lib_rc EQUAL 0 AND EXISTS "${_genlib}")
+                set(OPENTUI_LIB "${_genlib}")
+                message(STATUS "Generated import library: ${_genlib}")
+            endif()
+        endif()
+        # Fallback: if .lib generation failed, try linking the DLL directly
+        if(NOT OPENTUI_LIB)
+            set(OPENTUI_LIB "${OPENTUI_DLL}")
+            message(WARNING "Could not generate .lib - trying direct DLL link")
+        endif()
     endif()
 endif()
 
 if(OPENTUI_LIB)
-    if(TARGET opentui_imported)
-        target_link_libraries(opentui_bindings PRIVATE opentui_imported)
-    else()
-        target_link_libraries(opentui_bindings PRIVATE ${OPENTUI_LIB})
-    endif()
+    target_link_libraries(opentui_bindings PRIVATE ${OPENTUI_LIB})
     message(STATUS "Found OpenTUI library: ${OPENTUI_LIB}")
 else()
     message(FATAL_ERROR "OpenTUI library not found in: ${OPENTUI_LIB_PATHS}\n"
