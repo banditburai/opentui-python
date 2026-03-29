@@ -26,7 +26,7 @@ jobs:
             runs-on: ubuntu-22.04
             cibw_archs: x86_64
           - os: linux-aarch64
-            runs-on: ubuntu-22.04
+            runs-on: ubuntu-24.04-arm
             cibw_archs: aarch64
           - os: macos-arm64
             runs-on: macos-14
@@ -34,15 +34,14 @@ jobs:
           - os: macos-x86_64
             runs-on: macos-14
             cibw_archs: x86_64
+          - os: windows-x86_64
+            runs-on: windows-latest
+            cibw_archs: AMD64
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Set up QEMU (Linux aarch64)
-        if: matrix.cibw_archs == 'aarch64'
-        uses: docker/setup-qemu-action@v3
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -54,12 +53,15 @@ jobs:
           CIBW_SKIP: "*-manylinux_i686 *-musllinux_*"
           CIBW_ARCHS_LINUX: ${{ matrix.cibw_archs }}
           CIBW_ARCHS_MACOS: ${{ matrix.cibw_archs }}
+          CIBW_ARCHS_WINDOWS: ${{ matrix.cibw_archs }}
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
           CIBW_BEFORE_ALL_LINUX: "dnf install -y git && python {project}/scripts/download_opentui.py && cp {project}/src/opentui/opentui-libs/libopentui.so /usr/local/lib/ && ldconfig"
           CIBW_BEFORE_ALL_MACOS: "python {project}/scripts/download_opentui.py --force --arch ${{ matrix.cibw_archs }} && sudo mkdir -p /usr/local/lib && sudo cp {project}/src/opentui/opentui-libs/libopentui.dylib /usr/local/lib/"
+          CIBW_BEFORE_ALL_WINDOWS: "python {project}/scripts/download_opentui.py --force"
           CIBW_ENVIRONMENT_LINUX: "LD_LIBRARY_PATH={project}/src/opentui/opentui-libs"
           CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=13.0"
+          CIBW_ENVIRONMENT_WINDOWS: "PATH={project}\\src\\opentui\\opentui-libs;$PATH"
           CIBW_TEST_REQUIRES: "pytest pytest-asyncio"
           CIBW_TEST_COMMAND: "pytest {project}/tests -v --tb=short -x"
           CIBW_TEST_SKIP: "*-macosx_x86_64"
@@ -161,9 +163,67 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           print-hash: true
 
+  verify-published:
+    name: Verify published wheel (${{ matrix.os }})
+    needs: [publish-to-pypi]
+    runs-on: ${{ matrix.runs-on }}
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux-x86_64
+            runs-on: ubuntu-22.04
+          - os: linux-aarch64
+            runs-on: ubuntu-24.04-arm
+          - os: macos-arm64
+            runs-on: macos-14
+          - os: windows-x86_64
+            runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            tests
+            pyproject.toml
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Install from PyPI (with retry)
+        shell: bash
+        run: |
+          for i in 1 2 3 4 5; do
+            if pip install "opentui==${{ steps.version.outputs.version }}"; then
+              echo "Installed opentui ${{ steps.version.outputs.version }} on attempt $i"
+              break
+            fi
+            if [ $i -eq 5 ]; then
+              echo "Failed to install opentui after 5 attempts"
+              exit 1
+            fi
+            echo "Attempt $i failed, waiting 15s..."
+            sleep 15
+          done
+          pip install pytest pytest-asyncio
+
+      - name: Smoke test import
+        run: python -c "from opentui import Signal, Box; s = Signal(0); print(f'Signal value: {s()}')"
+
+      - name: Run full test suite
+        run: pytest tests -v --tb=short -x
+
   create-github-release:
     name: Create GitHub Release
-    needs: [publish-to-pypi]
+    needs: [publish-to-pypi, verify-published]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     permissions:

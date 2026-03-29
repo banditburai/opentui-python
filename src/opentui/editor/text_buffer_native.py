@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import sys
 from typing import Any
 
 from ..native import _decode, _nb, _rgba_to_list
@@ -32,7 +33,15 @@ def _get_zig_set_styled_text() -> Any:
     global _zig_set_styled_text_fn
     if _zig_set_styled_text_fn is None:
         try:
-            fn = ctypes.CDLL(None).textBufferSetStyledText
+            if sys.platform == "win32":
+                from ..ffi import _preloaded_lib_path
+
+                if _preloaded_lib_path is None:
+                    raise OSError("OpenTUI native library was not preloaded")
+                lib = ctypes.CDLL(_preloaded_lib_path)
+            else:
+                lib = ctypes.CDLL(None)
+            fn = lib.textBufferSetStyledText
         except OSError:
             import logging
 

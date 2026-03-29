@@ -14,6 +14,7 @@ _log = logging.getLogger(__name__)
 
 _NATIVE_AVAILABLE = False
 _native_module: Any = None
+_preloaded_lib_path: str | None = None
 
 
 def _binding_filename_matches_runtime(filename: str) -> bool:
@@ -62,9 +63,17 @@ def _get_lib_names() -> list[str]:
 
 
 def _preload_opentui_library() -> None:
+    global _preloaded_lib_path
+
     current_dir = os.path.dirname(os.path.abspath(__file__))
     package_dir = os.path.dirname(current_dir)
     lib_names = _get_lib_names()
+
+    # Windows: register DLL search directory so LoadLibrary can find dependencies.
+    if sys.platform == "win32":
+        lib_dir = os.path.join(current_dir, "opentui-libs")
+        if os.path.isdir(lib_dir):
+            os.add_dll_directory(lib_dir)
 
     candidates = [
         os.path.join(d, "opentui-libs", n)
@@ -81,7 +90,11 @@ def _preload_opentui_library() -> None:
         if not os.path.isfile(candidate):
             continue
         try:
-            ctypes.CDLL(candidate, mode=ctypes.RTLD_GLOBAL)
+            if sys.platform == "win32":
+                ctypes.CDLL(candidate)
+            else:
+                ctypes.CDLL(candidate, mode=ctypes.RTLD_GLOBAL)
+            _preloaded_lib_path = candidate
             return
         except OSError as exc:
             _log.debug("Failed to preload library %s: %s", candidate, exc)

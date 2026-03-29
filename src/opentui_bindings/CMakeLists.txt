@@ -51,8 +51,35 @@ nanobind_add_module(
     reconciler_patch.cpp
 )
 
+# Windows: find_library won't locate a .dll without a .lib import library.
+# Search for the DLL directly and create an IMPORTED target.
+if(NOT OPENTUI_LIB AND WIN32)
+    foreach(_dir ${OPENTUI_LIB_PATHS})
+        foreach(_name opentui.dll libopentui.dll)
+            if(EXISTS "${_dir}/${_name}")
+                set(OPENTUI_DLL "${_dir}/${_name}")
+                break()
+            endif()
+        endforeach()
+        if(OPENTUI_DLL)
+            break()
+        endif()
+    endforeach()
+    if(OPENTUI_DLL)
+        add_library(opentui_imported SHARED IMPORTED)
+        set_target_properties(opentui_imported PROPERTIES
+            IMPORTED_LOCATION "${OPENTUI_DLL}"
+        )
+        set(OPENTUI_LIB "${OPENTUI_DLL}")
+    endif()
+endif()
+
 if(OPENTUI_LIB)
-    target_link_libraries(opentui_bindings PRIVATE ${OPENTUI_LIB})
+    if(TARGET opentui_imported)
+        target_link_libraries(opentui_bindings PRIVATE opentui_imported)
+    else()
+        target_link_libraries(opentui_bindings PRIVATE ${OPENTUI_LIB})
+    endif()
     message(STATUS "Found OpenTUI library: ${OPENTUI_LIB}")
 else()
     message(FATAL_ERROR "OpenTUI library not found in: ${OPENTUI_LIB_PATHS}\n"
@@ -84,6 +111,7 @@ endif()
 install(TARGETS opentui_bindings DESTINATION "opentui")
 
 # Bundle the native library so auditwheel/delocate can find and repair it.
+# On Windows, the DLL is bundled in opentui-libs/ within the wheel.
 if(OPENTUI_LIB)
     install(FILES ${OPENTUI_LIB} DESTINATION "opentui/opentui-libs")
 endif()
