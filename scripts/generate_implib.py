@@ -1,7 +1,9 @@
 """Generate a .lib import library from opentui.dll using MSVC tools.
 
-Run after download_opentui.py on Windows. Requires Visual Studio (dumpbin, lib).
-Uses vswhere to locate the MSVC toolchain when tools aren't on PATH.
+Extracts extern "C" function declarations from the C++ binding source files
+to build a .def file, then uses MSVC lib.exe to create the import library.
+This avoids depending on dumpbin parsing (Zig DLLs may have non-standard
+export table formats).
 """
 
 import glob
@@ -11,20 +13,14 @@ import subprocess
 import sys
 
 
-def find_msvc_tools() -> dict[str, str]:
-    """Locate dumpbin.exe and lib.exe via vswhere + MSVC directory structure."""
-    tools: dict[str, str] = {}
-
+def find_msvc_lib() -> str | None:
+    """Locate lib.exe via vswhere + MSVC directory structure."""
     # Check if already on PATH
-    for tool in ("dumpbin", "lib"):
-        try:
-            subprocess.run([tool], capture_output=True, timeout=5)
-            tools[tool] = tool
-        except FileNotFoundError:
-            pass
-
-    if len(tools) == 2:
-        return tools
+    try:
+        subprocess.run(["lib", "/?"], capture_output=True, timeout=5)
+        return "lib"
+    except FileNotFoundError:
+        pass
 
     # Use vswhere to find Visual Studio installation
     vswhere = os.path.join(
@@ -32,30 +28,60 @@ def find_msvc_tools() -> dict[str, str]:
         "Microsoft Visual Studio", "Installer", "vswhere.exe",
     )
     if not os.path.isfile(vswhere):
-        return tools
+        return None
 
     result = subprocess.run(
         [vswhere, "-latest", "-property", "installationPath"],
         capture_output=True, text=True,
     )
     if result.returncode != 0 or not result.stdout.strip():
-        return tools
+        return None
 
     vs_path = result.stdout.strip()
-    # Find the latest MSVC toolset under VC/Tools/MSVC/*/bin/Hostx64/x64/
     msvc_bin_pattern = os.path.join(
         vs_path, "VC", "Tools", "MSVC", "*", "bin", "Hostx64", "x64",
     )
-    msvc_dirs = sorted(glob.glob(msvc_bin_pattern), reverse=True)
-    for msvc_dir in msvc_dirs:
-        dumpbin = os.path.join(msvc_dir, "dumpbin.exe")
+    for msvc_dir in sorted(glob.glob(msvc_bin_pattern), reverse=True):
         lib_exe = os.path.join(msvc_dir, "lib.exe")
-        if os.path.isfile(dumpbin) and os.path.isfile(lib_exe):
-            tools["dumpbin"] = dumpbin
-            tools["lib"] = lib_exe
-            break
+        if os.path.isfile(lib_exe):
+            return lib_exe
 
-    return tools
+    return None
+
+
+def extract_symbols_from_source(bindings_dir: str) -> list[str]:
+    """Extract function names from extern "C" blocks in C++ source files."""
+    symbols: set[str] = set()
+
+    for cpp_file in sorted(glob.glob(os.path.join(bindings_dir, "*.cpp"))):
+        with open(cpp_file) as f:
+            content = f.read()
+
+        # Find all extern "C" blocks
+        for match in re.finditer(r'extern\s+"C"\s*\{', content):
+            start = match.end()
+            # Find matching closing brace (handle nested braces)
+            depth = 1
+            pos = start
+            while pos < len(content) and depth > 0:
+                if content[pos] == "{":
+                    depth += 1
+                elif content[pos] == "}":
+                    depth -= 1
+                pos += 1
+            block = content[start : pos - 1]
+
+            # Extract function declarations (lines with return_type name(...))
+            for line in block.splitlines():
+                line = line.strip()
+                if not line or line.startswith("//") or line.startswith("/*"):
+                    continue
+                # Match function declarations: type name(args...)
+                m = re.match(r"(?:const\s+)?(?:void|int|uint\d+_t|size_t|bool|float|double|char|unsigned|struct\s+\w+)\s*\*?\s+(\w+)\s*\(", line)
+                if m:
+                    symbols.add(m.group(1))
+
+    return sorted(symbols)
 
 
 def find_dll(lib_dir: str) -> str | None:
@@ -66,44 +92,24 @@ def find_dll(lib_dir: str) -> str | None:
     return None
 
 
-def generate_implib(dll_path: str, lib_dir: str) -> None:
+def main() -> None:
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    lib_dir = os.path.join(project_root, "src", "opentui", "opentui-libs")
+    bindings_dir = os.path.join(project_root, "src", "opentui_bindings")
     def_path = os.path.join(lib_dir, "opentui.def")
     lib_path = os.path.join(lib_dir, "opentui.lib")
 
-    tools = find_msvc_tools()
-    if "dumpbin" not in tools or "lib" not in tools:
-        print("Could not find MSVC dumpbin/lib tools", file=sys.stderr)
-        print("Ensure Visual Studio with C++ workload is installed", file=sys.stderr)
+    dll_path = find_dll(lib_dir)
+    if not dll_path:
+        print(f"No DLL found in {lib_dir}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Using dumpbin: {tools['dumpbin']}")
-    print(f"Using lib: {tools['lib']}")
+    print(f"DLL: {dll_path}")
 
-    # Extract exports with dumpbin
-    result = subprocess.run(
-        [tools["dumpbin"], "/EXPORTS", dll_path],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        print(f"dumpbin failed: {result.stderr}", file=sys.stderr)
-        sys.exit(1)
-
-    # Parse export names from dumpbin output
-    symbols: list[str] = []
-    in_exports = False
-    for line in result.stdout.splitlines():
-        if re.match(r"\s+ordinal\s+hint\s+RVA\s+name", line):
-            in_exports = True
-            continue
-        if in_exports:
-            if not line.strip():
-                break
-            m = re.match(r"\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)", line)
-            if m:
-                symbols.append(m.group(1))
-
+    # Extract symbols from C++ source
+    symbols = extract_symbols_from_source(bindings_dir)
     if not symbols:
-        print("No exports found in DLL", file=sys.stderr)
+        print("No extern C symbols found in binding source files", file=sys.stderr)
         sys.exit(1)
 
     # Write .def file
@@ -112,31 +118,26 @@ def generate_implib(dll_path: str, lib_dir: str) -> None:
         for sym in symbols:
             f.write(f"    {sym}\n")
 
-    print(f"Found {len(symbols)} exports, wrote {def_path}")
+    print(f"Extracted {len(symbols)} symbols from source, wrote {def_path}")
+
+    # Find lib.exe
+    lib_exe = find_msvc_lib()
+    if not lib_exe:
+        print("Could not find MSVC lib.exe", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Using lib: {lib_exe}")
 
     # Generate .lib
     result = subprocess.run(
-        [tools["lib"], f"/DEF:{def_path}", f"/OUT:{lib_path}", "/MACHINE:X64"],
+        [lib_exe, f"/DEF:{def_path}", f"/OUT:{lib_path}", "/MACHINE:X64"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        print(f"lib failed: {result.stderr}", file=sys.stderr)
+        print(f"lib.exe failed: {result.stderr}", file=sys.stderr)
         sys.exit(1)
 
     print(f"Generated {lib_path}")
-
-
-def main() -> None:
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    lib_dir = os.path.join(project_root, "src", "opentui", "opentui-libs")
-
-    dll_path = find_dll(lib_dir)
-    if not dll_path:
-        print(f"No DLL found in {lib_dir}", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Generating import library from {dll_path}")
-    generate_implib(dll_path, lib_dir)
 
 
 if __name__ == "__main__":
