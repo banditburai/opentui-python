@@ -4,8 +4,13 @@ Upstream: packages/core/src/tests/renderer.control.test.ts
 Tests: 34 (22 ported from upstream + 12 Python-specific CliRenderer wrapper tests)
 """
 
-import select
 import sys
+
+import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="Unix-only terminal control")
+
+import select
 import termios
 import time
 

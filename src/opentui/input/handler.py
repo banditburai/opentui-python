@@ -13,8 +13,13 @@ import logging
 import os
 import select
 import sys
-import termios
-import tty
+
+try:
+    import termios
+    import tty
+except ImportError:
+    termios = None  # type: ignore[assignment]
+    tty = None  # type: ignore[assignment]
 from collections.abc import Callable
 from typing import Any
 
@@ -90,6 +95,8 @@ class InputHandler(EscapeParserMixin):
     # -- Lifecycle -----------------------------------------------------------
 
     def start(self) -> None:
+        if termios is None:
+            raise NotImplementedError("Terminal input requires Unix (termios)")
         if self._running:
             return
         self._running = True
