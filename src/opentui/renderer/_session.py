@@ -2,6 +2,7 @@
 
 import contextlib
 import logging
+import sys
 import time as _time
 from typing import Any
 
@@ -9,11 +10,24 @@ from .. import hooks
 
 _log = logging.getLogger(__name__)
 
+_IS_WINDOWS = sys.platform == "win32"
+
 
 def prepare_terminal_session(renderer: Any) -> tuple[Any, Any, Any]:
     import os as _os
-    import select as _sel
     import sys as _sys
+
+    if _IS_WINDOWS:
+        # On Windows, the WindowsBackend handles raw mode in start().
+        # We still need to set up the renderer and drain startup input.
+        renderer.setup()
+        if not renderer._config.testing and renderer._config.kitty_keyboard_flags:
+            with contextlib.suppress(Exception):
+                renderer.enable_keyboard(renderer._config.kitty_keyboard_flags)
+        _flush_console_input()
+        return _os, None, _sys
+
+    import select as _sel
     import termios as _termios
 
     fd = _sys.stdin.fileno()
@@ -113,14 +127,20 @@ def teardown_terminal_session(
     with contextlib.suppress(Exception):
         sys_module.stdout.write("\x1b[0 q\x1b]112\x07")
         sys_module.stdout.flush()
-    try:
-        fd = sys_module.stdin.fileno()
-        for _ in range(3):
-            _time.sleep(0.03)
-            while select_module.select([fd], [], [], 0.02)[0]:
-                os_module.read(fd, 4096)
-    except (OSError, ValueError):
-        pass
+
+    if select_module is not None:
+        # Unix: drain using select
+        try:
+            fd = sys_module.stdin.fileno()
+            for _ in range(3):
+                _time.sleep(0.03)
+                while select_module.select([fd], [], [], 0.02)[0]:
+                    os_module.read(fd, 4096)
+        except (OSError, ValueError):
+            pass
+    elif _IS_WINDOWS:
+        # Windows: flush console input buffer
+        _flush_console_input()
 
 
 def destroy_terminal_session(renderer: Any) -> None:
@@ -166,6 +186,18 @@ def _drain_startup_stdin(fd: int, os_module: Any, select_module: Any) -> None:
             last_data = _time.perf_counter()
         elif _time.perf_counter() - last_data >= drain_idle:
             break
+
+
+def _flush_console_input() -> None:
+    """Flush the Windows console input buffer via Console API."""
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+        handle = kernel32.GetStdHandle(-10)  # STD_INPUT_HANDLE
+        kernel32.FlushConsoleInputBuffer(handle)
+    except Exception:
+        pass
 
 
 __all__ = [

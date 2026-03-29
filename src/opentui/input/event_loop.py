@@ -7,12 +7,12 @@ part of input.py.
 
 import contextlib
 import logging
-import os
 from collections.abc import Callable
 from typing import Any
 
 _log = logging.getLogger(__name__)
 
+from ._backend_buffer import BufferBackend
 from .handler import InputHandler
 
 _RESIZE_DEBOUNCE = 0.10  # seconds — default resize debounce delay
@@ -44,40 +44,58 @@ class EventLoop:
         self._running = True
         self._input_handler.start()
 
-        # Register SIGWINCH handler for terminal resize detection.
+        has_sigwinch = hasattr(signal, "SIGWINCH")
+
+        # Register SIGWINCH handler for terminal resize detection (Unix only).
         # The handler sets a flag; the main loop checks it each frame
         # to avoid calling resize from a signal context.
         prev_handler = None
-        with contextlib.suppress(AttributeError, OSError):
-            prev_handler = signal.getsignal(signal.SIGWINCH)
+        if has_sigwinch:
+            with contextlib.suppress(AttributeError, OSError):
+                prev_handler = signal.getsignal(signal.SIGWINCH)
 
-        def _on_sigwinch(signum: int, frame: Any) -> None:
-            self._resize_pending = True
-            self._last_resize_time = time.perf_counter()
+            def _on_sigwinch(signum: int, frame: Any) -> None:
+                self._resize_pending = True
+                self._last_resize_time = time.perf_counter()
 
-        with contextlib.suppress(AttributeError, OSError):
-            signal.signal(signal.SIGWINCH, _on_sigwinch)
+            with contextlib.suppress(AttributeError, OSError):
+                signal.signal(signal.SIGWINCH, _on_sigwinch)
+
+        # Polling resize fallback for platforms without SIGWINCH (Windows)
+        if not has_sigwinch:
+            import shutil
+
+            self._last_term_size = shutil.get_terminal_size()
 
         try:
             while self._running:
                 start_time = time.perf_counter()
 
-                # Resize handling — debounce 100ms after last SIGWINCH.
-                #
-                # ALWAYS keep rendering during debounce (at old dims).
-                # The native renderer wraps each frame in DEC Synced
-                # Output (CSI ?2026h … CSI ?2026l), so the terminal
-                # shows each frame atomically.  Between frames the
-                # terminal may briefly reflow, but the next atomic
-                # frame overwrites everything within ~16ms.
-                #
-                # After debounce: resize buffers → force full repaint
-                # at correct dimensions.  No \x1b[2J — that pushes
-                # alternate-screen content into terminal scrollback.
-                if self._resize_pending:
-                    since_last = time.perf_counter() - self._last_resize_time
-                    if since_last >= _RESIZE_DEBOUNCE:
-                        self._resize_pending = False
+                if has_sigwinch:
+                    # Resize handling — debounce 100ms after last SIGWINCH.
+                    #
+                    # ALWAYS keep rendering during debounce (at old dims).
+                    # The native renderer wraps each frame in DEC Synced
+                    # Output (CSI ?2026h … CSI ?2026l), so the terminal
+                    # shows each frame atomically.  Between frames the
+                    # terminal may briefly reflow, but the next atomic
+                    # frame overwrites everything within ~16ms.
+                    #
+                    # After debounce: resize buffers → force full repaint
+                    # at correct dimensions.  No \x1b[2J — that pushes
+                    # alternate-screen content into terminal scrollback.
+                    if self._resize_pending:
+                        since_last = time.perf_counter() - self._last_resize_time
+                        if since_last >= _RESIZE_DEBOUNCE:
+                            self._resize_pending = False
+                            self._handle_resize()
+                else:
+                    # Polling fallback: check terminal size each frame
+                    import shutil
+
+                    current_size = shutil.get_terminal_size()
+                    if current_size != self._last_term_size:
+                        self._last_term_size = current_size
                         self._handle_resize()
 
                 # Drain ALL pending input events before rendering.
@@ -86,12 +104,14 @@ class EventLoop:
 
                 # ALWAYS render — block SIGWINCH during render so it
                 # can't fire mid-flush and cause a dimension mismatch.
-                with contextlib.suppress(AttributeError, OSError):
-                    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGWINCH})
+                if has_sigwinch:
+                    with contextlib.suppress(AttributeError, OSError):
+                        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGWINCH})
                 for callback in self._render_callbacks:
                     callback(self._frame_time)
-                with contextlib.suppress(AttributeError, OSError):
-                    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGWINCH})
+                if has_sigwinch:
+                    with contextlib.suppress(AttributeError, OSError):
+                        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGWINCH})
 
                 # Sleep to maintain target FPS
                 elapsed = time.perf_counter() - start_time
@@ -101,7 +121,7 @@ class EventLoop:
 
         finally:
             self._input_handler.stop()
-            if prev_handler is not None:
+            if has_sigwinch and prev_handler is not None:
                 with contextlib.suppress(AttributeError, OSError):
                     signal.signal(signal.SIGWINCH, prev_handler)
 
@@ -145,7 +165,7 @@ class EventLoop:
 
 
 class TestInputHandler(InputHandler):
-    """InputHandler for test mode — reads from a pipe instead of real stdin.
+    """InputHandler for test mode — reads from a buffer instead of real stdin.
 
     Allows injecting raw terminal sequences in tests, which flow through
     the same parsing pipeline as production input (escape sequences, mouse
@@ -163,36 +183,36 @@ class TestInputHandler(InputHandler):
     __test__ = False  # Not a pytest test class
 
     def __init__(self) -> None:
-        super().__init__()
-        self._pipe_r, self._pipe_w = os.pipe()
+        self._buffer_backend = BufferBackend()
+        super().__init__(backend=self._buffer_backend)
 
     def start(self) -> None:
         if self._running:
             return
         self._running = True
-        self._fd = self._pipe_r
+        self._backend.start()  # type: ignore[union-attr]
 
     def stop(self) -> None:
+        if not self._running:
+            return
         self._running = False
+        self._backend.stop()  # type: ignore[union-attr]
 
     def feed(self, data: str) -> None:
         """Feed raw terminal data and process it immediately.
 
-        Data is written to the pipe and parsed through the same pipeline
-        as real terminal input.  Events are dispatched synchronously
+        Data is written to the buffer backend and parsed through the same
+        pipeline as real terminal input.  Events are dispatched synchronously
         before this method returns.
         """
         if not data:
             return
-        os.write(self._pipe_w, data.encode("utf-8"))
+        self._buffer_backend.feed(data)
         while self.poll():
             pass
 
     def destroy(self) -> None:
         self._running = False
-        for fd in (self._pipe_r, self._pipe_w):
-            with contextlib.suppress(OSError):
-                os.close(fd)
 
 
 __all__ = [

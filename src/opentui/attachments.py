@@ -1,6 +1,7 @@
 """Attachment normalization utilities for paste and drop payloads."""
 
 import shlex
+import sys
 from pathlib import Path
 
 from .events import AttachmentPayload, PasteEvent
@@ -23,7 +24,11 @@ def detect_dropped_paths(text: str) -> list[str]:
         return []
 
     try:
-        candidates = shlex.split(stripped)
+        # On Windows, shlex in POSIX mode eats backslashes (path separators).
+        # Use posix=False there and strip leftover quotes manually.
+        candidates = shlex.split(stripped, posix=(sys.platform != "win32"))
+        if sys.platform == "win32":
+            candidates = [c.strip('"').strip("'") for c in candidates]
     except ValueError:
         return []
 

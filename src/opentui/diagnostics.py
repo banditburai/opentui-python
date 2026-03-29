@@ -27,6 +27,7 @@ where to ``tail -f``.
 import logging
 import os
 import sys
+import time as _time
 from pathlib import Path
 from typing import Any
 
@@ -73,9 +74,17 @@ def _ensure_handler() -> None:
     _log_file_path = log_path
 
     handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
-    handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S.%f")
-    )
+
+    # %f (microseconds) is a glibc extension — not supported by Windows strftime.
+    # Use a custom formatter that appends milliseconds portably.
+    class _MsFormatter(logging.Formatter):
+        def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
+            ct = self.converter(record.created)
+            base = _time.strftime("%H:%M:%S", ct)
+            ms = int((record.created % 1) * 1000)
+            return f"{base}.{ms:03d}"
+
+    handler.setFormatter(_MsFormatter("%(asctime)s %(levelname)-7s %(message)s"))
     _log.addHandler(handler)
     _log.setLevel(logging.DEBUG)
 

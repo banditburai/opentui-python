@@ -7,26 +7,20 @@ The escape-sequence parsing state machine lives in ``_escape_parser.py``
 and is mixed into ``InputHandler`` via ``EscapeParserMixin``.
 """
 
-import atexit
+from __future__ import annotations
+
 import contextlib
 import logging
-import os
-import select
-import sys
-
-try:
-    import termios
-    import tty
-except ImportError:
-    termios = None  # type: ignore[assignment]
-    tty = None  # type: ignore[assignment]
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..attachments import normalize_paste_payload
 from ..events import KeyEvent, MouseEvent, PasteEvent
 from ._escape_parser import EscapeParserMixin
 from .key_maps import _ANSI_RE
+
+if TYPE_CHECKING:
+    from ._backend import TerminalBackend
 
 _log = logging.getLogger(__name__)
 
@@ -34,9 +28,14 @@ _log = logging.getLogger(__name__)
 class InputHandler(EscapeParserMixin):
     """Handles terminal input events."""
 
-    def __init__(self, *, use_kitty_keyboard: bool = True):
-        self._old_settings: Any = None
-        self._fd: int = -1  # raw fd for unbuffered reads
+    def __init__(
+        self,
+        *,
+        use_kitty_keyboard: bool = True,
+        backend: TerminalBackend | None = None,
+    ):
+        self._backend: TerminalBackend | None = backend
+        self._fd: int = -1  # kept for backward compat (Unix backend exposes fd)
         self._key_handlers: list[Callable[[KeyEvent], None]] = []
         self._mouse_handlers: list[Callable[[MouseEvent], None]] = []
         self._paste_handlers: list[Callable[[PasteEvent], None]] = []
@@ -47,14 +46,18 @@ class InputHandler(EscapeParserMixin):
         self._running = False
         self._use_kitty_keyboard = use_kitty_keyboard
 
-    def _read_char(self) -> str:
-        """Read a single UTF-8 character from the terminal fd.
+    def _has_data(self, timeout: float = 0) -> bool:
+        """Check if input data is available.
 
-        Using os.read() on the raw fd prevents the select/read mismatch
-        that occurs with sys.stdin.read(1): Python's BufferedReader may
-        pre-read more bytes from the fd into its internal buffer, causing
-        subsequent select() calls to report "no data" even though Python's
-        buffer holds the remaining bytes of an escape sequence.
+        Delegates to the backend. This is the single abstraction point
+        that both handler.py and _escape_parser.py call.
+        """
+        if self._backend is None:
+            return False
+        return self._backend.has_data(timeout)
+
+    def _read_char(self) -> str:
+        """Read a single UTF-8 character from the backend.
 
         Multi-byte UTF-8 characters (e.g. Korean, Chinese, emoji) require
         reading additional continuation bytes after the leading byte:
@@ -63,11 +66,12 @@ class InputHandler(EscapeParserMixin):
         - 1110xxxx -> 3 bytes (CJK, most BMP)
         - 11110xxx -> 4 bytes (emoji, supplementary)
         """
-        data = os.read(self._fd, 1)
-        if not data:
+        if self._backend is None:
+            return ""
+        b = self._backend.read_byte()
+        if b < 0:
             return ""
 
-        b = data[0]
         if b < 0x80:
             return chr(b)
 
@@ -82,50 +86,38 @@ class InputHandler(EscapeParserMixin):
         else:
             remaining = 0  # Invalid leading byte
 
+        data = bytes([b])
         for _ in range(remaining):
-            if not select.select([self._fd], [], [], 0.05)[0]:
+            if not self._has_data(0.05):
                 break
-            extra = os.read(self._fd, 1)
-            if not extra:
+            extra_b = self._backend.read_byte()
+            if extra_b < 0:
                 break
-            data += extra
+            data += bytes([extra_b])
 
         return data.decode("utf-8", errors="replace")
 
     # -- Lifecycle -----------------------------------------------------------
 
     def start(self) -> None:
-        if termios is None:
-            raise NotImplementedError("Terminal input requires Unix (termios)")
         if self._running:
             return
         self._running = True
-        self._fd = sys.stdin.fileno()
-        self._old_settings = termios.tcgetattr(self._fd)
-        tty.setcbreak(self._fd)
-        # Disable ISIG so Ctrl+C delivers \x03 byte to stdin instead of
-        # raising SIGINT.  Disable IEXTEN so VDISCARD (Ctrl+O on macOS)
-        # and VLNEXT (Ctrl+V) aren't consumed by the line discipline.
-        new_settings = termios.tcgetattr(self._fd)
-        new_settings[0] &= ~termios.ICRNL  # iflag: don't translate CR->NL
-        new_settings[3] &= ~(termios.ISIG | termios.IEXTEN)  # lflags
-        termios.tcsetattr(self._fd, termios.TCSANOW, new_settings)
-        # Ensure terminal is restored even on unhandled crash / exit.
-        atexit.register(self._atexit_restore)
+        if self._backend is None:
+            from ._backend import create_backend
 
-    def _atexit_restore(self) -> None:
-        with contextlib.suppress(Exception):
-            if self._old_settings:
-                termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old_settings)
-                self._old_settings = None
+            self._backend = create_backend()
+        self._backend.start()
+        # Expose fd for backward compat (Unix backend has it)
+        if hasattr(self._backend, "fd"):
+            self._fd = self._backend.fd
 
     def stop(self) -> None:
         if not self._running:
             return
         self._running = False
-        if self._old_settings:
-            termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old_settings)
-            self._old_settings = None
+        if self._backend is not None:
+            self._backend.stop()
 
     # -- Handler registration ------------------------------------------------
 
@@ -164,9 +156,7 @@ class InputHandler(EscapeParserMixin):
         if not self._running:
             return False
 
-        # Use select on the raw fd (not sys.stdin) to avoid mismatch
-        # with os.read — both now operate on the kernel buffer directly.
-        if select.select([self._fd], [], [], 0)[0]:
+        if self._has_data(0):
             char = self._read_char()
             if not char:
                 return False

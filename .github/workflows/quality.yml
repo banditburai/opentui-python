@@ -8,9 +8,11 @@ on:
 
 jobs:
   quality:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
         python-version: ["3.12", "3.13"]
 
     steps:
@@ -25,19 +27,44 @@ jobs:
     - name: Download OpenTUI native library
       run: python scripts/download_opentui.py
 
+    - name: Install native library (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo cp src/opentui/opentui-libs/libopentui.so /usr/local/lib/
+        sudo ldconfig
+
+    - name: Install native library (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        sudo mkdir -p /usr/local/lib
+        sudo cp src/opentui/opentui-libs/libopentui.dylib /usr/local/lib/
+
+    - name: Generate import library (Windows)
+      if: runner.os == 'Windows'
+      run: python scripts/generate_implib.py
+
     - name: Install dependencies
       run: uv sync --all-extras
 
     - name: Lint with ruff
+      if: runner.os == 'Linux'
       run: |
         uv run ruff check
         uv run ruff format --check
 
     - name: Type check with ty
+      if: runner.os == 'Linux'
       run: uv run ty check
 
-    - name: Run tests
+    - name: Run tests (Linux/macOS)
+      if: runner.os != 'Windows'
       run: uv run pytest tests/ -v --tb=short
+
+    - name: Run tests (Windows)
+      if: runner.os == 'Windows'
+      run: uv run pytest tests/ -v --tb=short
+      env:
+        PATH: "${{ github.workspace }}\\src\\opentui\\opentui-libs;${{ env.PATH }}"
 
   quality-check:
     runs-on: ubuntu-latest

@@ -1417,7 +1417,11 @@ class TestCodeRenderable:
             setup.renderer.root.add(code)
             setup.render_frame()
 
-            await asyncio.sleep(0.03)
+            # Wait for async highlighting to complete (portable — no fixed sleep)
+            for _ in range(200):
+                if not code.is_highlighting:
+                    break
+                await asyncio.sleep(0.005)
             setup.render_frame()
 
             assert code.plain_text == "const initial = 'hello';"
@@ -1427,7 +1431,10 @@ class TestCodeRenderable:
             assert code.plain_text == "const initial = 'hello';"
 
             setup.render_frame()
-            await asyncio.sleep(0.03)
+            for _ in range(200):
+                if not code.is_highlighting:
+                    break
+                await asyncio.sleep(0.005)
             setup.render_frame()
 
             assert code.plain_text == "const updated = 'world';"
