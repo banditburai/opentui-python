@@ -113,8 +113,10 @@ endif()
 install(TARGETS opentui_bindings DESTINATION "opentui")
 
 # Bundle the native library so auditwheel/delocate can find and repair it.
-# On Windows, the DLL is bundled in opentui-libs/ within the wheel.
-if(OPENTUI_LIB)
+# On Windows, both the import library (.lib) AND the runtime DLL are needed.
+if(WIN32 AND OPENTUI_LIB AND OPENTUI_DLL)
+    install(FILES ${OPENTUI_LIB} ${OPENTUI_DLL} DESTINATION "opentui/opentui-libs")
+elseif(OPENTUI_LIB)
     install(FILES ${OPENTUI_LIB} DESTINATION "opentui/opentui-libs")
 elseif(OPENTUI_DLL)
     install(FILES ${OPENTUI_DLL} DESTINATION "opentui/opentui-libs")
